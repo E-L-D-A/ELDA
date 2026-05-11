@@ -87,7 +87,7 @@ The inter-domain stream graph must be a **DAG** - no domain may be both upstream
 ```
 Feature domains          top      - product-specific; consume from all tiers below
 Orphan intersections     second   - named by relationship; consumed by feature domains
-Network / Storage        terminal - consumed by all; consume nothing above themselves
+Transport / Storage      terminal - consumed by all; consume nothing above themselves
 Pure core                bottom   - dependency-free; consumed by everything
 ```
 
@@ -117,7 +117,7 @@ The product-specific vertical slice. One per product feature (e.g. `home`, `prof
 | Services | UI (system): viewport, platform, SDK |
 | Adapters | UI (bindings): component-level wiring |
 | Use-Cases | B-Logic (watchers): reactive logic, event subscriptions |
-| Domain Rules | Pure UX rule invariants |
+| Entities | Pure UX rule invariants |
 
 ### Orphan intersections
 
@@ -154,7 +154,7 @@ Owns all transport concerns. Feature domains call into it; it never imports feat
 | Services | API client + proto definitions |
 | Adapters | Interceptors |
 | Use-Cases | B-Logic (validators) |
-| Domain Rules | Network rules (retry, timeout, auth policy) |
+| Entities | Network rules (retry, timeout, auth policy) |
 
 ### Storage subdomain
 Owns all persistence and caching concerns.
@@ -164,7 +164,7 @@ Owns all persistence and caching concerns.
 | Services | Storage (persist + cache) |
 | Adapters | Interface (bindings) |
 | Use-Cases | B-Logic (CRUDs) |
-| Domain Rules | Data storage rules |
+| Entities | Data storage rules |
 
 ### Subdomains
 Three cross-cutting concerns that span all columns:
