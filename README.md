@@ -63,6 +63,18 @@ Each domain exposes two perpendicular interfaces:
 
 Code outside the domain interacts exclusively through these two surfaces.
 
+### Composition root
+
+A Service is the input surface a layer above the layer cake reaches into. That layer is the **runtime composition root**: the entry point the host runtime instantiates directly. In a router-driven UI app the root is the route tree (`__root.tsx`, layout routes, leaf routes); in a request-driven server it is the request handlers; in a CLI it is the entry command. Everything else - other services, adapters, use-cases - is *composed by* the root, not invoking each other.
+
+Service consumption is **composition, not invocation**. The composition root wires services together: it instantiates them, supplies their ports (slot content, callback parameters, configured policies), and decides which combination this run uses. A service does not import and mount another service. Doing so inverts the composition direction (the inner service dictates what its parent looks like) and bypasses the root's authority over what gets wired. If a service needs another service's content inside itself, it accepts a named slot port and lets the composition root pass that content in.
+
+The rule applies to **service ↔ service** specifically. A service consuming a use-case is fine - use-cases are behavioral hooks the service implements its logic with, not composition surfaces. Tooling outside the production surface (dev panels, instrumentation, scaffolds) lives outside this rule by design: its job is to inspect or perturb the running app, which presupposes a position the production composition wouldn't give it.
+
+This rule and the cross-domain rule act on different axes and do not collide. **Cross-domain communication** still flows only through Streams and Generators (the API/Events surfaces above); cross-domain *Service imports between domain internals* are still the failure case the "Cross-cutting systems" section names. A composition root, by contrast, sits outside any domain's internals and is allowed to reach into multiple domains - that is precisely its job. A route file that composes this domain's services and that domain's use-cases is doing composition, not violating a carve-out.
+
+Practical signal: in a source dependency graph, every service file should appear as a *target* of imports only from composition-root files and from sibling layers within its own domain (its adapters, use-cases, entities). It should not appear as a target of imports from any other service, in or out of its domain.
+
 ---
 
 ## Domain ontology
@@ -275,3 +287,4 @@ Framework-level reactive primitives (RxJS BehaviorSubjects, SolidJS signals) are
 11. Upward layer edges are dependency-inverted: an inner layer declares its needs as parameters; the adjacent outer layer supplies them by composition. No DI container or service locator.
 12. An inner layer needing an outer layer's module is misplaced logic, not a dependency to invert: split it, pure part inward, binding part to Adapters.
 13. Cross-cutting systems are mechanism (ambient; all layers but pure core), state-and-call-outs (wrapped at Services/Adapters, passed inward as values), or vocabulary (shared-library contract referenced by name; presentation vocabulary never in Entities).
+14. Services are composed by the runtime composition root, not invoked by other services. A service ↔ service direct import inverts composition direction and is a smell; the consuming service should accept a named slot port and let the composition root supply the contents. Use-cases consumed by services are exempt (they are behavioral hooks, not composition surfaces). Production-path code only; dev tooling lives outside the rule.
