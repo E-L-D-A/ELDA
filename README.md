@@ -34,6 +34,26 @@ Every domain contains exactly four layers, stacked top-to-bottom:
 - Inner layers (Entities, Use-Cases) **must not import** outer layers (Adapters, Services)
 - Dashed dependency lines = weak/optional coupling; red dashed = inadvisable, avoid
 
+### Crossing layers
+
+The downward edges (Services → Adapters → Use-Cases → Entities) are both control flow and source dependency: a request enters at a Service, calls down through the layers, and imports point the same way. The upward edges are control flow only, an inner layer invoking something an outer layer provides, and on those edges the source dependency is inverted.
+
+Inversion here is not a DI container or a service locator. It means: **an inner layer declares what it needs as parameters, and the layer above supplies them.** A use-case that needs the current route takes it as an argument; the adapter that wires the router hands it down. A use-case that needs to navigate takes a `navigate` callback; the adapter supplies the concrete one. The "port" is usually just the parameter list, a structural contract, and earns a named interface only when the contract is large enough to be worth naming. The supplying happens by ordinary composition: the outer layer calls the inner one within its own scope and passes its values down. There is no separate wiring framework, because the composition is the wiring.
+
+Corollary, the **relocation rule**: if an inner layer finds itself needing an *outer layer's module* (a use-case importing a service, an entity importing an adapter), that is not a dependency to invert, it is misplaced logic. Split it. The pure part, a function of plain values, moves inward to where its dependencies actually are; the binding part, which reads the outer module and feeds the pure part, moves outward to the Adapters layer, whose defined job is exactly this binding. After the split nothing imports upward, because the inner part now depends only on values and on ambient mechanism.
+
+This generalizes the rule already stated for the Entities↔Services edge ("Entities define interfaces for Services to implement; Entities do not import Services") to every layer boundary.
+
+### Cross-cutting systems
+
+A rendering framework, a styling system, a platform SDK, a router: these span every column and belong to no single domain. Classify each by what it delivers.
+
+- **Mechanism** is behavior with no state of its own: reactive primitives, JSX, `requestAnimationFrame`, a scheduler. Ambient. Allowed in every layer except pure core, which is dependency-free by definition. Not wrapped, not routed through anything. A framework signal inside a use-case is local state and is fine.
+- **State, and call-outs**, are values that are application state, or operations that mutate the outside world: the router's location and `navigate`, the platform SDK's viewport and keyboard signals, storage reads and writes. These cross the boundary, so they are wrapped: a Service as the facade over the raw API, an Adapter where the API is async, event-driven, or throwing (wrapped into a generator and a domain-shaped value). Inner layers receive the wrapped value as a parameter; they never import the raw API or the Service module.
+- **Vocabulary** is names and shapes, no behavior or state: a styling token scale, a design system's primitives, a wire protocol's types. A shared-library contract, not a domain. Domain code may reference its *stable contract* (a token name, a type) but not its *implementation* (a utility-class string is implementation). Where the reference is allowed tracks what it is: a type belongs in pure core or anywhere above; a presentation token belongs in Adapters and up, never in Entities.
+
+The same shape recurs between domains. A domain's only sanctioned cross-domain channels are its two surfaces, API and Events, via Streams and Generators. A domain whose Service can be imported by another domain's code has skipped this: it failed to put its producers behind a surface. The fix is on the producer side (expose the value as a Stream, or the operation as a Generator), not on the consumer side (a runtime wall around someone else's internals).
+
 ### Domain surface
 
 Each domain exposes two perpendicular interfaces:
@@ -252,3 +272,6 @@ Framework-level reactive primitives (RxJS BehaviorSubjects, SolidJS signals) are
 8. The inter-domain stream subscription graph must be a DAG; stream subscriptions flow downward across tiers (Feature → Orphans → Terminal → Core).
 9. The event-exchange interface tracks a causal set per emission and drops any trigger that would re-enter a stream already in that set.
 10. Pure core contains only dependency-free code; any code with an import belongs in a domain, orphan, or subdomain above it.
+11. Upward layer edges are dependency-inverted: an inner layer declares its needs as parameters; the adjacent outer layer supplies them by composition. No DI container or service locator.
+12. An inner layer needing an outer layer's module is misplaced logic, not a dependency to invert: split it, pure part inward, binding part to Adapters.
+13. Cross-cutting systems are mechanism (ambient; all layers but pure core), state-and-call-outs (wrapped at Services/Adapters, passed inward as values), or vocabulary (shared-library contract referenced by name; presentation vocabulary never in Entities).
