@@ -63,6 +63,18 @@ Each domain exposes two perpendicular interfaces:
 
 Code outside the domain interacts exclusively through these two surfaces.
 
+#### The API-Event surface
+
+Each domain's two interfaces, API and Events, are realized as a single **public surface**: a named target consumers reference, in whatever form the host language and module system provide. The concrete mechanism (a barrel module, a `pub` export, a public package interface, several split entry targets where build output requires them) is a language-and-tooling concern; the discipline that follows is architectural:
+
+- Consumers reference the public surface by name. They do not reach past it into the domain's internal modules, files, or directory tree.
+- The public surface is the contract. Re-organizing internals leaves consumers untouched.
+- The internal layer structure (Services / Adapters / Use-Cases / Entities) is private to the domain. Whether each layer is a subdirectory, a file, or a class is implementation.
+
+This sharpens the Composition root rule: a cross-domain reference is the domain identifier, and any reference that reaches past the public surface name is a deep reach and a smell.
+
+Internal files use concrete names that describe their contents. ELDA's architectural vocabulary (Stream, Generator, Service, Vocabulary) belongs in this document, while filenames stay in the engineer-canonical register. The public surface mediates between the two registers, so consumers see named exports and can ignore the internal layout that produced them.
+
 ### Composition root
 
 A Service is the input surface a layer above the layer cake reaches into. That layer is the **runtime composition root**: the entry point the host runtime instantiates directly. In a router-driven UI app the root is the route tree (`__root.tsx`, layout routes, leaf routes); in a request-driven server it is the request handlers; in a CLI it is the entry command. Everything else - other services, adapters, use-cases - is *composed by* the root, not invoking each other.
@@ -74,6 +86,16 @@ The rule applies to **service ↔ service** specifically. A service consuming a 
 This rule and the cross-domain rule act on different axes and do not collide. **Cross-domain communication** still flows only through Streams and Generators (the API/Events surfaces above); cross-domain *Service imports between domain internals* are still the failure case the "Cross-cutting systems" section names. A composition root, by contrast, sits outside any domain's internals and is allowed to reach into multiple domains - that is precisely its job. A route file that composes this domain's services and that domain's use-cases is doing composition, not violating a carve-out.
 
 Practical signal: in a source dependency graph, every service file should appear as a *target* of imports only from composition-root files and from sibling layers within its own domain (its adapters, use-cases, entities). It should not appear as a target of imports from any other service, in or out of its domain.
+
+### Vocabulary
+
+Vocabulary in the cross-cutting classification (design tokens, type aliases, wire schemas) is *owned by one domain*: the one that emits it. Other domains do not re-declare, re-bundle, or hold their own manifest of the same vocabulary; consumption flows through the owner's public surface.
+
+Where the vocabulary is reactive (a current theme identifier, a current locale), the public surface carries it through whatever the host runtime provides for runtime-supplied values: a context handle, a request scope, a dependency-injected binding. Consumers receive values through that channel.
+
+Where the vocabulary's static representation must exist before runtime composition (compile-time style emission, schemas consumed by code generators), the static module lives with the owner. Consumers reference the owner's wire-level identifiers, names that are part of the contract, through whatever channel does not require importing the owner's module: a string reference, a name lookup, a code-generation pipeline output.
+
+The principle does not mandate a specific runtime channel. It mandates that consumers do not re-declare vocabulary they don't own, and that the owner remains the single point of emission.
 
 ---
 
@@ -288,3 +310,5 @@ Framework-level reactive primitives (RxJS BehaviorSubjects, SolidJS signals) are
 12. An inner layer needing an outer layer's module is misplaced logic, not a dependency to invert: split it, pure part inward, binding part to Adapters.
 13. Cross-cutting systems are mechanism (ambient; all layers but pure core), state-and-call-outs (wrapped at Services/Adapters, passed inward as values), or vocabulary (shared-library contract referenced by name; presentation vocabulary never in Entities).
 14. Services are composed by the runtime composition root, not invoked by other services. A service ↔ service direct import inverts composition direction and is a smell; the consuming service should accept a named slot port and let the composition root supply the contents. Use-cases consumed by services are exempt (they are behavioral hooks, not composition surfaces). Production-path code only; dev tooling lives outside the rule.
+15. Each domain exposes its public surface as a single named target; consumers reference only that target. References that reach past the public surface into a domain's internal structure are forbidden.
+16. Vocabulary (design tokens, type aliases, wire schemas) is owned by one domain. Other domains do not re-declare, re-bundle, or hold their own manifest of the same vocabulary; consumption flows through the owner's public surface.
