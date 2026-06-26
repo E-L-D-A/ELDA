@@ -124,7 +124,7 @@ This is the step that converts ELDA's "scout signals" into enforcement. It is wh
 
 ### D1. Run the boundary checks
 
-Import boundaries (inner layers import no outer layer; features import only barrels; only composition roots reach a domain's `services/`), no orphan exports (every exported symbol has a consumer outside its file), no async/await or try/catch inside `entities/` or `use-cases/`. Green, or fix. A reviewer should never be the first line of defense for a rule a machine can check.
+Import boundaries (inner layers import no outer layer; features import only barrels; only composition roots reach a domain's `services/`) and no async/await or try/catch inside `entities/` or `use-cases/`: green, or fix. A reviewer should never be the first line of defense for a rule a machine can check. Separately, the surface-reachability pass lists exports with no consumer outside their file - review each as dead surface to trim or a capability exposed ahead of demand to keep. The invariant is only `consumers ⊆ surface` (nothing is reached past the surface), not `surface ⊆ consumers`; an unconsumed export is a candidate for review, not a failure.
 
 ### D2. Verify blast radius equals diff
 
