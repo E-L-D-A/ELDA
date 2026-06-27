@@ -1,8 +1,6 @@
 # @elda/oxlint-plugin
 
-ELDA's architecture rules as an [oxlint](https://oxc.rs) plugin. Authored against the ESLint-v9
-plugin API that oxlint adopted, so the same plugin runs under ESLint too. It composes into a
-project's existing lint config and pass - it is not a separate linter.
+ELDA's architecture rules as an [oxlint](https://oxc.rs) plugin. Authored against the ESLint-v9 plugin API that oxlint adopted, so the same plugin runs under ESLint too. It composes into a project's existing lint config and pass - it is not a separate linter.
 
 The rules cite the ELDA constraint they enforce (see [../../README.md](../../README.md)).
 
@@ -17,8 +15,7 @@ The rules cite the ELDA constraint they enforce (see [../../README.md](../../REA
 
 ## Usage
 
-Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js`); they run in
-your existing pass, alongside your own rules:
+Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js`); they run in your existing pass, alongside your own rules:
 
 ```json
 {
@@ -34,9 +31,7 @@ your existing pass, alongside your own rules:
 
 ## Conventions and options
 
-The ELDA conventions are baked in: the four layer names, `domains/` as the domain root, and
-`.d.ts`-belongs-to-a-domain. Only three things vary per project, supplied as rule options (shown
-with their defaults):
+The ELDA conventions are baked in: the four layer names, `domains/` as the domain root, and `.d.ts`-belongs-to-a-domain. Only three things vary per project, supplied as rule options (shown with their defaults):
 
 ```json
 {
@@ -52,8 +47,12 @@ with their defaults):
 
 `elda/vocab-gate` accepts the same `compositionRoot` option.
 
+## Scope: reachability stays in knip
+
+Every rule here is file-local - decidable from one file plus its import specifiers, which is what lets a per-file linter host it.
+The one ELDA check that is **not** here is "the public surface carries no unconsumed members" (`surface ⊆ consumers`): that is whole-project reachability from the runtime roots, which a per-file linter structurally cannot do, so it belongs to [knip](https://knip.dev) (entries = composition roots + server + tooling, never the barrels).
+It is also a Tier-2 *signal* (an unconsumed export is dead surface, or a capability exposed ahead of demand), so it runs as a separate advisory pass rather than a blocking rule.
+
 ## Status
 
-oxlint's JS plugin host is **alpha**. The rules use only standard ESTree visitors
-(`ImportDeclaration`, `AwaitExpression`, `CallExpression`, …) and no type information, so they sit
-well within the supported surface, but expect some churn until the host stabilizes.
+oxlint's JS plugin host is **alpha**. The rules use only standard ESTree visitors (`ImportDeclaration`, `AwaitExpression`, `CallExpression`, …) and no type information, so they sit well within the supported surface, but expect some churn until the host stabilizes.
