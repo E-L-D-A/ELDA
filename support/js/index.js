@@ -166,6 +166,16 @@ const imports = {
 // named port, or lift the shared behaviour into a use-case. Warn-level - a smell, not a hard breach -
 // and separately togglable from the structural invariants in elda/imports.
 const noServiceCoupling = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+      },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
     const { domainAlias, appAlias } = options(context);
     const filename = filenameOf(context);
