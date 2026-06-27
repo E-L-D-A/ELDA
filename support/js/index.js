@@ -98,6 +98,17 @@ function targetOf(filename, spec, domainAlias, appAlias) {
 // One rule because a plugin reads the importing file's own role, which static no-restricted-imports
 // cannot. The "inadvisable" service<->service smell is a separate warn-level rule (no-service-coupling).
 const imports = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+        compositionRoot: { type: 'string' },
+      },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
     const { domainAlias, appAlias, compositionRoot } = options(context);
     const filename = filenameOf(context);
@@ -201,6 +212,13 @@ const noAsyncInner = {
 // elda/vocab-gate - constraint 20 / playbook C3: shared-namespace writes with literal keys at the
 // integration surface (the composition root) introduce out-of-band vocabulary.
 const vocabGate = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: { compositionRoot: { type: 'string' } },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
     const { compositionRoot } = options(context);
     if (!new RegExp(`/${compositionRoot}/`).test(filenameOf(context))) return {};
