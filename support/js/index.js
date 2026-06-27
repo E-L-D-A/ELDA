@@ -51,6 +51,17 @@ function parseSpec(spec, domainAlias, appAlias) {
 // constraint-10 (pure core imports no domain). One rule because a plugin can read the importing
 // file's own role, which static no-restricted-imports cannot - so no per-domain config generation.
 const imports = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+        compositionRoot: { type: 'string' },
+      },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
     const { domainAlias, appAlias, compositionRoot } = options(context);
     const role = fileRole(filenameOf(context), compositionRoot);
@@ -109,6 +120,13 @@ const noAsyncInner = {
 // elda/vocab-gate - constraint 20 / playbook C3: shared-namespace writes with literal keys at the
 // integration surface (the composition root) introduce out-of-band vocabulary.
 const vocabGate = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: { compositionRoot: { type: 'string' } },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
     const { compositionRoot } = options(context);
     if (!new RegExp(`/${compositionRoot}/`).test(filenameOf(context))) return {};
