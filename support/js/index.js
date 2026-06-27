@@ -90,9 +90,8 @@ function targetOf(filename, spec, domainAlias, appAlias) {
 // elda/imports - the hard, decidable layer + surface invariants (Tier-1):
 //   constraint 1  an inner layer never imports an outer one (via alias AND relative paths);
 //   constraint 10 pure core depends on nothing in any domain;
-//   constraint 14 the public barrel exposes use-cases + vocabulary, never the services/adapters
-//                 composition surface (the two-surface model);
-//   constraint 15 a cross-domain reference goes through the public barrel, not internals;
+//   constraint 15 the consumable surface (barrel) carries use-cases + vocabulary and not services/
+//                 adapters, and a cross-domain reference goes through it, not into internals;
 //   constraint 16 a barrel does not re-bundle another domain's surface;
 //   constraint 24 composition roots reach the barrel or the services surface only.
 // One rule because a plugin reads the importing file's own role, which static no-restricted-imports
@@ -132,12 +131,12 @@ const imports = {
       if (role.kind === 'barrel') {
         // The bare-barrel surface is the consumable one - use-cases + vocabulary (entities). Services
         // and adapters are the composition surface, reached only at `<domain>/services` by the
-        // composition root (constraint 14). Re-exporting another domain re-bundles its vocabulary
+        // composition root (constraint 15). Re-exporting another domain re-bundles its vocabulary
         // (constraint 16).
         if (t.domain !== role.domain) {
           context.report({ node, message: `ELDA constraint 16: a domain barrel must not re-bundle another domain's surface (${domainAlias}/${t.domain}); reference foreign vocabulary at the point of use, not by republishing it.` });
         } else if (t.layer === 'services' || t.layer === 'adapters') {
-          context.report({ node, message: `ELDA constraint 14: the public barrel exposes use-cases + entities; '${t.layer}' is the composition surface, reached only at ${domainAlias}/${role.domain}/services by the composition root.` });
+          context.report({ node, message: `ELDA constraint 15: the consumable surface (barrel) carries use-cases + vocabulary; '${t.layer}' belongs to the runtime-composition surface (${domainAlias}/${role.domain}/services), reached only by the composition root.` });
         }
         return;
       }
