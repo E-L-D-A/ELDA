@@ -2,12 +2,14 @@
 // so the same plugin runs under ESLint too). Add to a project's existing config:
 //
 //   { "jsPlugins": ["@elda/oxlint-plugin"],
-//     "rules": { "elda/imports": "warn", "elda/no-async-inner": "warn",
-//                "elda/vocab-gate": "warn", "elda/ambient-ownership": "warn" } }
+//     "rules": { "elda/imports": "warn", "elda/no-service-coupling": "warn",
+//                "elda/no-async-inner": "warn", "elda/vocab-gate": "warn",
+//                "elda/ambient-ownership": "warn" } }
 //
-// Rules cite the ELDA constraint they enforce (ELDA/README.md). The conventions are
-// baked in (layers, domains/, .d.ts ownership); only `domainAlias` / `appAlias` / `compositionRoot`
-// vary per project and come from rule options, defaulting to the common `#` / `@` / `routes`.
+// or extend the shipped preset (see README): structural invariants as errors, smells as warnings.
+// Rules cite the ELDA constraint they enforce (ELDA/README.md). The conventions are baked in (layers,
+// domains/, .d.ts ownership); only `domainAlias` / `appAlias` / `compositionRoot` vary per project and
+// come from rule options, defaulting to the common `#` / `@` / `routes`.
 
 const LAYERS = ['entities', 'use-cases', 'adapters', 'services'];
 const LAYER_RANK = { entities: 0, 'use-cases': 1, adapters: 2, services: 3 };
@@ -28,6 +30,8 @@ function options(context) {
 function fileRole(filename, compositionRoot) {
   const m = filename.match(/\/domains\/([^/]+)\/(entities|use-cases|adapters|services)\//);
   if (m) return { kind: 'domain', domain: m[1], layer: m[2] };
+  const barrel = filename.match(/\/domains\/([^/]+)\/index\.[tj]sx?$/);
+  if (barrel) return { kind: 'barrel', domain: barrel[1] };
   if (new RegExp(`/${compositionRoot}/`).test(filename)) return { kind: 'composition-root' };
   if (/\/core\//.test(filename)) return { kind: 'core' };
   return { kind: 'other' };
@@ -43,21 +47,65 @@ function parseSpec(spec, domainAlias, appAlias) {
   if (rest == null) return null;
   const segs = rest.split('/').filter(Boolean);
   if (segs.length === 0) return null;
-  return { domain: segs[0], second: segs[1] ?? null, layer: LAYERS.includes(segs[1]) ? segs[1] : null, depth: segs.length };
+  return { domain: segs[0], second: segs[1] ?? null, layer: LAYERS.includes(segs[1]) ? segs[1] : null, depth: segs.length, path: segs.slice(1).join('/') };
 }
 
-// elda/imports - R1 (inner never imports outer), R2/constraint-15 (cross-domain only via the
-// barrel), R3/constraint-24 (composition roots reach the barrel + services surface only), and
-// constraint-10 (pure core imports no domain). One rule because a plugin can read the importing
-// file's own role, which static no-restricted-imports cannot - so no per-domain config generation.
+// Resolve a relative import (`./x`, `../x`) against the importing file's path, then read off the same
+// { domain, layer, depth } shape parseSpec yields - so the layer + cross-domain rules apply to
+// relative imports too, not only `#/`-aliased ones. Returns null when it resolves outside domains/.
+function posixResolve(dir, spec) {
+  const out = [];
+  for (const p of (dir + '/' + spec).split('/')) {
+    if (p === '' || p === '.') continue;
+    else if (p === '..') out.pop();
+    else out.push(p);
+  }
+  return '/' + out.join('/');
+}
+
+function relativeTarget(filename, spec) {
+  if (typeof spec !== 'string' || !(spec.startsWith('./') || spec.startsWith('../'))) return null;
+  const resolved = posixResolve(filename.slice(0, filename.lastIndexOf('/')), spec);
+  const m = resolved.match(/\/domains\/(.+)$/);
+  if (!m) return null;
+  const segs = m[1].split('/').filter(Boolean);
+  if (segs.length === 0) return null;
+  return { domain: segs[0], second: segs[1] ?? null, layer: LAYERS.includes(segs[1]) ? segs[1] : null, depth: segs.length, path: segs.slice(1).join('/') };
+}
+
+// Pure-data assets (images, fonts, media) carry no behaviour, structure, or side-effect; importing
+// one yields a value. That is vocabulary, so they classify as `entities` (rank 0): importable from any
+// layer, never a service, still surface-gated across domains by constraint 15. Stylesheets are
+// deliberately NOT here - CSS/SCSS/etc. are code (they compose through ports like headless UI, scope
+// to a boundary like shadow DOM, and layer internally like BEM), so they classify by directory like
+// any module and every rule applies to them.
+const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)(\?.*)?$/i;
+
+function targetOf(filename, spec, domainAlias, appAlias) {
+  const t = parseSpec(spec, domainAlias, appAlias) ?? relativeTarget(filename, spec);
+  if (t && typeof spec === 'string' && DATA_RE.test(spec)) t.layer = 'entities';
+  return t;
+}
+
+// elda/imports - the hard, decidable layer + surface invariants (Tier-1):
+//   constraint 1  an inner layer never imports an outer one (via alias AND relative paths);
+//   constraint 10 pure core depends on nothing in any domain;
+//   constraint 14 the public barrel exposes use-cases + vocabulary, never the services/adapters
+//                 composition surface (the two-surface model);
+//   constraint 15 a cross-domain reference goes through the public barrel, not internals;
+//   constraint 16 a barrel does not re-bundle another domain's surface;
+//   constraint 24 composition roots reach the barrel or the services surface only.
+// One rule because a plugin reads the importing file's own role, which static no-restricted-imports
+// cannot. The "inadvisable" service<->service smell is a separate warn-level rule (no-service-coupling).
 const imports = {
   create(context) {
     const { domainAlias, appAlias, compositionRoot } = options(context);
-    const role = fileRole(filenameOf(context), compositionRoot);
+    const filename = filenameOf(context);
+    const role = fileRole(filename, compositionRoot);
     if (role.kind === 'other') return {};
 
     const check = (node, spec) => {
-      const t = parseSpec(spec, domainAlias, appAlias);
+      const t = targetOf(filename, spec, domainAlias, appAlias);
       if (!t) return;
 
       if (role.kind === 'core') {
@@ -70,12 +118,26 @@ const imports = {
         }
         return;
       }
+      if (role.kind === 'barrel') {
+        // The bare-barrel surface is the consumable one - use-cases + vocabulary (entities). Services
+        // and adapters are the composition surface, reached only at `<domain>/services` by the
+        // composition root (constraint 14). Re-exporting another domain re-bundles its vocabulary
+        // (constraint 16).
+        if (t.domain !== role.domain) {
+          context.report({ node, message: `ELDA constraint 16: a domain barrel must not re-bundle another domain's surface (${domainAlias}/${t.domain}); reference foreign vocabulary at the point of use, not by republishing it.` });
+        } else if (t.layer === 'services' || t.layer === 'adapters') {
+          context.report({ node, message: `ELDA constraint 14: the public barrel exposes use-cases + entities; '${t.layer}' is the composition surface, reached only at ${domainAlias}/${role.domain}/services by the composition root.` });
+        }
+        return;
+      }
       // role.kind === 'domain'
       if (t.domain === role.domain) {
         if (t.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
           context.report({ node, message: `ELDA constraint 1: ${role.layer} (inner) must not import the outer layer ${t.layer}.` });
         }
       } else if (t.depth !== 1) {
+        // Cross-domain reference must use the public barrel, not reach into internals. The bare
+        // barrel (depth 1 = the consumable use-cases + vocabulary surface) is allowed.
         context.report({ node, message: `ELDA constraint 15: reference domain '${t.domain}' through its public surface (${domainAlias}/${t.domain}), not its internals.` });
       }
     };
@@ -85,6 +147,36 @@ const imports = {
       ExportNamedDeclaration: (node) => node.source && check(node, node.source.value),
       ExportAllDeclaration: (node) => node.source && check(node, node.source.value),
       ImportExpression: (node) => node.source && node.source.type === 'Literal' && check(node, node.source.value),
+    };
+  },
+};
+
+// elda/no-service-coupling - constraint 14 as a Tier-2 "inadvisable dependency" (the red arrows in
+// ELDA-Layers): a service should not invoke a sibling service. Compose them at the runtime root via a
+// named port, or lift the shared behaviour into a use-case. Warn-level - a smell, not a hard breach -
+// and separately togglable from the structural invariants in elda/imports.
+const noServiceCoupling = {
+  create(context) {
+    const { domainAlias, appAlias } = options(context);
+    const filename = filenameOf(context);
+    const m = filename.match(/\/domains\/([^/]+)\/(services\/.*)$/);
+    if (!m) return {};
+    const domain = m[1];
+    // A unit is a directory. Files co-located in the same directory - a flat `X.tsx` + `X.css` cluster
+    // or a self-segregated `X/ui.tsx` + `X/helpers.ts` folder - are one unit and import each other
+    // freely; co-location is ELDA's core structure. The smell is a service invoking a *different*
+    // service unit. To draw a boundary between two services, give each its own directory.
+    const dir = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(0, i); };
+    const importerDir = dir(m[2]);
+    const flag = (node, spec) => {
+      const t = targetOf(filename, spec, domainAlias, appAlias);
+      if (!t || t.domain !== domain || t.layer !== 'services' || t.depth <= 1) return;
+      if (dir(t.path) === importerDir) return; // same directory = same unit, co-located imports are free
+      context.report({ node, message: `ELDA constraint 14 (inadvisable): service unit '${importerDir}' invokes a different service unit '${dir(t.path)}' in '${domain}'; supply it as a named port from the composition root, or lift the shared logic into a use-case.` });
+    };
+    return {
+      ImportDeclaration: (node) => node.source && flag(node, node.source.value),
+      ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
     };
   },
 };
@@ -149,9 +241,27 @@ const plugin = {
   meta: { name: 'elda' },
   rules: {
     'imports': imports,
+    'no-service-coupling': noServiceCoupling,
     'no-async-inner': noAsyncInner,
     'vocab-gate': vocabGate,
     'ambient-ownership': ambientOwnership,
+  },
+};
+
+// Preset for ESLint flat-config consumers: `extends: [eldaPlugin.configs.recommended]`. oxlint's
+// `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped
+// `recommended.json` by path instead (see README). Both encode the same tiering: structural
+// invariants as errors, the inadvisable / integration smells as warnings.
+plugin.configs = {
+  recommended: {
+    plugins: { elda: plugin },
+    rules: {
+      'elda/imports': 'error',
+      'elda/no-async-inner': 'error',
+      'elda/ambient-ownership': 'error',
+      'elda/no-service-coupling': 'warn',
+      'elda/vocab-gate': 'warn',
+    },
   },
 };
 
