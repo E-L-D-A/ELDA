@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "jsPlugins": ["@elda/oxlint-plugin"],
+  "rules": {
+    "elda/imports": "warn",
+    "elda/no-layer-branches": "warn",
+    "elda/no-async-inner": "warn",
+    "elda/no-mutable-surface": "warn",
+    "elda/ambient-ownership": "warn",
+    "elda/no-service-coupling": "warn",
+    "elda/no-adapter-coupling": "warn",
+    "elda/no-penetration": "warn",
+    "elda/no-deep-side-effects": "warn",
+    "elda/vocab-gate": "warn"
+  }
+}

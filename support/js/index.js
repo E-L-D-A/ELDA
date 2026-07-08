@@ -3,16 +3,20 @@
 //
 //   { "jsPlugins": ["@elda/oxlint-plugin"],
 //     "rules": { "elda/imports": "warn", "elda/no-service-coupling": "warn",
-//                "elda/no-async-inner": "warn", "elda/vocab-gate": "warn",
-//                "elda/ambient-ownership": "warn" } }
+//                "elda/no-mutable-surface": "warn", "elda/no-async-inner": "warn",
+//                "elda/vocab-gate": "warn", "elda/ambient-ownership": "warn" } }
 //
-// or extend the shipped preset (see README): structural invariants as errors, smells as warnings.
-// Rules cite the ELDA constraint they enforce (ELDA/README.md). The conventions are baked in (layers,
-// domains/, .d.ts ownership); only `domainAlias` / `appAlias` / `compositionRoot` vary per project and
-// come from rule options, defaulting to the common `#` / `@` / `routes`.
+// or extend a shipped grade preset (see README): `adopting` reports everything, `aligned` gates
+// the structural invariants, `justified` gates the graded smells too.
+// Rules cite the ELDA constraint they enforce by its grouped ID (ELDA/README.md, "Constraints").
+// The conventions are baked in (layer names as file leaves or suffixes, domains/ as the domain
+// root, nested slices, .d.ts ownership); the legacy layer-directory layout is recognized too, so a
+// migrating codebase lints correctly, and `no-layer-branches` flags it. Only `domainAlias` /
+// `appAlias` / `compositionRoot` vary per project, defaulting to the common `#` / `@` / `routes`.
 
 const LAYERS = ['entities', 'use-cases', 'adapters', 'services'];
 const LAYER_RANK = { entities: 0, 'use-cases': 1, adapters: 2, services: 3 };
+const LAYER_SUFFIX_RE = /\.(entities|use-cases|adapters|services)$/;
 
 const norm = (p) => String(p ?? '').replace(/\\/g, '/');
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
@@ -26,19 +30,62 @@ function options(context) {
   };
 }
 
+const stripExt = (name) => name.replace(/\.d\.ts$/, '').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less)$/, '');
+
+// Classify a path inside domains/ into the slice chain and the layer classification.
+// Directories express concerns: a plain-named directory is a nested slice (SURFACE.7), a
+// layer-suffixed directory (`back-nav.adapters/`) is a unit whose contents classify by the suffix,
+// and a bare layer-named directory is the legacy branch layout (recognized here, flagged by
+// no-layer-branches per LAYER.7). Layer membership otherwise rides the leaf file name: the bare
+// reserved names, or a `<stem>.<layer>` suffix. A trailing plain name is a surface: `index` the
+// consumable barrel, `services` (a layer name, caught above) the composition surface, any other
+// name a named surface.
+function classify(segs) {
+  const chain = [];
+  let layer = null;
+  let via = null;
+  const sub = [];
+  let surface = null;
+  let branchDir = false;
+  for (let i = 0; i < segs.length; i++) {
+    const last = i === segs.length - 1;
+    const name = last ? stripExt(segs[i]) : segs[i];
+    if (layer) { sub.push(name); continue; }
+    if (LAYERS.includes(name)) {
+      layer = name;
+      via = last ? 'leaf' : 'branch';
+      if (!last) branchDir = true;
+      continue;
+    }
+    const sfx = name.match(LAYER_SUFFIX_RE);
+    if (sfx) {
+      layer = sfx[1];
+      via = last ? 'suffix' : 'unit-dir';
+      if (!last) sub.push(name);
+      continue;
+    }
+    if (last) surface = name;
+    else chain.push(name);
+  }
+  return { chain, layer, via, sub, surface, branchDir, segs };
+}
+
 // Where does the current file sit in the ELDA structure?
 function fileRole(filename, compositionRoot) {
-  const m = filename.match(/\/domains\/([^/]+)\/(entities|use-cases|adapters|services)\//);
-  if (m) return { kind: 'domain', domain: m[1], layer: m[2] };
-  const barrel = filename.match(/\/domains\/([^/]+)\/index\.[tj]sx?$/);
-  if (barrel) return { kind: 'barrel', domain: barrel[1] };
+  const m = filename.match(/\/domains\/(.+)$/);
+  if (m) {
+    const c = classify(m[1].split('/').filter(Boolean));
+    if (c.layer && c.chain.length > 0) return { kind: 'domain', ...c };
+    if (c.surface && c.chain.length > 0) return { kind: 'surface', ...c };
+    return { kind: 'other' };
+  }
   if (new RegExp(`/${compositionRoot}/`).test(filename)) return { kind: 'composition-root' };
   if (/\/core\//.test(filename)) return { kind: 'core' };
   return { kind: 'other' };
 }
 
-// Parse a `#/...` or `@/domains/...` import specifier into the domain it targets, or null for
-// anything that isn't a cross-surface alias import (relative paths, bare packages, `@/core`, ...).
+// Parse a `#/...` or `@/domains/...` import specifier, or null for anything else (bare packages,
+// `@/core`, ...). A single-segment specifier is the domain's consumable barrel.
 function parseSpec(spec, domainAlias, appAlias) {
   if (typeof spec !== 'string') return null;
   let rest = null;
@@ -47,12 +94,11 @@ function parseSpec(spec, domainAlias, appAlias) {
   if (rest == null) return null;
   const segs = rest.split('/').filter(Boolean);
   if (segs.length === 0) return null;
-  return { domain: segs[0], second: segs[1] ?? null, layer: LAYERS.includes(segs[1]) ? segs[1] : null, depth: segs.length, path: segs.slice(1).join('/') };
+  return finishTarget(classify(segs));
 }
 
-// Resolve a relative import (`./x`, `../x`) against the importing file's path, then read off the same
-// { domain, layer, depth } shape parseSpec yields - so the layer + cross-domain rules apply to
-// relative imports too, not only `#/`-aliased ones. Returns null when it resolves outside domains/.
+// Resolve a relative import against the importing file's path, so the layer and boundary rules
+// apply to relative imports too. Returns null when it resolves outside domains/.
 function posixResolve(dir, spec) {
   const out = [];
   for (const p of (dir + '/' + spec).split('/')) {
@@ -70,32 +116,58 @@ function relativeTarget(filename, spec) {
   if (!m) return null;
   const segs = m[1].split('/').filter(Boolean);
   if (segs.length === 0) return null;
-  return { domain: segs[0], second: segs[1] ?? null, layer: LAYERS.includes(segs[1]) ? segs[1] : null, depth: segs.length, path: segs.slice(1).join('/') };
+  return finishTarget(classify(segs));
 }
 
-// Pure-data assets (images, fonts, media) carry no behaviour, structure, or side-effect; importing
-// one yields a value. That is vocabulary, so they classify as `entities` (rank 0): importable from any
-// layer, never a service, still surface-gated across domains by constraint 15. Stylesheets are
-// deliberately NOT here - CSS/SCSS/etc. are code (they compose through ports like headless UI, scope
-// to a boundary like shadow DOM, and layer internally like BEM), so they classify by directory like
-// any module and every rule applies to them.
+function finishTarget(t) {
+  // A bare `#/x` names x's consumable barrel, never a surface of nothing.
+  if (t.chain.length === 0 && t.surface && !t.layer) return { ...t, chain: [t.surface], surface: 'index' };
+  return t;
+}
+
+// Pure-data assets (images, fonts, media) carry no behaviour; importing one yields a value. That
+// is vocabulary, classified as `entities` (SURFACE.6): importable from any layer inside the owning
+// domain's tree, surface-gated across boundaries. Stylesheets are deliberately NOT here - CSS is
+// code and classifies by its layer and unit like any module.
 const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)(\?.*)?$/i;
 
 function targetOf(filename, spec, domainAlias, appAlias) {
   const t = parseSpec(spec, domainAlias, appAlias) ?? relativeTarget(filename, spec);
-  if (t && typeof spec === 'string' && DATA_RE.test(spec)) t.layer = 'entities';
+  if (t && typeof spec === 'string' && DATA_RE.test(spec)) return { ...t, layer: 'entities', via: 'leaf', asset: true };
   return t;
 }
 
-// elda/imports - the hard, decidable layer + surface invariants (Tier-1):
-//   constraint 1  an inner layer never imports an outer one (via alias AND relative paths);
-//   constraint 10 pure core depends on nothing in any domain;
-//   constraint 15 the consumable surface (barrel) carries use-cases + vocabulary and not services/
-//                 adapters, and a cross-domain reference goes through it, not into internals;
-//   constraint 16 a barrel does not re-bundle another domain's surface;
-//   constraint 24 composition roots reach the barrel or the services surface only.
-// One rule because a plugin reads the importing file's own role, which static no-restricted-imports
-// cannot. The "inadvisable" service<->service smell is a separate warn-level rule (no-service-coupling).
+// Relationship between the importer's slice chain and the target's: the shared prefix decides
+// whether the reference stays inside one slice, descends into an owned child, climbs toward an
+// ancestor, or crosses to a peer at the divergence point.
+function rel(a, b) {
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  if (p === a.length && p === b.length) return { p, kind: 'same' };
+  if (p === a.length) return { p, kind: 'into-child' };
+  if (p === b.length) return { p, kind: 'to-ancestor' };
+  return { p, kind: 'peer' };
+}
+
+// A services target in surface form is the runtime-composition surface itself (`x/services` with
+// nothing after it), the thing a composer reaches; anything past it is internals.
+const isServicesSurface = (t) => t.layer === 'services' && t.sub.length === 0;
+
+// elda/imports - the hard, decidable layer + boundary invariants (Tier 1):
+//   LAYER.1    an inner layer never imports an outer one (alias and relative paths alike);
+//   ROOT.6     pure core depends on nothing in any domain;
+//   ROOT.1     composition roots compose top-level domains through their surfaces only;
+//   ROOT.7     each domain composes its direct children only, and a slice never references its
+//              parent;
+//   SURFACE.2  a consumable surface carries use-cases and vocabulary, never services or adapters;
+//   SURFACE.3  a cross-boundary reference goes through a surface, never into a layer's internals,
+//              and a surface never re-bundles a peer or foreign domain's surface;
+//   SURFACE.7  a nested slice is internal to its parent: outside it, only the parent's published
+//              surfaces exist.
+// A trailing plain segment is ambiguous between a named surface of the chain and a nested slice's
+// barrel; the rule tries both readings and stays quiet if either is legal, so it never
+// false-positives on the ambiguity. The graded lateral smells are the separate warn-level rules
+// (no-service-coupling, no-adapter-coupling).
 const imports = {
   meta: {
     schema: [{
@@ -114,42 +186,86 @@ const imports = {
     const role = fileRole(filename, compositionRoot);
     if (role.kind === 'other') return {};
 
+    // Returns a violation message for this reading of the target, or null when legal.
+    const judge = (t) => {
+      if (role.kind === 'core') return 'ELDA ROOT.6: pure core depends on nothing in any domain.';
+
+      if (role.kind === 'composition-root') {
+        if (t.chain.length > 1) return `ELDA ROOT.1 / SURFACE.7: composition roots compose top-level domains; '${t.chain.join('/')}' is internal to '${t.chain[0]}', composed by its parent.`;
+        if (t.layer && t.layer !== 'services') return `ELDA ROOT.1: composition roots consume a domain's published surfaces (its barrel, a named surface, or services), never its ${t.layer} layer.`;
+        return null;
+      }
+
+      const r = rel(role.chain, t.chain);
+
+      if (role.kind === 'surface') {
+        // A surface curates its own slice and its owned children (SURFACE.7); republishing a peer
+        // or foreign domain re-bundles that domain's surface (SURFACE.3). A consumable surface
+        // carries use-cases and vocabulary only; services and adapters belong to the
+        // runtime-composition surface, which the `services` leaf realizes and may reference freely.
+        if (r.kind === 'peer' || r.kind === 'to-ancestor') {
+          return `ELDA SURFACE.3: a domain's surface must not re-bundle a peer or foreign domain's surface (${domainAlias}/${t.chain.join('/')}); reference foreign vocabulary at the point of use, not by republishing it.`;
+        }
+        if (r.kind === 'into-child' && t.chain.length > role.chain.length + 1) {
+          return `ELDA SURFACE.7 / ROOT.7: curate the direct child '${t.chain[role.chain.length]}'; '${t.chain.join('/')}' is internal to it.`;
+        }
+        if (role.surface !== 'services' && (t.layer === 'services' || t.layer === 'adapters')) {
+          return `ELDA SURFACE.2: the consumable surface carries use-cases + vocabulary; '${t.layer}' belongs to the runtime-composition surface (${domainAlias}/${role.chain.join('/')}/services), reached only by its composer.`;
+        }
+        return null;
+      }
+
+      // role.kind === 'domain'
+      if (r.kind === 'same') {
+        if (t.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
+          return `ELDA LAYER.1: ${role.layer} (inner) must not import the outer layer ${t.layer}.`;
+        }
+        return null;
+      }
+
+      if (r.kind === 'into-child') {
+        if (t.asset) return null;
+        const child = t.chain.slice(0, role.chain.length + 1).join('/');
+        if (t.chain.length > role.chain.length + 1) {
+          return `ELDA ROOT.7: '${role.chain.join('/')}' composes its direct children only; '${t.chain.join('/')}' is composed by its own parent.`;
+        }
+        if (t.surface) return null;
+        if (t.layer === 'services') {
+          if (!isServicesSurface(t)) return `ELDA SURFACE.3: '${child}' is composed at its runtime-composition surface, never past it.`;
+          if (role.layer !== 'services') return `ELDA ROOT.7: composing the slice '${child}' is services work; ${role.layer} consumes it through its surface.`;
+          return null;
+        }
+        return `ELDA SURFACE.3: consume the slice '${child}' through its surface, never its ${t.layer} leaf.`;
+      }
+
+      if (r.kind === 'to-ancestor') {
+        return `ELDA ROOT.7: a slice never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); shared content extracts into a sibling slice.`;
+      }
+
+      // r.kind === 'peer'
+      const sib = t.chain.slice(0, r.p + 1).join('/');
+      if (t.chain.length > r.p + 1) {
+        return `ELDA SURFACE.7: reference '${sib}' through its surface; '${t.chain.join('/')}' is internal to it.`;
+      }
+      if (t.surface || (!t.layer && !t.surface)) return null;
+      if (t.layer === 'services' && isServicesSurface(t) && role.layer === 'services') {
+        // The graded OWNER.5 mounting, reported by no-service-coupling at warn instead of here.
+        return null;
+      }
+      return `ELDA SURFACE.3: reference '${sib}' through a public surface (${domainAlias}/${sib}, or a named surface entry), never its ${t.layer} layer.`;
+    };
+
     const check = (node, spec) => {
       const t = targetOf(filename, spec, domainAlias, appAlias);
       if (!t) return;
-
-      if (role.kind === 'core') {
-        context.report({ node, message: 'ELDA constraint 10: pure core depends on nothing in any domain.' });
-        return;
+      const verdictA = judge(t);
+      if (verdictA === null) return;
+      // The slice-barrel reading of an ambiguous trailing plain segment.
+      if (t.surface && t.surface !== 'index' && !t.layer) {
+        const b = { ...t, chain: [...t.chain, t.surface], surface: 'index' };
+        if (judge(b) === null) return;
       }
-      if (role.kind === 'composition-root') {
-        if (t.depth !== 1 && t.second !== 'services') {
-          context.report({ node, message: `ELDA constraint 24: composition roots consume a domain's published surface (its barrel or services), not its ${t.layer ?? 'internals'}.` });
-        }
-        return;
-      }
-      if (role.kind === 'barrel') {
-        // The bare-barrel surface is the consumable one - use-cases + vocabulary (entities). Services
-        // and adapters are the composition surface, reached only at `<domain>/services` by the
-        // composition root (constraint 15). Re-exporting another domain re-bundles its vocabulary
-        // (constraint 16).
-        if (t.domain !== role.domain) {
-          context.report({ node, message: `ELDA constraint 16: a domain barrel must not re-bundle another domain's surface (${domainAlias}/${t.domain}); reference foreign vocabulary at the point of use, not by republishing it.` });
-        } else if (t.layer === 'services' || t.layer === 'adapters') {
-          context.report({ node, message: `ELDA constraint 15: the consumable surface (barrel) carries use-cases + vocabulary; '${t.layer}' belongs to the runtime-composition surface (${domainAlias}/${role.domain}/services), reached only by the composition root.` });
-        }
-        return;
-      }
-      // role.kind === 'domain'
-      if (t.domain === role.domain) {
-        if (t.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
-          context.report({ node, message: `ELDA constraint 1: ${role.layer} (inner) must not import the outer layer ${t.layer}.` });
-        }
-      } else if (t.depth !== 1) {
-        // Cross-domain reference must use the public barrel, not reach into internals. The bare
-        // barrel (depth 1 = the consumable use-cases + vocabulary surface) is allowed.
-        context.report({ node, message: `ELDA constraint 15: reference domain '${t.domain}' through its public surface (${domainAlias}/${t.domain}), not its internals.` });
-      }
+      context.report({ node, message: verdictA });
     };
 
     return {
@@ -161,56 +277,165 @@ const imports = {
   },
 };
 
-// elda/no-service-coupling - constraint 14 as a Tier-2 "inadvisable dependency" (the red arrows in
-// ELDA-Layers): a service should not invoke a sibling service. Compose them at the runtime root via a
-// named port, or lift the shared behaviour into a use-case. Warn-level - a smell, not a hard breach -
-// and separately togglable from the structural invariants in elda/imports.
-const noServiceCoupling = {
+// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container. A directory
+// named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one
+// classification, and the tree stops encoding concerns at that node. Layer membership rides file
+// names (`entities.ts`, `<stem>.entities.ts`); directories express concerns (slices and units).
+// The analyzers still recognize the branch layout so a migrating codebase lints correctly; this
+// rule is the migration's fix-list.
+const noLayerBranches = {
+  create(context) {
+    const m = filenameOf(context).match(/\/domains\/(.+)$/);
+    if (!m) return {};
+    const segs = m[1].split('/').filter(Boolean);
+    const bucket = segs.slice(0, -1).find((s) => LAYERS.includes(s));
+    if (!bucket) return {};
+    return {
+      Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<stem>.${bucket}.ts\`) and directories express concerns.` }),
+    };
+  },
+};
+
+// elda/no-service-coupling and elda/no-adapter-coupling - OWNER.5 as Tier-2 "inadvisable
+// dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between
+// two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
+// A service should not invoke a sibling service (compose them at the root via a named port, or lift
+// the shared behaviour into a use-case); an adapter should not reach a sibling adapter (the layer
+// above composes the two bindings, or they co-locate into one unit). For services the grading
+// extends across peers: a service unit mounting a peer's block at its runtime-composition surface
+// is OWNER.5's unified-composition case, exempted from the hard surface rule in elda/imports and
+// reported here instead. A domain composing its own slices is self-composition (ROOT.7) and is not
+// flagged. Warn-level - smells, not hard breaches - and separately togglable.
+function lateralCoupling(layer, remedy, crossSurface) {
+  return {
+    meta: {
+      schema: [{
+        type: 'object',
+        properties: {
+          domainAlias: { type: 'string' },
+          appAlias: { type: 'string' },
+        },
+        additionalProperties: false,
+      }],
+    },
+    create(context) {
+      const { domainAlias, appAlias } = options(context);
+      const filename = filenameOf(context);
+      const m = filename.match(/\/domains\/(.+)$/);
+      if (!m) return {};
+      const role = classify(m[1].split('/').filter(Boolean));
+      if (role.layer !== layer || role.chain.length === 0) return {};
+      // A unit is a directory (SURFACE.5): same directory means one unit and co-located imports
+      // are free. The unit label is the path of directories between the slice and the file.
+      const unitOf = (c) => {
+        const dirs = c.via === 'branch' ? [c.layer, ...c.sub.slice(0, -1)] : c.via === 'unit-dir' ? c.sub.slice(0, -1) : [];
+        return dirs.join('/');
+      };
+      const importerUnit = unitOf(role);
+      const flag = (node, spec) => {
+        const t = targetOf(filename, spec, domainAlias, appAlias);
+        if (!t || t.layer !== layer || t.asset) return;
+        const r = rel(role.chain, t.chain);
+        if (r.kind === 'into-child') return; // Self-composition of an owned slice (ROOT.7).
+        if (r.kind === 'to-ancestor') return; // The hard breach; elda/imports reports it.
+        if (r.kind === 'peer') {
+          if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {
+            context.report({ node, message: `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || role.chain.join('/')}' mounts peer '${t.chain.join('/')}' at its runtime-composition surface; prefer a named slot port its composer fills, and justify the mounting where the port becomes ceremony.` });
+          }
+          return;
+        }
+        const targetUnit = unitOf(t);
+        if (targetUnit === importerUnit) return; // Same directory means same unit.
+        context.report({ node, message: `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || '(slice root)'}' reaches a different ${layer} unit '${targetUnit || '(slice root)'}' in '${role.chain.join('/')}'; ${remedy}` });
+      };
+      return {
+        ImportDeclaration: (node) => node.source && flag(node, node.source.value),
+        ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
+      };
+    },
+  };
+}
+
+const noServiceCoupling = lateralCoupling('services', 'supply it as a named port from the composition root, or lift the shared logic into a use-case.', true);
+const noAdapterCoupling = lateralCoupling('adapters', 'let the layer above compose the two bindings, or co-locate them into one unit.');
+
+// elda/no-penetration - the `*` imports and exports that punch holes in module edges and let the
+// architecture leak through. A namespace import (`import * as ns`) consumes a surface opaquely -
+// every export looks used, so the unconsumed-export review signal (SURFACE.4) goes blind. A
+// re-export-all (`export *`) republishes whatever a module happens to expose, so the surface stops
+// being a deliberate named contract (SURFACE.1). Reference and re-export by name; the rare earned
+// case (a generated barrel, a namespace-only package) takes an inline ignore. Side-effect imports
+// are a separate concern - see no-deep-side-effects. Warn-level and separately togglable.
+const noPenetration = {
+  create(context) {
+    return {
+      ImportNamespaceSpecifier: (node) => context.report({
+        node,
+        message: 'ELDA SURFACE.4: `import * as` consumes a surface opaquely - every export looks used, blinding the unconsumed-export signal. Import the named symbols you use.',
+      }),
+      ExportAllDeclaration: (node) => context.report({
+        node,
+        message: 'ELDA SURFACE.1: `export *` republishes whatever the module exports, so the surface is not a deliberate named contract. Re-export named symbols.',
+      }),
+    };
+  },
+};
+
+// elda/no-deep-side-effects - SURFACE.5: a side-effect-only import (`import './x'`, no binding)
+// runs another module for effect with nothing named crossing the edge. Inside a unit that is fine -
+// a co-located stylesheet is part of the unit - and the composition root composes global effects
+// without restriction (ROOT.2). The smell is a side-effect import that reaches *past the unit* into
+// another module: a deep effect that co-location would make honest, or a named value would make
+// visible. External packages (a polyfill, a vendor stylesheet) are not a reach into the domain tree
+// and pass. Warn-level and separately togglable.
+const noDeepSideEffects = {
   meta: {
     schema: [{
       type: 'object',
       properties: {
         domainAlias: { type: 'string' },
         appAlias: { type: 'string' },
+        compositionRoot: { type: 'string' },
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias } = options(context);
+    const { domainAlias, appAlias, compositionRoot } = options(context);
     const filename = filenameOf(context);
-    const m = filename.match(/\/domains\/([^/]+)\/(services\/.*)$/);
+    const role = fileRole(filename, compositionRoot);
+    if (role.kind !== 'domain' && role.kind !== 'surface') return {};
+    const m = filename.match(/\/domains\/(.+)$/);
     if (!m) return {};
-    const domain = m[1];
-    // A unit is a directory. Files co-located in the same directory - a flat `X.tsx` + `X.css` cluster
-    // or a self-segregated `X/ui.tsx` + `X/helpers.ts` folder - are one unit and import each other
-    // freely; co-location is ELDA's core structure. The smell is a service invoking a *different*
-    // service unit. To draw a boundary between two services, give each its own directory.
-    const dir = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? p : p.slice(0, i); };
-    const importerDir = dir(m[2]);
+    const importerDir = m[1].split('/').filter(Boolean).slice(0, -1).join('/');
     const flag = (node, spec) => {
       const t = targetOf(filename, spec, domainAlias, appAlias);
-      if (!t || t.domain !== domain || t.layer !== 'services' || t.depth <= 1) return;
-      if (dir(t.path) === importerDir) return; // same directory = same unit, co-located imports are free
-      context.report({ node, message: `ELDA constraint 14 (inadvisable): service unit '${importerDir}' invokes a different service unit '${dir(t.path)}' in '${domain}'; supply it as a named port from the composition root, or lift the shared logic into a use-case.` });
+      if (!t) return; // An external or bare package is not a reach into the domain tree.
+      if (t.segs && t.segs.slice(0, -1).join('/') === importerDir) return; // Same unit: co-located.
+      context.report({ node, message: `ELDA SURFACE.5: side-effect import '${spec}' runs another module for effect with nothing named crossing the edge; co-locate it in the unit, compose it at the root, or import a named value.` });
     };
     return {
-      ImportDeclaration: (node) => node.source && flag(node, node.source.value),
-      ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
+      ImportDeclaration: (node) => {
+        if (node.specifiers.length === 0 && node.source) flag(node, node.source.value);
+      },
     };
   },
 };
 
-// elda/no-async-inner - constraint 7 + the Outcome model: async / await / try-catch stay out of the
-// inner layers (wrapped at adapters as generators; outcomes are typed branch values).
+// elda/no-async-inner - LAYER.4 and the Outcome model: async / await / try-catch stay out of the
+// inner layers (wrapped at adapters into channel-conforming values; outcomes are typed branch
+// values).
 const noAsyncInner = {
   create(context) {
-    if (!/\/domains\/[^/]+\/(entities|use-cases)\//.test(filenameOf(context))) return {};
-    const reportAsync = (node) => node.async && context.report({ node, message: 'ELDA constraint 7: async functions are not permitted in entities/use-cases.' });
+    const m = filenameOf(context).match(/\/domains\/(.+)$/);
+    if (!m) return {};
+    const c = classify(m[1].split('/').filter(Boolean));
+    if (c.layer !== 'entities' && c.layer !== 'use-cases') return {};
+    const reportAsync = (node) => node.async && context.report({ node, message: 'ELDA LAYER.4: async functions are not permitted in entities/use-cases.' });
     return {
-      AwaitExpression: (node) => context.report({ node, message: 'ELDA constraint 7: await is not permitted in entities/use-cases; wrap async at the adapters layer.' }),
-      ForOfStatement: (node) => node.await && context.report({ node, message: 'ELDA constraint 7: for-await is not permitted in entities/use-cases.' }),
-      TryStatement: (node) => context.report({ node, message: 'ELDA (Outcome model): try/catch is not permitted in entities/use-cases; outcomes flow as typed branch values.' }),
+      AwaitExpression: (node) => context.report({ node, message: 'ELDA LAYER.4: await is not permitted in entities/use-cases; wrap async at the adapters layer.' }),
+      ForOfStatement: (node) => node.await && context.report({ node, message: 'ELDA LAYER.4: for-await is not permitted in entities/use-cases.' }),
+      TryStatement: (node) => context.report({ node, message: 'ELDA LAYER.4 (Outcome model): try/catch is not permitted in entities/use-cases; outcomes flow as typed branch values.' }),
       FunctionDeclaration: reportAsync,
       FunctionExpression: reportAsync,
       ArrowFunctionExpression: reportAsync,
@@ -218,8 +443,53 @@ const noAsyncInner = {
   },
 };
 
-// elda/vocab-gate - constraint 20 / playbook C3: shared-namespace writes with literal keys at the
-// integration surface (the composition root) introduce out-of-band vocabulary.
+// elda/no-mutable-surface - CHANNEL.4: state crosses boundaries as published immutable values. A
+// module-level `export let` / `export var` (directly, or exporting a top-level `let` binding by
+// name) is a live mutable binding every importer shares by reference - shared state with none of a
+// channel's delivery semantics - so domain code never exposes one. Publish a constant, an accessor,
+// or a channel instead.
+function patternNames(id, out) {
+  if (!id) return;
+  switch (id.type) {
+    case 'Identifier': out.add(id.name); break;
+    case 'ObjectPattern': for (const p of id.properties) patternNames(p.value ?? p.argument, out); break;
+    case 'ArrayPattern': for (const el of id.elements) patternNames(el, out); break;
+    case 'AssignmentPattern': patternNames(id.left, out); break;
+    case 'RestElement': patternNames(id.argument, out); break;
+  }
+}
+
+const noMutableSurface = {
+  create(context) {
+    if (!/\/domains\//.test(filenameOf(context))) return {};
+    return {
+      Program(program) {
+        const mutable = new Set();
+        for (const node of program.body) {
+          if (node.type === 'VariableDeclaration' && node.kind !== 'const') {
+            for (const d of node.declarations) patternNames(d.id, mutable);
+          }
+        }
+        for (const node of program.body) {
+          if (node.type !== 'ExportNamedDeclaration') continue;
+          if (node.declaration && node.declaration.type === 'VariableDeclaration' && node.declaration.kind !== 'const') {
+            context.report({ node, message: `ELDA CHANNEL.4: \`export ${node.declaration.kind}\` shares a live mutable binding by reference; publish a constant, an accessor, or a channel instead.` });
+          }
+          if (!node.source) {
+            for (const s of node.specifiers ?? []) {
+              if (s.local && s.local.type === 'Identifier' && mutable.has(s.local.name)) {
+                context.report({ node: s, message: `ELDA CHANNEL.4: exporting the mutable binding '${s.local.name}' shares it live by reference; publish a constant, an accessor, or a channel instead.` });
+              }
+            }
+          }
+        }
+      },
+    };
+  },
+};
+
+// elda/vocab-gate - OWNER.2 / ROOT.2: shared-namespace writes with literal keys at the integration
+// surface (the composition root) introduce out-of-band vocabulary the owner should hold.
 const vocabGate = {
   meta: {
     schema: [{
@@ -238,28 +508,28 @@ const vocabGate = {
         if (c && c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier') {
           const m = c.property.name;
           if ((m === 'setAttribute' || m === 'setItem' || m === 'setProperty') && isStr(node.arguments && node.arguments[0])) {
-            context.report({ node, message: `ELDA constraint 20: shared-namespace write ${m}('${node.arguments[0].value}', ...) at the integration surface; route it through the owner's binding surface (playbook C3).` });
+            context.report({ node, message: `ELDA OWNER.2 / ROOT.2: shared-namespace write ${m}('${node.arguments[0].value}', ...) at the integration surface; route it through the owner's binding surface.` });
           }
         }
       },
       AssignmentExpression(node) {
         const l = node.left;
         if (l && l.type === 'MemberExpression' && l.object && l.object.type === 'MemberExpression' && l.object.property && l.object.property.name === 'dataset') {
-          context.report({ node, message: 'ELDA constraint 20: dataset write at the integration surface; identity vocabulary belongs to its owner (playbook C3).' });
+          context.report({ node, message: 'ELDA OWNER.2 / ROOT.2: dataset write at the integration surface; identity vocabulary belongs to its owner.' });
         }
       },
     };
   },
 };
 
-// elda/ambient-ownership - constraint 16: ambient declarations are vocabulary, owned by a domain.
-// A .d.ts outside src/domains/ is an un-owned catch-all (the type-layer `shared/` column).
+// elda/ambient-ownership - OWNER.2: ambient declarations are vocabulary, owned by a domain. A .d.ts
+// outside src/domains/ is an un-owned catch-all (the type-layer `shared/` column).
 const ambientOwnership = {
   create(context) {
     const f = filenameOf(context);
     if (!(f.endsWith('.d.ts') && !f.includes('/domains/'))) return {};
     return {
-      Program: (node) => context.report({ node, message: 'ELDA constraint 16: ambient declarations belong co-located in the owning domain (src/domains/<x>/), not a root or shared .d.ts catch-all.' }),
+      Program: (node) => context.report({ node, message: 'ELDA OWNER.2: ambient declarations belong co-located in the owning domain (src/domains/<x>/), not a root or shared .d.ts catch-all.' }),
     };
   },
 };
@@ -268,28 +538,39 @@ const plugin = {
   meta: { name: 'elda' },
   rules: {
     'imports': imports,
+    'no-layer-branches': noLayerBranches,
     'no-service-coupling': noServiceCoupling,
+    'no-adapter-coupling': noAdapterCoupling,
+    'no-penetration': noPenetration,
+    'no-deep-side-effects': noDeepSideEffects,
     'no-async-inner': noAsyncInner,
+    'no-mutable-surface': noMutableSurface,
     'vocab-gate': vocabGate,
     'ambient-ownership': ambientOwnership,
   },
 };
 
-// Preset for ESLint flat-config consumers: `extends: [eldaPlugin.configs.recommended]`. oxlint's
-// `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped
-// `recommended.json` by path instead (see README). Both encode the same tiering: structural
-// invariants as errors, the inadvisable / integration smells as warnings.
+// Presets, one per machine-holdable alignment state (ELDA/README.md, "Grades of alignment";
+// META.6). `adopting` is the migration posture: every rule reports and the fix-list stays visible.
+// `aligned` holds the aligned grade: the structural invariants gate as errors. `justified` holds
+// the justified grade: the graded smells gate too, so a deviation lands only as an inline
+// suppression carrying its justification. A preset supplies the gate; the grade is read off the
+// tree under it. ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends`
+// is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped
+// `<name>.json` by path instead (see README).
+const INVARIANTS = ['imports', 'no-layer-branches', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
+const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-deep-side-effects', 'vocab-gate'];
+const gradePreset = (invariants, smells) => ({
+  plugins: { elda: plugin },
+  rules: Object.fromEntries([
+    ...INVARIANTS.map((r) => [`elda/${r}`, invariants]),
+    ...SMELLS.map((r) => [`elda/${r}`, smells]),
+  ]),
+});
 plugin.configs = {
-  recommended: {
-    plugins: { elda: plugin },
-    rules: {
-      'elda/imports': 'error',
-      'elda/no-async-inner': 'error',
-      'elda/ambient-ownership': 'error',
-      'elda/no-service-coupling': 'warn',
-      'elda/vocab-gate': 'warn',
-    },
-  },
+  adopting: gradePreset('warn', 'warn'),
+  aligned: gradePreset('error', 'warn'),
+  justified: gradePreset('error', 'error'),
 };
 
 export default plugin;

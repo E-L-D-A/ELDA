@@ -5,21 +5,44 @@ Event-Layer-Domain Architecture
 
 ![Layer map](./ELDA-Layers.svg)
 
-For the step-by-step procedure that applies these rules when integrating a feature, see [FEATURE-INTEGRATION.md](./FEATURE-INTEGRATION.md).
+The two diagrams are the source of truth; this document decodes them into prose and states the binding constraints. [FEATURE-INTEGRATION.md](./FEATURE-INTEGRATION.md) turns the rules into the step-by-step procedure for integrating a feature, and [support/js](./support/js) ships the machine-checkable subset as a lint plugin, with a preset for each grade a machine can hold. A non-normative appendix at the end maps the concepts onto concrete primitives for a TypeScript runtime.
 
 ---
 
-## Core idea
+## The thesis
 
-ELDA combines **layered Clean Architecture** with **Event-Driven Design** using **Domain-Driven Design** as the organizational boundary.
+Software architecture habitually treats structure (where code lives) and dataflow (how values move, who tells whom) as separate concerns, each with its own school. The structure-first family (Clean, Hexagonal, DDD, feature-sliced designs) governs placement and dependency direction while leaving runtime communication to convention. The dataflow-first family (flow-based programming, synchronous dataflow, Rx, actors) makes communication primary and leaves structure flat.
 
-Each product concern lives in its own **Domain**. Domains communicate exclusively through **event streams**. Within a domain, code is strictly stratified into four layers with one-way dependency rules.
+ELDA welds the two into an identity: **structure encodes dataflow** - the layer placement and the import graph are the data path, read them and you have read how values move; **dataflow dictates structure** - where a piece of code sits is determined by what flows into it, position is dependencies, a channel's direction sets its layer, and misplaced logic is precisely logic whose dataflow disagrees with its location; **the name states the conjunction** - Events (the dataflow), Layers (the structure), Domains (the ownership boundary that welds them).
+
+**Ownership is the welding operation.** Every element of the dataflow - a value, a channel, a piece of vocabulary, a composition decision - has exactly one owner, and the owner's position is the element's single structural home. One owner per element is the function that maps dataflow onto structure; it is what makes "structure encodes dataflow" well-defined. Most prohibitions in this document are one rule seen from different angles: a consumer may reference an owner, and never re-own what the owner holds.
+
+ELDA has one generative principle: one graph carries both. The layer rules, the channel discipline, the surface model, and the ownership taxonomy all derive from it; anything in this document that does not is marked as an example.
+
+### What the identity buys
+
+- **Static traceability.** Every edge is a direct typed reference; nothing hides behind a string, and where a host namespace forces a string seam (a DOM attribute, a storage key) the owner's single declaration keeps even that edge findable (see Vocabulary). The whole inter-domain graph, feedback loops included, is discoverable by following references, and the data flow itself is navigable: a channel can be definition-hopped from producer to consumer.
+- **Predictable location.** The kind of an effect predicts its layer (a binding bug in Adapters, a rule bug in Entities, an I/O bug in Services, an orchestration bug in Use-Cases), and its concern predicts its domain. Navigation is "go to a predicted location".
+- **Bounded blast radius.** A change has the scope its diff says it has, and cross-domain navigation cost is constant at the surface, independent of the target's internal depth.
+- **Mechanical shakeability.** By-reference edges and named surface exports give build tooling per-name granularity.
+
+These are consequences of the identity and hold exactly as long as it does, which is why enforcement is treated below as a first-class design property.
+
+## Positioning and prior art
+
+ELDA's parts are prior art: Clean Architecture's four layers with the outer ring re-purposed, Hexagonal's primary and driven ports as the API and Events surfaces, DDD's bounded contexts replicated per concern, Seemann's Composition Root and Pure DI, functional-core-imperative-shell extended to a two-tier impure boundary (Adapters, then the shell), the observer/iterator duality behind Stream/Generator, the colored-function diagnosis with a decoloring response, and errors-as-values without the negative-branch bias.
+
+What ELDA adds is the weld that binds them: structure ≡ dataflow, with ownership as the encoder.
+
+ELDA owns *where things live and how they connect*: the one graph. It delegates *what things are made of* to the host: what a stream is (any conforming reactive primitive), enforcement mechanics (the host's linter, as a plugin), reachability analysis (the host's dead-export tooling), wire validation (a codec at the transport boundary), temporal runtime dynamics where genuinely needed (a scheduling substrate at the shell). The one thing never delegated is wiring: a library that ships its own wiring channel spanning module boundaries - a DI container's resolution graph, an effect system's context channel riding its types - would add a second dependency graph parallel to the module graph, and dataflow that travels a second graph is exactly the decoupling the identity exists to reject. Such substrates are admissible only beneath a single surface or at the imperative shell, for temporal concerns the static identity is silent about (scheduling, cancellation, backpressure), and their types never ride a consumable surface.
+
+Scope: ELDA governs structure and flow inside one runtime. It does not cross processes (see composition roots below), does not manufacture transactional guarantees (see the state model), and does not attempt to absorb operator discipline - it assumes a maintained review tier and pays off in proportion to it. Its nearest real alternative is the hand-assembled stack: a feature-sliced layout, a reactive-primitives library, container-free DI, a functional core. ELDA's claim over that stack is the weld alone - one ownership principle governing the seams each piece leaves to convention (effects, async coloring, cross-cutting policy, string-namespace vocabulary) - priced at the ceremony and the enforcement this document closes with.
 
 ---
 
 ## Domain structure
 
-Every domain contains exactly four layers, stacked top-to-bottom:
+Each product concern lives in its own **Domain**. Every domain contains the same four layers, stacked top-to-bottom:
 
 | Layer | Color | Responsibility | Concrete examples |
 |---|---|---|---|
@@ -28,8 +51,24 @@ Every domain contains exactly four layers, stacked top-to-bottom:
 | **Use-Cases** | red | Business/application logic: processes, watchers, pipelines | Feature workflows, data transformations, event handlers |
 | **Entities** | yellow | Pure, framework-free domain invariants | UX rules, data constraints, network policy |
 
-The four layers face two audiences. A domain's **Services** are reached by the **composition root**, which instantiates and wires them; a **peer domain** reaches only the domain's **Use-Cases** and vocabulary, through the public surface, never its Services (see [constraints 14-15](#constraints-summary) for more info).\
+The four layers face two audiences. A domain's **Services** are reached by the **composition root**, which instantiates and wires them; a **peer domain** reaches only the domain's **Use-Cases** and vocabulary, through the public surface, never its Services (one graded exception, the peer mounting treated under Composition roots).\
 Hence the naming: **Services** are domains *served* up for the runtime, **Use-Cases** are how domains can be re-used.
+
+The examples in this table, and every enumeration in this document, are descriptive, non-binding illustrations. The Layers diagram's UI / Network / Data split of a feature domain is likewise one example of subdomains - a subdomain is a full domain nested inside another (same layers, same surfaces, same rules), treated under Slices and nesting below - and each domain decomposes as its own concern requires.
+
+### Reading the diagrams
+
+A translation legend maps the two diagrams' labels onto this document's vocabulary. The Layers diagram's **Application Runtime** band is the composition root; its **Features** row is the Use-Cases layer, its **Domain Rules** row the Entities layer, and its **Shared** column the pure core (zero outside dependencies; arrows point from domains into it, never back). The General diagram draws each layer with a producer facet and a consumer facet, example artifacts on each (`web-api`, `gateways`, `streams`, `rules` down the producer side; `UI`, `presenters`, `processes`, `models` down the consumer side); the API bands face the peer domain, the Events bands sit on the outer edges, and the bottom half zooms into the Use-Cases band to draw the Pipe-Event-Stream cycle with its Active/Passive matrix. Along the U, data may be enriched, re-shaped, or filtered by data drawn from Entities. There are no upward arrows anywhere; within a subcolumn every dependency arrow points down. The runtime band's composing arrow recurses: within the Feature column the domain itself plays the Application Runtime role for its subdomain columns, the composing arrows fanning out per slice, and each subdomain column realizes its four layer rows as one artifact box each, a leaf per layer.
+
+### Slices and nesting
+
+A layer is a classification of code, never a container. Within a domain's tree, every grouping node expresses a concern - a nested domain (a **slice**) or a unit (see Units) - and layer membership rides the leaves: the tree is the concern ontology made literal, position answers "which concern" at every level, and the file answers "which layer of it". A container named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one classification, and the tree stops encoding anything at exactly that node.
+
+Nesting is an ownership placement, and three consequences follow:
+
+- **Siblings are peers.** Between two slices of one parent, the full cross-domain discipline applies: consumable surfaces, the use-case crossing, the graded lateral mounting.
+- **Subdomains are internal.** Outside the parent, only the parent's own published surfaces exist. A subdomain is the parent's revisable decomposition decision, and a visible name is a contract: keeping children invisible is what keeps internal re-drawing contract-free, so boundary migration stays the health the Ontology section names. Publishing a child capability is the parent's deliberate act - a curated re-export on its surface, a hop that homes exactly the contract decision - and a child whose outside consumers outgrow the parent has factually stopped being internal: the sharedness move extracts or promotes it.
+- **The parent is its children's composition root.** A domain reaches its own slices' runtime-composition surfaces and composes their blocks; composing owned parts re-owns nothing. Each level composes exactly its direct children, the runtime's roots compose the top-level domains, and root-unawareness recurses: a slice never references its parent, and content two siblings share extracts into a sibling slice.
 
 ### Layer dependency rules
 
@@ -37,7 +76,7 @@ Hence the naming: **Services** are domains *served* up for the runtime, **Use-Ca
 - **Awareness flows upward**: Entities define interfaces for Services to implement; Entities do not import Services
 - **Activity progresses top-to-bottom** through all layers for any given request
 - Inner layers (Entities, Use-Cases) **must not import** outer layers (Adapters, Services)
-- Dashed dependency lines = weak/optional coupling; red dashed = inadvisable (service-to-service across units), avoid
+- Dashed dependency lines = weak/optional coupling; red dashed = inadvisable, avoid. The diagram draws the red links at both outer rows: service-to-service and adapter-to-adapter across units. Its cross-unit links at Use-Cases are ordinary solid dependencies (the designed crossing), and at Entities weak ones (vocabulary reference)
 
 ### Crossing layers
 
@@ -45,327 +84,338 @@ The downward edges (Services → Adapters → Use-Cases → Entities) are both c
 
 Inversion here is purely structural - no DI container, no service locator. It means: **an inner layer declares what it needs as parameters, and the layer above supplies them.** A use-case that needs the current route takes it as an argument; the adapter that wires the router hands it down. A use-case that needs to navigate takes a `navigate` callback; the adapter supplies the concrete one. The "port" is usually just the parameter list, a structural contract, and earns a named interface only when the contract is large enough to be worth naming. The supplying happens by ordinary composition: the outer layer calls the inner one within its own scope and passes its values down. There is no separate wiring framework, because the composition is the wiring.
 
-Corollary, the **relocation rule**: if an inner layer finds itself needing an *outer layer's module* (a use-case importing a service, an entity importing an adapter), that is misplaced logic. Split it. The pure part, a function of plain values, moves inward to where its dependencies actually are; the binding part, which reads the outer module and feeds the pure part, moves outward to the Adapters layer, whose defined job is exactly this binding. After the split nothing imports upward, because the inner part now depends only on values and on ambient mechanism.
+The port remark generalizes into the **indirection rule**: an indirection earns its keep as a structural change - the added hop must become the home of a decision (an invariant, a shape translation, a composition authority), and a hop after which every decision lives where it already lived is ceremony. The rule governs hops at architectural boundaries; extracting a helper inside a unit (see Units) is style, outside its reach.
 
-This generalizes the rule already stated for the Entities↔Services edge ("Entities define interfaces for Services to implement; Entities do not import Services") to every layer boundary.
+Corollary, the **relocation rule**: if an inner layer finds itself needing an *outer layer's module* (a use-case importing a service, an entity importing an adapter), that is misplaced logic. Split it. The pure part, a function of plain values, moves inward to where its dependencies actually are; the binding part, which reads the outer module and feeds the pure part, moves outward to the Adapters layer, whose defined job is exactly this binding. After the split nothing imports upward, because the inner part now depends only on values and on ambient mechanism. **Ambient mechanism** is the substrate the host already supplies everywhere - the language runtime, a channel-conforming reactive primitive, the rendering runtime: code uses it in place, it never forms an import edge to an outer layer, and it exempts nothing from a layer's own purity rules.
 
-### Cross-cutting systems
+Downward, the ordering protects the activity path: a request descends through every layer's work. A bare downward *reference* at any distance (a Service naming an Entity type) is deliberately unregulated - a type is stateless vocabulary, and regulating reference distance would demand hops that home no decision, which the indirection rule refuses.
 
-A rendering framework, a styling system, a platform SDK, a router: these span every column and belong to no single domain. Classify each by what it delivers.
+### The two axes and the projection curve
 
-- **Mechanism** is behavior with no state of its own: reactive primitives, JSX, `requestAnimationFrame`, a scheduler. Ambient. Allowed in every layer except pure core, which is dependency-free by definition. Not wrapped, not routed through anything. A framework signal inside a use-case is local state and is fine.
-- **State, and call-outs**, are values that are application state, or operations that mutate the outside world: the platform SDK's viewport and keyboard signals, storage reads and writes, request/response over the network. When these come in a shape that doesn't match the domain's, they cross the boundary by being wrapped: a Service as the facade over the raw API, an Adapter where the API is async, event-driven, or throwing (wrapped into a generator and a domain-shaped value). Inner layers receive the wrapped value as a parameter; they never import the raw API or the Service module.
-- **Vocabulary** is names and shapes, no behavior or state: a styling token scale, a design system's primitives, a wire protocol's types. A shared-library contract. Domain code may reference its *stable contract* (a token name, a type) but not its *implementation* (a utility-class string is implementation). Where the reference is allowed tracks what it is: a type belongs in pure core or anywhere above; a presentation token belongs in Adapters and up, never in Entities.
+The Layers diagram draws two axes over the whole map. The **Activity axis** (vertical) is the probability of encountering an active side: Services predominantly drive (they make the outgoing call, mount the UI, boot the SDK), Adapters actively drive the external APIs they wrap, Use-Cases are the pivot where active production meets active consumption, and Entities are fully passive - pure invariants invoked on demand. The **Generalization axis** (horizontal) is how few specifics the code holds: more general code carries fewer constants and less concrete logic. The diagram's diagonal curve is a mental frame that limits divergence between the two: each layer's code should project onto the curve, so highly active code is specific and highly general code is passive. Code far off the curve (a very general module that actively drives, a very specific one that only waits) is a placement smell.
 
-The same classification settles the files a domain authors and imports, by what each *is*. A **stylesheet is code** - it composes through ports (a headless component takes its styling from the composer), encapsulates on a boundary (shadow DOM), and layers internally (BEM) - so it classifies by the layer it occupies, obeys that layer's rules, and co-located with its component belongs to that unit. The styling *system* it draws on is cross-cutting vocabulary (a token scale, above); the sheet the domain writes is its own code. A **pure-data asset** (an image, a font, a media file) carries no behavior or structure, and importing it resolves to a value, so it is vocabulary itself, classified as an Entity: importable from any layer, never a service, reached across domains only through the surface.
+---
 
-**Shape mismatch is what triggers the wrapping.** When an external system's API is already domain-shaped (reactive accessors, value-returning hooks, pure callbacks, idempotent on import), it is consumed directly as a use-case from another library; no wrapping is needed and no Adapter is in the chain. Domain code that orchestrates such APIs, deriving state or encoding policies over them, is itself a use-case composing use-cases. The Adapter layer is triggered specifically by shape mismatch with the domain: imperative interfaces, throwing APIs, async-callback or Promise-based control flow, mutable global state, request/response over the network. The structural Adapter pattern (an object converting interface A to interface B) appears at many layers; what places code in the ELDA Adapters layer is whether it crosses a shape boundary with the environment; converting an interface alone does not put it there.
+## Channels
 
-**Cross-cutting concerns are absorbed into composition blocks exposed by services; the runtime is the only context where cross-cutting composition is unrestricted.** Every other layer has shape, direction, and generalization constraints that prevent it from cleanly composing across domains. A cross-cutting concern (a navigation policy, a theme application, a localization rendering, a loading shell) cannot escape its owning domain as a free-floating hook, component, or helper that consumers call wherever they need it; doing so re-introduces cross-cutting at a layer that does not permit it. The way a cross-cutting domain expresses its concerns is by exposing **composition blocks** (services) that absorb the concern internally. Other domains contribute data and behavior contracts; the cross-cutting domain provides the blocks that render those contracts with the concern applied. The runtime composes feature data into cross-cutting blocks. This is the only place in the architecture where cross-domain composition has free reign, and it is the place ELDA reserves for it.
+### The active/passive matrix
 
-The boundary between a directly-consumed cross-cutting use-case and a concern that must become a block is fixed by a single test, because the two rules above (consume domain-shaped APIs directly; do not let cross-cutting escape as a hook) otherwise give opposite verdicts on the same helper. A cross-cutting hook that reads only ambient mechanism or another domain's already-published reactive state and returns a pure value, owning no state and idempotent on import, is consumed directly as a use-case. A concern that owns state, encodes a policy, or authors markup that more than one consumer would otherwise re-author must be a composition block. The discriminating question is not whether the helper is reusable but whether consuming it as a bare hook forces each consumer to re-author the concern: a pure predicate does not, so it stays a hook; a navigation push-versus-replace policy, a theme application, a loading shell do, so they are blocks.
+Every piece of code has a **producer side and a consumer side**, and each side is independently **active or passive**. The two cross-domain channels are the diagonals of that matrix:
 
-The same shape recurs between domains. A domain's only sanctioned cross-domain channels are its two surfaces, API and Events, via Streams and Generators. A domain whose Service can be imported by another domain's code has skipped this: it failed to put its producers behind a surface. The fix belongs on the producer side (expose the value as a Stream, or the operation as a Generator), where the missing surface actually is.
+- **Stream** = active producer + passive consumer. The producer pushes; subscribers receive. Callbacks and frame-tick subscriptions are categorical subsets of Streams.
+- **Generator** = passive producer + active consumer. The consumer pulls; the producer responds. Plain function calls are a categorical subset of Generators.
 
-### Domain surface
+Push versus pull is a *consequence*, set by which side is active: an active producer pushes, an active consumer pulls, a passive consumer receives the push, a passive producer responds to the pull. Producer and consumer are **shifting roles** - the same code is a consumer in one exchange and a producer in another - so neither channel is bound to a fixed side.
 
-Each domain exposes two perpendicular interfaces:
+The full loop between two domains (the Pipe-Event-Stream association): a consumer use-case `call`s a Generator, which `trigger`s the producer use-case, which `update`s a Stream, which `notify`s the consumer use-case. A domain is the active producer at the Stream it updates, the passive producer at the Generator it is triggered through, the active consumer at the Generator it calls, and the passive consumer at the Stream that notifies it.
 
-- **API** (left side): callable input surface; how other code invokes this domain
-- **Events** (right side): observable output surface; what this domain emits when state changes
+### Concepts, not primitives
 
-Peer domains interact with this domain exclusively through these two surfaces, realized as one named **consumable surface** that carries its use-cases and vocabulary. Services are not on it; they are published on a separate **runtime-composition surface** that only the composition root reaches, to instantiate and wire them. The division is by audience: a peer domain consumes use-cases and vocabulary, the composition root composes services.
+Stream, Generator, API, and Events are raw, shape-agnostic concepts, never specific language constructs. A reactive signal *is* a Stream; a callback registration *is* a Stream subscription; a plain function call *is* a Generator pull. A primitive that already realizes a concept is used directly - there is nothing to wrap it into. Adaptation exists for shapes that *mismatch* the concepts (a promise, a throwing call, an imperative API), and the adaptation makes them conform to what the conforming primitives already satisfy. The concrete primitive is a runtime concern; the architectural rule is only that domains communicate through these channels exclusively.
 
-#### The API-Event surface
+### Storage shape is orthogonal to direction
 
-Each domain's two interfaces, API and Events, are realized as a single public **consumable surface**: a named target consumers reference, in whatever form the host language and module system provide. The concrete mechanism (a barrel module, a `pub` export, a public package interface, several split entry targets where build output requires them) is a language-and-tooling concern; the discipline that follows is architectural:
+A Stream or Generator may carry **event-shaped** values (discrete emissions, no notion of a current value, missed emissions lost without explicit replay) or **state-shaped** values (always a current value, late subscribers see it, intermediate updates aggregated). Both shapes fit both channel roles. The category names which side is active; the storage model is a separate choice governed by what consumers need from the channel (replay semantics, late-subscriber behavior, memory of past emissions).
 
-- Consumers reference the public surface by name. They do not reach past it into the domain's internal modules, files, or directory tree.
-- The public surface is the contract. Re-organizing internals leaves consumers untouched.
-- The internal layer structure (Services / Adapters / Use-Cases / Entities) is private to the domain. Whether each layer is a subdirectory, a file, or a class is implementation.
+### Publication is immutable
 
-This sharpens the Composition root rule: a cross-domain reference is the domain identifier, and any reference that reaches past the public surface name is a deep reach and a smell.
+Channels push values by reference, so a mutable published object would hand every subscriber a live reference into producer state - shared state with extra steps, re-opening the write contention and torn snapshots the state model forecloses. A value is therefore immutable from the moment it is published: the producer never mutates a value after publishing it (copy-on-publish where the source is mutable), and a consumer holds what it receives as a snapshot it does not own.
 
-Internal files use concrete names that describe their contents. ELDA's architectural vocabulary (Stream, Generator, Service, Vocabulary) belongs in this document, while filenames stay in the engineer-canonical register. The public surface mediates between the two registers, so consumers see named exports and can ignore the internal layout that produced them.
+### Cycle safety: the two gates
 
-### Composition root
+The Pipe-Event-Stream loop is a cycle by construction, and feedback loops are inherent to interactive systems, so a blanket prohibition would be wrong. The discipline splits into two gates:
 
-A Service is the input surface a layer above the four-layer stack reaches into. That layer is the **runtime composition root**: the entry point the host runtime instantiates directly. In a router-driven UI app the root is the route tree (`__root.tsx`, layout routes, leaf routes); in a request-driven server it is the request handlers; in a CLI it is the entry command. Everything else - other services, adapters, use-cases - is *composed by* the root; none invoke each other directly.
+- **Gate 1 - no synchronous short-circuit (statically checkable).** Every cross-domain reference cycle must enclose a **settling element**: a delayed or change-gated channel that breaks synchronous re-entry. This is the causality analysis of synchronous dataflow (every cycle contains a delay), run on the reference graph the by-reference rule keeps statically visible. A settling-less cycle is a causality loop, rejected structurally; a stack overflow at runtime is only its weak symptom.
+- **Gate 2 - convergence is observable.** A settling element guarantees progress; convergence is a value-level property, undecidable in general. A change-gated loop quiesces when values stop changing, and a genuinely non-converging loop stays visibly hot: a localized, observable logic bug.
 
-Services are **composed** by the root. The composition root wires services together: it instantiates them, supplies their ports (slot content, callback parameters, configured policies), and decides which combination this run uses. A service does not import and mount another service. Doing so inverts the composition direction (the inner service dictates what its parent looks like) and bypasses the root's authority over what gets wired. If a service needs another service's content inside itself, it accepts a named slot port and lets the composition root pass that content in.
+The conformance contract that follows: a channel that participates in a reference cycle must be **change-gated** - equality-gated delivery with a tight equality. A value-retaining replay channel inside a loop re-fires its retained value forever, and a too-coarse equality can itself sustain a low-amplitude oscillation, so neither satisfies the gate.
 
-The rule applies to **service ↔ service** specifically. A service consuming a use-case is fine: use-cases are behavioral hooks the service implements its logic with. Tooling outside the production surface (dev panels, instrumentation, scaffolds) lives outside this rule by design: its job is to inspect or perturb the running app, which presupposes a position the production composition wouldn't give it.
+---
 
-This rule and the cross-domain rule act on different axes and do not collide. **Cross-domain communication** still flows only through Streams and Generators (the API/Events surfaces above); cross-domain *Service imports between domain internals* are still the failure case the "Cross-cutting systems" section names. A composition root, by contrast, sits outside any domain's internals and is allowed to reach into multiple domains - that is precisely its job. A route file that composes this domain's services and that domain's use-cases is doing the composition root's job, no carve-out required.
+## Surfaces
 
-The composition root's cross-domain license is **breadth across domains, with its depth held at each surface**: it may reach into many domains, but into each only through that domain's published surface - the cross-domain barrel, and the runtime-composition (services) surface for the pieces the runtime wires. It does not reach into a domain's adapters or entities, and the use-case hooks it wires are exposed on a surface rather than deep-imported by layer path. Reaching past the surface into internal layers is ladder-creep: the root accretes dependence on internals, and the surface's authority erodes from the one consumer hardest to constrain. The breadth the root is granted is exactly why its depth must stay at the surface.
+### API, Events, and audiences
 
-Practical signal: in a source dependency graph, every service file should appear as a *target* of imports only from composition-root files, from sibling layers within its own domain (its adapters, use-cases, entities), and from the other files of its own unit. It should not appear as a target of imports from any other service unit, in or out of its domain.
+A domain exposes two perpendicular interfaces - **API** (callable input: how other code invokes it, carrying its callable use-cases and the Generators others trigger) and **Events** (observable output: what it emits when state changes, carrying its Streams). Both are realized as one or more named public **surfaces**: targets consumers reference by name, in whatever form the host language and module system provide (a barrel module, a `pub` export, a public package interface, split entry targets where build output requires them).
 
-The unit the rule acts on is the **directory**. A service's implementation is the files co-located in its directory - a flat `Thing.ext` cluster sharing a name, or a self-segregated `Thing/` folder of differently-named parts (an entry, helpers, a stylesheet) - and those files are one service composing itself; co-location of related code is ELDA's organizing structure, so an intra-unit import carries no restriction. A component reaching for its own co-located stylesheet or helper is one unit assembling itself across files and languages, and the service ↔ service rule does not reach inside it. The rule operates between units: a *different* service unit, a different directory, is what may not be imported and mounted. Co-location joins files into one service, and a separate directory splits them; to enforce a boundary between two services that share a directory, give each its own.
+The surfaces divide by audience. The **consumable surface** carries the use-cases and vocabulary any peer domain references, and never exposes services or adapters: peers consume at the use-case crossing. The **runtime-composition surface** carries the services the composition root instantiates and wires, and only the root reaches it, save the graded mounting exception (see Composition roots). A surface additionally splits whenever one target would conflate two consumer types - a client-facing and a server-facing target are distinct surfaces of the same API, so server-only vocabulary never rides into a client bundle.
 
-### The runtime integration surface (imperative shell)
+### The surface is the contract
 
-The runtime composition root has an outer face the four-layer stack does not: the **runtime integration surface**, the imperative shell where the architecture meets the host runtime's own primitives. The schematics show it; earlier editions of this prose omitted it. Its job is to reconcile the high-level concerns the domains expose into an actionable sequence fit for the runtime context, expressed in that context's primitives: a framework's mount lifecycle and signals, a platform SDK's boot and lifecycle calls, the browser's `navigator` and DOM, service-worker registration. It is the one place where the otherwise-banned `async`/`await` and `try`/`catch` are legitimate, because boot sequencing genuinely needs them and they never enter a domain's call graph. Constraint 7 governs the domain layers; the imperative shell sits above them and is the boundary at which the platform's async and throwing primitives are sequenced before any domain runs.
+Consumers reference a surface by name and never reach past it into the domain's internal layers, modules, or directory tree. Internals reorganize freely behind it. Internal files use concrete, engineer-canonical names describing their contents; ELDA's architectural vocabulary (Stream, Generator, Service) belongs in this document, and the surface mediates between the two registers.
 
-The surface has two allowances and one prohibition. It may **sequence**: instantiate domain services, supply their ports, subscribe and route their streams, and order the runtime's own primitives into a context-fit boot. It may **not chew**: it holds no domain decision and no owned-vocabulary literal. The discriminator is whether a line *names and orders* owned surfaces and runtime primitives, or *re-implements* a semantic a domain owns. `await initMiniApp(); initTheme(app)` names and orders (allowed). `if (app.env === 'max') document.body.setAttribute('data-platform', 'max')` re-implements host-identity-to-styling, a vocabulary owned by the styling domain and consumed by its CSS, by re-spelling a literal the owner already holds (prohibited; it belongs in the owner, which exposes a binding surface the shell calls).
+The invariant is `consumers ⊆ surface`: nothing is reached past the surface, and a domain may expose more than its current consumers require, so a new consumer can arrive without forcing a producer edit. An unconsumed export is a review signal: dead surface to trim, or a capability deliberately ahead of demand.
 
-The prohibition exists because the integration surface is the one zone exempt from the layer rules, and an exempt zone acquires catch-all gravity, the same pull that turns an Adapters layer or a `shared/` column into a dumping ground. The owner breaks its own semantics into edible parts inside its domain, where the producer-to-meaning binding still holds, and exposes those parts; the shell feeds them to the platform in sequence. The shell sequences the pre-chewed parts its owners produce.
+### Units
+
+A **unit is a directory dedicated to one concern-part**, distinct from a slice, which is a nested domain with surfaces of its own (see Slices and nesting). Files co-located in one unit - a flat name-stem cluster, or a self-segregated folder of parts - are one unit composing itself, and intra-unit imports carry no restriction beyond layer rank, which binds regardless of path form; co-location is ELDA's organizing structure. A different directory is a different unit, and the cross-unit rules (the lateral service-to-service and adapter-to-adapter smells among them) act on directories: to draw a boundary between two things sharing a directory, give each its own. The spec never mandates decomposition; structure starts coarse and splits when a boundary becomes real. An effect-only import (a bare import for its side effect) reaching past its unit hides an effect in the graph and is a smell; effect composition by import belongs to the composition root.
+
+### What a file is fixes its classification
+
+A stylesheet is code: it composes through ports, scopes on boundaries, and layers internally, so it classifies by the layer it occupies, obeys that layer's rules, and belongs to the unit it is co-located with. A pure-data asset (an image, a font, a media file) carries no behavior and resolves to a value on import, so it is vocabulary, classified as an Entity: importable from any layer, never a service, surface-gated across domains.
+
+---
+
+## Ownership
+
+### The re-ownership principle
+
+A consumer may **reference** a domain, never **re-own** it. An invocation re-owns when it commits a decision over something the consumer does not own. A domain owns five things, and re-owning any of them is the violation:
+
+1. **Setup** - its instantiation and wiring. Only composition roots instantiate services and wire ports.
+2. **State** - published, never shared by mutable reference; a consumer writing to a received value re-owns producer state.
+3. **Vocabulary** - declared once by the owner; a re-declaration anywhere else re-owns it.
+4. **Behavior** - the owner publishes the capability its identities imply; a consumer branching on the owner's identity values re-derives policy the owner should hold.
+5. **Cross-cutting placement** - a concern spanning other domains is composed by the root; a consumer mounting it re-owns placement over domains it does not own.
+
+Re-use is always by reference to the single conceptual owner and never re-instances ownership. Rendering a domain-controlled component with the consumer's own content inside it is fine - the consumer owns that content. Mounting a concern whose scope spans domains the consumer does not own (a loading shell, a theme application, a router) is the root's prerogative.
+
+Worked example, in both directions: an environment-access domain owns the *mechanism* (typed, per-runtime read and validation) and its own generic deployment vocabulary; a tooling domain that needs a gating variable owns *that key* as its own vocabulary and reads it through the mechanism. The tooling domain re-declaring the environment contract re-owns the mechanism-owner's vocabulary; the environment domain absorbing the tooling-specific key re-owns the tooling domain's - semantic coupling without an import edge is still re-ownership. The root composes the full per-runtime contract from each wired domain's declared keys.
+
+The state vector carries one sharpening: a published write operation's input space is the domain's legal transition space. Where every value the type admits is a legal state, the state's raw setter is that operation, published as-is; a narrower operation exists only where it holds an invariant the raw width would otherwise delegate to every consumer to know and re-enforce. The wrapper earns its keep exactly when it is the invariant's home - the indirection rule again; a wrapper holding no rule is indirection for its own sake.
 
 ### Vocabulary
 
-Vocabulary in the cross-cutting classification (design tokens, type aliases, wire schemas) is *owned by one domain*: the one that emits it. Other domains do not re-declare, re-bundle, or hold their own manifest of the same vocabulary; consumption flows through the owner's public surface.
+Vocabulary - types, wire schemas, design tokens, identifiers - is owned by the domain that emits it and declared at that owner's entity layer. Other domains do not re-declare, re-bundle, or hold their own manifest of it; consumption flows through the owner's surface. Reactive vocabulary (a current theme, a current locale) rides whatever runtime channel the host provides for supplied values; static vocabulary that must exist before runtime composition lives with the owner and is referenced through channels that do not import the owner's module (a name lookup, a code-generation output).
 
-Where the vocabulary is reactive (a current theme identifier, a current locale), the public surface carries it through whatever the host runtime provides for runtime-supplied values: a context handle, a request scope, a dependency-injected binding. Consumers receive values through that channel.
+The same ownership governs identifiers living in a **shared runtime namespace** rather than a module: a DOM attribute and its selector, a CSS custom property, a storage key, a URL parameter, a message type, a runtime global. These cross representation boundaries no single type system spans, with no import edge linking writer to reader, so the discipline is collapsed to one point: the owner declares the identifier once (a typed constant, an exposed binding surface, a generation output emitting both representations from one source), and consumers reference the declaration, never a re-spelled literal. A re-spelled literal is invisible to import-following search and reads as dead code to anyone without the cross-package context. Introducing a new such identifier is an act of creating vocabulary: it gets an owner before any site writes it.
 
-Where the vocabulary's static representation must exist before runtime composition (compile-time style emission, schemas consumed by code generators), the static module lives with the owner. Consumers reference the owner's wire-level identifiers, names that are part of the contract, through whatever channel does not require importing the owner's module: a string reference, a name lookup, a code-generation pipeline output.
+Consuming an owner's *identity* vocabulary has three forms of decreasing safety. **Referencing** it by type is sound: a rename breaks the reference at compile time. **Deriving behavior keyed on it** (branching on a host identifier to pick a rule) is a smell even when type-bound: the type checks the name and misses the policy, so a new identity with the same behavior is silently mishandled; the owner publishes the capability its identities imply, and consumers branch on that. **Re-declaring** the literal with no type binding is forbidden outright.
 
-The principle does not mandate a specific runtime channel. It mandates that consumers do not re-declare vocabulary they don't own, and that the owner remains the single point of emission.
+Ambient declarations (global augmentations, ambient modules, declaration files) are vocabulary like any other: co-located with their owning domain, never pooled in a root catch-all.
 
-The same ownership governs vocabulary that lives in a **shared runtime namespace** rather than a module: a DOM attribute and its CSS selector, a CSS custom property, a storage key, a URL parameter, a postMessage type, a runtime global. These are string-keyed identifiers shared by convention across packages and across representation boundaries (a JavaScript string on one side, a CSS selector on the other), with no import edge linking writer to reader. This is the one channel where the typed source-dependency this architecture relies on cannot exist, because the host platform offers no slot to carry the semantic alongside the primitive. They are vocabulary nonetheless, owned by one domain; consumers reference the owner's declaration (a typed constant, an exposed binding surface, a code-generation output that emits both representations from one source), never a re-spelled literal. A literal re-declaration is invisible to every search that follows imports and reads as dead code to anyone without the cross-package context, so the leak is both silent and dangerous to remove. Introducing a new such identifier is an act of creating vocabulary: it gets an owner first, then a binding surface, before any site writes it. Because the writer/reader seam crosses representations no single type system spans, the binding cannot be machine-checked at the primitive; collapse it to one owner-internal point that code-generation spans, and enforce one level up (no owned-vocabulary literal outside its owner; the owner emits both ends from one declaration).
+A foreign owner's contract (a shared library's tokens, an external system's types) is referenced by name at the layer its kind permits: a type at any layer, a presentation token at Adapters and above and never in an Entity, an implementation detail (a utility-class string) nowhere.
 
-Consuming an owner's *identity* vocabulary takes three forms of decreasing safety, and the type system hides the difference between them. **Referencing** it - comparing a value against the owner's literal where the comparison is checked against the owner's type, or naming the owner's exported identifier - is sound: a rename in the owner breaks the reference at compile time, the binding working as intended. **Deriving behavior keyed on** an identity value, such as branching on `host === 'telegram'` to choose a layout rule, is a smell even when the literal is type-bound, because it re-owns the owner's *behavioral* semantics: the type checks the name but not the policy, so a new identity with the same behavior is silently mishandled, and "this identity behaves this way" now lives in two places. **Re-declaring** the literal with no type binding, a bare string written into a shared runtime namespace, is the worst and is forbidden outright (above): invisible to import-following search, broken by a rename or removal with no signal. The rule: reference identity vocabulary by type freely; do not derive behavior keyed on identity values. Have the owner expose the *capability* its identities imply and branch on that - the owner knows which of its identities carry which behavior, and a consumer that re-derives it has taken on knowledge the owner should have published.
+### Cross-cutting concerns are blocks
 
----
-
-## Domain ontology
-
-Domain boundaries are drawn deliberately. They are decisions about how to partition the problem space, and those decisions evolve as understanding matures. There is no single correct partition.
-
-The useful mental model is a **Venn diagram**. Each domain is a set. Code exists somewhere on the diagram - inside one circle, at the edge of a circle, or at the intersection of two or more circles. The position of a piece of code on the diagram is determined by its dependencies: what it imports tells you which circles it gravitates toward.
-
-This reframes the classification question. "Which domain does this belong to?" becomes "where on the diagram does this sit?" The second question is always answerable from the code itself. The first requires judging essence, which is often impossible early in a project.
-
-As understanding matures, boundaries sharpen. Code migrates toward the circle it most belongs to, and the diagram changes shape. This is expected and healthy: the original structure was right for what was known when it was drawn.
+A concern that owns state, encodes a policy, or authors markup more than one consumer would otherwise re-author cannot escape its owning domain as a free-floating hook; each consumer mounting it would re-instance ownership. The owning domain absorbs it into a **composition block** - a service - and the root composes it once, with consumer content composed in; other domains contribute data and behavior contracts. A helper that owns nothing and returns a pure value over ambient mechanism or already-published state stays directly consumable as a use-case; the discriminator is re-ownership: does consuming it as a bare hook force each consumer to re-instance or re-decide what one owner should hold?
 
 ---
 
-## Inter-domain communication
+## Composition roots
 
-Domains interact via the **Pipe-Event-Stream** pattern. Direct cross-domain calls are inadvisable.
+A **composition root** is the host runtime's entry band above every domain: the one position that reaches a domain's Services to instantiate and wire them. In a router-driven UI app it is the route tree; in a request-driven server, the request handlers; in a CLI, the entry command. It is not a domain, has no four-layer stack, and holds no layer-typed domain code; domains are unaware of it. There is no limit on the number of roots or their relations - a client, a server, and a build-time bundler root under identical rules is a normal shape - because execution context is a coloring (see Concurrency). Composition also recurses beneath the root: each domain is the composition root of its own slices (see Slices and nesting), so a runtime root composes the top-level domains and each level composes its direct children.
 
-```
-Producer Domain                     Consumer Domain
-─────────────────                   ─────────────────
-Use-Cases
-  │  update
-  ▼
-Streams ──────── notify ──────────▶ Use-Cases
-                                      │  call
-                                      ▼
-Use-Cases ◀────── trigger ────────── Generators
-```
+**All data starts and ends at the root.** A root-side producer feeds a producer Service; data descends the producer domain's layers to its use-case, crosses to the consumer domain's use-case over the channel, ascends to the consumer Service, and exits at the root-side consumer - a U-shaped detour, enriched along the way from the Entities layer. The same root is both faces of its U.
 
-- **Producer** domain's Use-Cases update a **Stream** (an observable/subject)
-- The stream **notifies** the Consumer domain's Use-Cases
-- Consumer Use-Cases **call** their own **Generators** (reactive sources)
-- Generators **trigger** Producer Use-Cases, completing the cycle
+**Breadth, with depth held at the surface.** The root's cross-domain license is breadth across many domains with depth held at each surface: it consumes each domain only through its published surfaces (consumable, and runtime-composition for what it wires) and never reaches into a layer's internals. Services are composed by the root - instantiated, given ports (slot content, callbacks, configured policies), combined per run.
 
-**Streams and Generators are runtime-agnostic abstractions.** ELDA defines them by direction: a Stream pushes values to subscribers; a Generator delivers values when pulled. The architecture does not mandate a concrete mechanism. A given runtime picks primitives that fit the shape, and the same architecture can run across different runtimes that each implement these in their own idiom. The architectural rule is that domains communicate through these channels exclusively; the primitive choice is a runtime concern.
+**Lateral composition is graded.** The grading concerns peers; a domain composing its own slices is self-composition (see Slices and nesting), ungraded. The designed form is a named slot port the root fills with the sibling block. Mounting the sibling block itself - another service unit of the same domain, or a peer domain's block reached at its runtime-composition surface and never past it - is inadvisable and carries a per-instance justification. The graded case exists for unified composition: a domain's own rules sometimes legitimately compose two peers, and threading every port through the root becomes ceremony - a hop holding no decision of the root's. It stays soft because a hard ban steers somewhere worse: re-authoring the sibling concern from its use-cases, which re-owns it, the actual violation. The justification test is the indirection rule: name the decision the root makes at the port hop; none means the port is ceremony and the mounting is honest. The same grading holds between Adapters of different units - cross-unit data crosses at use-cases, so the layer above composes the two bindings, or they co-locate into one unit.
 
-**The data shape passing through a channel is orthogonal to its direction.** A Stream or Generator may carry event-shaped values (discrete emissions, no notion of current value, missed emissions are lost without explicit replay) or state-shaped values (always a current value, late subscribers see it, intermediate updates are aggregated). Both shapes fit both ELDA roles. Channel shape is an implementation decision governed by what consumers need from the channel (replay semantics, behavior for late subscribers, memory of past emissions), independent of the ELDA category. Two channels carrying different shapes can both be Streams (or both Generators) at the architectural level; the category names the direction, and the storage model is a separate, orthogonal choice.
+**Wiring needs no container.** The wiring graph is bounded at surface granularity, so it stays small enough to remain ordinary code; published-not-shared state leaves no lifetimes for a container to manage; parameter inversion keeps construction inside the type system's ordinary checking. What remains for a container is only a wiring channel parallel to the module graph - rejected like every other out-of-band channel.
 
-A domain is **Active** when it initiates the cycle (Producer role) and **Passive** when it reacts (Consumer role). The same domain can play both roles in different interactions.
+### The imperative shell
 
-### Domain tiers
+The root's outer face is the **runtime integration surface**: the imperative shell where the architecture meets the host's own primitives (mount lifecycles, SDK boot calls, service-worker registration). It is the one place where the otherwise-banned awaiting and catching of host primitives is legitimate, because boot sequencing genuinely needs them and they never enter a domain's call graph.
 
-The inter-domain stream graph must be a **DAG** - no domain may be both upstream and downstream in the same causal chain. To make this structurally explicit, domains are arranged into tiers. Stream subscriptions only flow downward across tiers:
+The shell may **sequence**: instantiate services, supply ports, subscribe and route channels, and order the host's own async and throwing primitives into a context-fit boot. It may not **chew**: it holds no domain decision and no owned-vocabulary literal. The discriminator is whether a line *names and orders* owned surfaces and runtime primitives, or *re-implements* a semantic a domain owns. The prohibition exists because an exempt zone acquires catch-all gravity; owners break their semantics into parts inside their domains and expose them, and the shell feeds the pre-chewed parts to the platform in sequence.
 
-```
-Feature domains          top      - product-specific; consume from all tiers below
-Orphan intersections     second   - named by relationship; consumed by feature domains
-Transport / Storage      terminal - consumed by all; consume nothing above themselves
-Pure core                bottom   - dependency-free; consumed by everything
-```
+### Failure and blast radius
 
-Feature domains at the same tier must also form a DAG among themselves - no two peer feature domains may subscribe to each other's streams in a cycle.
+An outcome a domain cannot turn into a meaningful branch (a boot failure, an SDK refusing to initialize) is translated back into the runtime's own terms at the shell, as a last resort, never modeled as a domain outcome. What it tears down is the root's decision: the root partitions its composition into scopes of its own choosing (an app, a request, a subtree); the failure terminates the scope that composed the failing piece, and the root decides restart, degrade, or propagate. A domain never supervises another domain - supervision is composition, so it is root work.
 
-When coordination between same-tier domains is unavoidable, the prescribed solution is a **Mediator** use-case that explicitly owns the coordination. This makes the cross-domain dependency visible and locates the termination condition in one place.
+### Roots connect through transport
 
-### Cycle enforcement
-
-Tier rules are written constraints. Runtime enforcement is provided by the **event-exchange interface** - the single infrastructure layer all stream emissions and generator triggers pass through.
-
-Each stream emission carries a **causal set**: the set of stream IDs already in its propagation chain. Before the event-exchange interface delivers a notification to a generator, it checks whether the target stream is already in the causal set. If it is, the trigger is dropped. If it is not, the target stream ID is added to the causal set and propagation continues.
-
-This check is implemented once in the event-exchange interface and applies automatically to every domain in the system. No per-domain cycle-detection code is needed.
+Domains communicate intra-root, by reference, through the use-case channel; a reference is valid only inside one runtime's memory, so a U never spans two roots. Roots communicate inter-root by serialization through the **transport plane** at the Services layer: a server-to-client flow is two Us chained through transport, each root the alpha and omega of its own plane. This is a deliberate rejection of location transparency: a network hop is never disguised as a local reference.
 
 ---
 
-## Full application structure
+## The cross-domain data path
 
-A complete ELDA application is built from several columns of domains/subdomains, each with the same four-layer stack:
+The use-case ↔ use-case channel is the only cross-domain crossing, so every compliant path has one spine: source layer descends to its own use-case (import-and-call), crosses the channel, ascends the consumer's layers (by inversion) to the target. Entities are data sources, drawn from and never written to; Services are where data exits; Use-Cases are the pivot. An effect never crosses at all: only data does - a request on the API surface, a value on the Events surface - so an effect stays contained to the domain that owns it.
 
-### Feature domain
-The product-specific vertical slice. One per product feature (e.g. `home`, `profile`, `faq`).
+What needs no path: a pure, total, effect-free thing (a name, a shape, a pure total function) is referenced directly by name through the surface - there is no state to go stale and no effect to contain. Whether such a thing is an entity or a use-case is the separate invariant-versus-process axis; purity earns the direct reference, the axis sets the layer.
 
-| Layer | Feature-domain slot |
-|---|---|
-| Services | UI (system): viewport, platform, SDK |
-| Adapters | UI (bindings): component-level wiring |
-| Use-Cases | B-Logic (watchers): reactive logic, event subscriptions |
-| Entities | Pure UX rule invariants |
-
-### Orphan intersections
-
-Code at the intersection of two domains forms an **orphan** - a module named by its relationship between its parent domains, recording which domains it sits between before it has a concept of its own.
-
-`home+profile` is an orphan at the intersection of the `home` and `profile` domains. It has no owner. Both parent domains consume from it. It does not consume from either parent.
-
-Naming by relationship removes the pressure to understand something before classifying it. When the concept behind an intersection becomes clear - when you can say what the orphan *is* rather than what it *intersects* - it earns a name and becomes a full domain. Until that point it remains honest about its nature.
-
-Orphan rules:
-- Named by the domains it intersects (`a+b`), before it earns a concept of its own
-- Consumed by its parent domains; does not consume from them
-- Sits below feature domains in the tier hierarchy; may consume from terminal subdomains and pure core
-- Carries only the ELDA layers it actually needs; a minimal orphan may be just an Entities layer and accumulates further layers as it grows
-
-Promotion signals:
-- You can describe what the orphan *is*, beyond which domains it intersects
-- It starts consuming from a domain outside its declared intersection
-- It accumulates all four layers with substantial content in each
-
-A three-way intersection (`a+b+c`) almost always signals a hidden domain that has not yet been named.
-
-### Pure core
-
-Pure code - code with no imports and no side effects - has no domain gravity. It sits at the center of the Venn diagram, belonging equally to all circles. It lives in a flat **core** layer at the bottom of the tier hierarchy, consumed by everything and depending on nothing.
-
-Core contains only dependency-free code: type definitions, branded types, pure transformation functions, base interfaces with no domain-specific semantics. Any code with an import belongs somewhere in the tiers above.
-
-### Transport subdomain
-Owns all transport concerns. Feature domains call into it; it never imports feature domains.
-
-| Layer | Transport slot |
-|---|---|
-| Services | API client + proto definitions |
-| Adapters | Interceptors |
-| Use-Cases | B-Logic (validators) |
-| Entities | Network rules (retry, timeout, auth policy) |
-
-### Storage subdomain
-Owns all persistence and caching concerns.
-
-| Layer | Storage slot |
-|---|---|
-| Services | Storage (persist + cache) |
-| Adapters | Interface (bindings) |
-| Use-Cases | B-Logic (CRUDs) |
-| Entities | Data storage rules |
-
-### Subdomains
-Three cross-cutting concerns that span all columns:
-
-- **UI subdomain**: everything visual, component framework, rendering
-- **Network subdomain**: transport, protocol, request lifecycle
-- **Data subdomain**: persistence, caching, serialization
-
----
-
-## Concurrency model
-
-`async`/`await` and raw Promise chains are banned from all userland code. The async/await model splits a codebase into two mutually incompatible function kinds: callers and callees must agree on the same kind to interoperate, and this agreement propagates transitively through the entire call graph. The result is two separate, non-composable camps.
-
-Instead, every asynchronous operation is treated as a **single-value stream** and wrapped in a generator before it enters any domain layer. This wrapping is the responsibility of the **Adapters layer**, which is already the designated boundary for external integrations. Use-Cases and Entities receive only generator protocol and never a raw Promise.
-
-Practical rule: if a platform API or third-party library returns a Promise, wrap it in a generator at the Adapters layer and advance it with a `yield` inside the domain.
-
-This keeps all domain code one consistent kind. Generators compose freely with other generators, call stacks stay coherent end-to-end, and the subscription graph remains statically traceable by reference without runtime inspection.
+Effect regulation follows the same ownership, because an effect is a write to some target. A write to state the domain owns is legal at the layer that owns it - a reactive primitive's setter called inside the use-case that created it is the domain exercising its own state - and needs no containment of its own, because what the architecture contains is the write's *observability*: nothing outside the owner sees the mutation except through published, immutable, change-gated channels. A write to the outside world binds at the outer layers, where the world's shape is bound. A write to another domain's anything is re-ownership and never happens; the consumer invokes the owner's published operation instead. Entities own no state, which makes them the one effect-free floor. The incidental micro-effects a host runtime makes unavoidable (allocation, module evaluation, memo caches) sit below the architecture's resolution and go unregulated.
 
 ---
 
 ## Outcome model
 
-ELDA has no error model because it does not classify exceptions as a distinct category. All code paths - successful, failed, partial, or any other - are branches in logic. A network timeout, a validation failure, and a successful response are all values emitted by the same stream; the consumer decides what each branch means.
+Two parties speak different outcome vocabularies. The platform knows only **runs or throws** - it observes termination shape alone. The domain knows only its **typed business outcomes** - branches with meaning. Architectures that let the machine's binary leak into business flow route a valid pessimistic outcome (a not-found, a validation failure) as a soft value or a hard exception by implementation accident. ELDA makes the layer stack a **bidirectional translator** between the two vocabularies:
 
-Exception-throwing code is treated as impure for the same reason as async code: it breaks the uniform value-producing contract of generators. Any library or platform API that throws must be wrapped at the Adapters layer into a generator that yields a typed branch value instead.
+- **Inbound**: a throwing external API is wrapped at Adapters into a typed value - one of the domain's meaningful branches. From there outcomes travel the normal data paths; there is no separate error channel, no exception in the call graph, and no branch designated as semantically wrong. Async and throwing are the same shape mismatch, translated at the same boundary.
+- **Outbound**: an outcome the domain cannot handle is converted back into the runtime's binary at the imperative shell (see blast radius above). Domains never see it.
 
-Rules:
-- No `try`/`catch` inside Use-Cases or Entities
-- No separate error channels alongside normal value channels
-- All outcomes flow through the same Streams/Generators infrastructure as typed values
-- Branch handling is enforced by the type system on the emitted value shape
+Ownership of outcomes: the Adapter touching a throwing API owns the inbound conversion; each domain owns its outcome shapes as vocabulary declared at Entities and exposed through the surface; a consumer handles the producer's typed branches and never reaches in to catch a raw throw. Exhaustive union checking is an ergonomic lift that makes the bookkeeping cheap; the substance is the translation itself, which runs the same on tagged values and convention.
 
-The "errors as values" pattern (Rust's `Result`, Haskell's `Either`) approximates this but still treats one branch as semantically wrong. ELDA takes no position on which branches are positive or negative - that is domain logic, expressed as branch values in the stream.
+---
 
-This model depends on the type system to be fully enforceable. Exhaustive union checking (TypeScript discriminated unions, Rust `match`) ensures all branches are handled at compile time. Without that guarantee, the enforcement burden shifts to code review and convention.
+## Concurrency: neutralize the colorings
+
+Async/await splits a codebase into two incompatible function kinds whose agreement propagates transitively through the call graph. ELDA neutralizes the coloring into one kind: every asynchronous operation is wrapped at the Adapters layer into a single-emission channel, and inner layers receive only channel protocol, never a raw promise. The channel's storage shape (whether a late subscriber sees the settled value) is the usual orthogonal choice. Execution context (compile-time, server-before-hydration, client-after) is the same kind of coloring, neutralized the same way: each context gets its own composition root under identical rules, and none is granted a structural exception. "Static" means stateless and behaviorless, never compile-time.
 
 ---
 
 ## State model
 
-State is always local to the domain, layer, or entity where it originates. There is no global state construct. Domains do not share mutable references.
+State is local to the domain and layer where it originates; there is no global state construct and no shared mutable reference between domains. A reactive primitive holding local state inside a use-case is that use-case's own affair. State that must cross a boundary is **published**: the producer emits values through a channel, consumers hold a subscription reference - a reference to the channel, never into producer state - and published values are immutable (see Channels). This forecloses the three failure classes of shared state: write contention (each location has one owner; published values cannot be written), implicit reflow (propagation is explicit channel delivery), and stale snapshots (a state-shaped channel delivers the current value at subscription and every update after).
 
-State that must cross a domain boundary is published, never shared by reference. The producing domain emits values through a Stream; consuming domains subscribe to that stream. The consumer holds a subscription reference to the stream, distinct from the producer's internal state.
-
-This distinction prevents three categories of problems that global state introduces:
-
-- **Write contention**: no two domains compete for write access to the same mutable location.
-- **Implicit reflow**: no consumer is silently re-evaluated when a distant producer mutates.
-- **Stale snapshots**: the stream delivers the current value at subscription time and every subsequent update; there is no cached copy to go out of date.
-
-Framework-level reactive primitives (RxJS BehaviorSubjects, SolidJS signals) are permitted as implementation tools. They belong at the layer where the state originates. A signal inside a Use-Case is local state; if its value needs to cross a domain boundary, it is wrapped in a Stream and exposed through the domain's Events surface.
+Scope honesty: a co-change invariant spanning several entities has one owner - a domain whose use-case performs the whole change as one published operation - and transactional atomicity itself is a terminal-tier capability (the storage or backend transaction), reached through transport or storage domains. ELDA locates the invariant; it does not manufacture the guarantee.
 
 ---
 
-## Advised design patterns
+## Ontology
 
-| Layer | Pattern | Purpose |
-|---|---|---|
-| Services | **Facade** | Simplified interface over an external system (platform SDK, storage driver, API client) |
-| Services | **Factory** | Produces service instances; accommodates platform-specific variants |
-| Adapters | **Adapter** | Converts an external interface to the domain-expected shape |
-| Adapters | **Decorator** | Adds cross-cutting behavior (retry, auth, logging) without changing the adapted interface |
-| Adapters | **Proxy** | Controls or defers access to an expensive external resource |
-| Use-Cases | **Command** | Encapsulates a use-case invocation as an executable object; enables queuing and undo |
-| Use-Cases | **Mediator** | Coordinates same-tier inter-domain interaction from a single explicit termination point |
-| Use-Cases | **Chain of Responsibility** | Passes a request along a handler pipeline; each handler decides to process or forward |
-| Entities | **Strategy** | An interchangeable domain rule expressed as a swappable algorithm |
-| Entities | **Composite** | Composes simple rules into arbitrarily deep rule trees |
-| Entities | **Specification** | A named, composable domain predicate; combinable with AND / OR / NOT |
-| Entities | **Value Object** | An immutable object defined by its value, not identity; structurally enforces a domain invariant |
+Domain boundaries are deliberate decisions that evolve as understanding matures; there is no single correct partition. The working model is a **Venn diagram**: each domain is a set, and a piece of code sits where its dependencies place it - inside one circle, at an edge, or at an intersection. "Which domain does this belong to?" becomes "where on the diagram does this sit?", which is always answerable from the imports.
+
+**Sharedness.** Code functionally intersecting two domains depends on both, so it is more shared - more general - than either parent: it extracts downward into a shared domain both parents depend on and that depends on neither (`A → S ← B`), collapsing any would-be mutual dependency into one-way edges. The dependency order that results is a DAG read straight off the graph, ordered by how many domains lean on each node, with the dependency-free **pure core** at the bottom (consumed by everything, importing nothing). How close a domain sits to core says how shared it is; the architecture never ranks domains by importance, and reference count is never an importance judgment.
+
+**The coordinator dual.** Code that *coordinates* two domains by consuming both their surfaces sits above both - the opposite pole from the extracted intersection. The discriminator is ownership: pure wiring (subscribe one domain's stream, call another's use-case, no policy held) is the composition root's job; coordination that owns a policy (an arbitration rule, a priority, a debounce discipline) is a concern with an owner - a domain that references both surfaces and sits exactly where its dependencies place it.
+
+Naming an extracted intersection, and deciding when it has earned a concept of its own, is judgment the architecture does not decide. Boundaries are provisional; code migrates toward the circle it most belongs to as the diagram changes shape, and that migration is health.
 
 ---
 
-## Brittleness as a property
+## Libraries
 
-ELDA optimizes for composability, refactor-friendliness, and locality of change at the cost of robustness against discipline lapses. The structural payoff (general logic at the composition root, system concerns at adapters, business logic at use-cases and entities, no leakage sideways) is held in place by every boundary being respected at every cross-domain touch. A single cross-domain deep import, a single cross-cutting hook exposed past its owning domain, a single service composing another service, and the local-scope-of-change property degrades from that point outward.
+A third-party library is a black box: ELDA does not see or govern its internals, only its surface as consumed. Consumption follows the same rules as any foreign system. An API that already conforms to the concepts (reactive accessors, value-returning hooks, pure callbacks, idempotent on import) is consumed directly and orchestrated by use-cases; externality alone triggers nothing. A mismatched shape is adapted at the boundary layers. At a foreign boundary the Adapter's obligation is **translation**: the domain declares its own entity vocabulary and the Adapter maps the foreign shape into it - a wrapper that merely re-shapes, leaving the foreign model in charge of the domain's types, has adopted the foreign model behind a compliant import graph. Between in-repo peer domains no such obligation exists: referencing a peer's vocabulary through its surface is the designed path, because the owner is inside the system and renames propagate by type. A library's own vocabulary is a foreign owner's contract, referenced by name and never re-declared. Wiring substrates are bounded by the bar stated under Positioning.
 
-This trade-off is deliberate. Architectures that prioritize malleability over rigor (Flux / Redux, Entity-Component-System, layered MVC) accept locality compromises so that an individual contributor's slip does not cascade through the structure. ELDA accepts the opposite: tighter structural payoff when the constraints hold, sharper degradation when they break. The grep tests written into the constraints (no deep imports past a public surface, no cross-cutting hooks at consumer sites, no service-to-service composition) function as scout signals, not enforcement; the architecture relies on reviewers and tooling to hold the line at the boundaries.
-
-Choose accordingly. ELDA fits codebases where the cost of structural drift is high (multi-year products, multi-team handoffs, systems that must remain navigable as they grow), where reviewers and tooling can be relied on to catch the slips at PR time, and where the team values the property of "a change has the scope its diff says it has" enough to keep the discipline. It is the wrong fit for prototypes that prioritize speed of one-off experiments, codebases without an enforcement culture at the boundaries, or teams that prefer architectures absorbing discipline lapses gracefully over those rewarding rigor.
-
-This trade-off is only sound when the rules that *can* be checked mechanically are checked mechanically, so that the human attention the architecture depends on is spent where no machine can reach. Enforcement therefore splits into three tiers. **Machine-enforced invariants** are the rules that are both structurally decidable and unambiguous when violated - import boundaries, no inner layer importing an outer one, no `async`/`await` or `try`/`catch` in the inner layers, no service-to-service import, no owned-vocabulary literal outside its owner - and these are CI gates, never a reviewer's burden. **Review-enforced judgments** are the calls a tool cannot settle, whether or not it can surface them - domain placement and promotion, port-versus-block shape, branch exhaustiveness, the introduction of a new shared-namespace identifier, and an export with no current consumer. That last one a tool can flag but cannot judge: the surface invariant is that consumers reference nothing past the surface (`consumers ⊆ surface`), and never that the surface carry nothing unconsumed (`surface ⊆ consumers`). An unconsumed export is either dead surface to trim or a capability deliberately exposed ahead of demand - and keeping the surface free to lead its consumers is the Open-Closed latitude that lets a new consumer arrive without forcing a producer edit. A tool surfaces the candidate; a human decides which it is. **Scheduled maintenance** are the obligations the architecture has but does not trigger on its own - re-evaluating the domain ontology as it matures, keeping the vocabulary registry current, and confirming that a license such as "domains may react freely" has not outrun the enforcement (the causal-set cycle check) that makes it safe.
-
-The failures this architecture actually suffers are the failures humans reliably make - omission, deferral, label-lag, avoiding boilerplate - not the conspicuous violation a reviewer catches in a small diff. Mechanizing the first class is what keeps catching the second affordable. Lint rules over the grep tests, type-system constraints on cross-domain imports, and structural validation in CI are not future hardening to be deferred; they are the precondition under which choosing brittleness is rational. A project that adopts ELDA's locality payoff without standing up Tier 1 has accepted the brittleness without buying the thing that makes it pay.
+One recurring boundary case: a validation library whose schema factory co-locates the data shape with a throwing validator produces an effectful object, and invoking that factory at the Entity layer lands the object on the pure floor. The Entity holds the shape; the factory invocation and its throwing surface belong outward, at the Adapter that translates the boundary. The library will not separate the two structurally, so that wall is the architecture's to build.
 
 ---
 
-## Constraints summary
+## The type-level language
 
-1. Inner layers never import outer layers within a domain.
-2. Domains communicate exclusively through Streams/Generators.
-3. Each domain exposes exactly one API surface and one Events surface.
-4. Orphan intersections are named by their parent domains (`a+b`); they are consumed by their parents and do not consume from them.
-5. Transport and Storage subdomains are consumed by feature domains and orphans; they do not consume upward.
-6. Streams and Generators are direct typed references; string-keyed dispatch is not permitted.
-7. `async`/`await` and Promise chains are not permitted in userland code; async operations are wrapped as single-value streams at the Adapters layer.
-8. The inter-domain stream subscription graph must be a DAG; stream subscriptions flow downward across tiers (Feature → Orphans → Terminal → Core).
-9. The event-exchange interface tracks a causal set per emission and drops any trigger that would re-enter a stream already in that set.
-10. Pure core contains only dependency-free code; any code with an import belongs in a domain, orphan, or subdomain above it.
-11. Upward layer edges are dependency-inverted: an inner layer declares its needs as parameters; the adjacent outer layer supplies them by composition. No DI container or service locator.
-12. An inner layer needing an outer layer's module is misplaced logic: split it, pure part inward, binding part to Adapters.
-13. Cross-cutting systems are mechanism (ambient; all layers but pure core), state-and-call-outs (wrapped at Services/Adapters, passed inward as values), or vocabulary (shared-library contract referenced by name; presentation vocabulary never in Entities).
-14. Services are composed by the runtime composition root, not invoked by other services. A service ↔ service direct import across units (constraint 25) inverts composition direction and is a smell; the consuming service should accept a named slot port and let the composition root supply the contents. Use-cases consumed by services are exempt (they are behavioral hooks, not composition surfaces). Production-path code only; dev tooling lives outside the rule.
-15. A domain publishes its surface to two audiences. Its consumable surface - a single named target, the barrel - carries the use-cases and vocabulary any peer domain references, and does not expose services. Its runtime-composition surface carries the services the composition root instantiates and wires, and only the root references it. Consumers reference a surface by its named target and never reach past it into the domain's internal structure.
-16. Vocabulary (design tokens, type aliases, wire schemas, ambient declarations) is owned by one domain. Other domains do not re-declare, re-bundle, or hold their own manifest of the same vocabulary; consumption flows through the owner's consumable surface (constraint 15). Ambient declarations (`declare global`, ambient `declare module`, `.d.ts` files) are co-located in the owning domain.
-17. The Adapter layer is triggered by shape mismatch between an external system and the domain (imperative interfaces, throwing APIs, async-callback or Promise-based control flow, mutable global state, request/response over the network). Externality without shape mismatch does not trigger it; external APIs that are already domain-shaped (use-case-shaped) are consumed directly and orchestrated as use-cases composing other use-cases.
-18. Cross-cutting concerns are absorbed into composition blocks exposed by services. Cross-cutting logic does not escape its owning domain as a free-floating hook, component, or helper; consumers receive blocks that have the concern already applied. The runtime composition root is the only context that may compose blocks from multiple domains freely; every other layer is constrained against cross-domain composition.
-19. The runtime composition root has an imperative-shell face, the runtime integration surface, where `async`/`await` and `try`/`catch` are permitted for boot sequencing. It may sequence owned surfaces, ports, and runtime primitives; it may not hold a domain decision or an owned-vocabulary literal. It sequences the owner's pre-chewed parts; it does not re-implement an owned semantic.
-20. String-keyed identifiers in a shared runtime namespace (DOM attributes and their selectors, CSS custom properties, storage keys, URL parameters, postMessage types, runtime globals) are vocabulary under constraint 16, owned by one domain. Consumers reference the owner's declaration - a typed constant, an exposed binding surface, or a code-generation output emitting both representations from one source - never a re-spelled literal. Introducing a new such identifier creates vocabulary and gets an owner before first use.
-21. The boundary between a directly-consumed cross-cutting use-case (constraint 17) and a composition block (constraint 18) is fixed by one test: a hook that reads only ambient mechanism or published state and returns a pure value, owning no state, is consumed directly; a concern that owns state, encodes a policy, or authors markup a consumer would otherwise re-author must be a block.
-22. The brittleness trade-off is conditioned on enforcement tiers: rules that are decidable and unambiguous when violated are machine-enforced CI gates; decidable-but-not-self-evident signals (an unconsumed export - dead surface, or a capability exposed ahead of demand) are surfaced by a tool yet judged by review, alongside the calls no tool can make; and the architecture's non-self-triggering obligations (ontology re-evaluation, vocabulary-registry upkeep, keeping reactive-freedom licenses within their enforced cycle-safety) are scheduled maintenance. The public-surface invariant is `consumers ⊆ surface`, never `surface ⊆ consumers` - a domain may expose more than its current consumers require.
-23. Consuming an owner's identity vocabulary has three forms of decreasing safety: referencing it by type (sound), deriving behavior keyed on an identity value (re-owns the owner's behavioral semantics - type-safe against renames but not against new identities, a smell), and re-declaring a literal with no type binding (invisible and rename-fragile, forbidden by constraint 20). Reference identity vocabulary by type; do not branch behavior on identity values - have the owner publish the capability its identities imply and branch on that.
-24. The composition root consumes each domain only through its published surface (the cross-domain barrel and the runtime-composition surface); its cross-domain license is breadth across domains, with depth held at each surface. It does not import a domain's adapters or entities, and use-case hooks it wires are exposed on a surface rather than deep-imported by layer path.
-25. The service ↔ service rule (constraint 14) acts on units, where a unit is a directory: the files co-located in one directory - a flat name-stem cluster or a self-segregated folder of parts - are one service that composes itself without restriction. A different service unit, a different directory, may not be imported and mounted. To separate two services that share a directory, give each its own.
-26. What a file is fixes its layer. A stylesheet is code: it classifies by the layer it occupies and obeys that layer's rules, and co-located with its component it belongs to that unit. A pure-data asset (image, font, media) is vocabulary, classified as an Entity: importable from any layer, never a service, surface-gated across domains.
+A type-level language (compile-time-gated type computation) is a second computational language, and ELDA is self-similar into it. The static principles recurse in full: a plain shape is a type-level entity, a type-level function (conditional, mapped, recursive) is a type-level use-case, exported types are the surface and unexported helpers are private, ambient declarations and merges are owned side-effects, and a computation that resolves to an error-shaped type instead of the compiler's bottom is the inbound outcome translation, recursed. The dynamic principles relocate to the meta-runtime whose clock ticks during reference resolution (largely at authoring time): navigation ergonomics become resolution paths, execution frequency becomes instantiation cost, state-over-time becomes state-over-resolution. In practice type-level code shadows the value-level layer it types; standalone type-level domains live mostly in libraries, which are opaque anyway.
+
+---
+
+## Navigation
+
+The by-reference rule means go-to-definition and find-references always land, and the string seams a host namespace forces are collapsed to their owner's single declaration (see Vocabulary), so those hops land at the owner; distance is the only question. Within a domain, cost is layer distance and asymmetric: downward is direct import-following, upward is the inversion's tax - a reverse lookup to the composition site that supplied the port. Across domains, cost is constant at the surface (one indirection) regardless of how deep the target sits, so a domain's internal complexity never leaks into a peer's navigation cost. Flat architectures smooth navigation by flatness and pay at scale, when boundaries erode and flow has no reference to follow; ELDA accepts the reverse-lookup tax and the surface indirection in exchange for costs that stay bounded and locations that stay predictable as the system grows.
+
+---
+
+## Enforcement
+
+### Brittleness as a property
+
+ELDA optimizes for composability, refactor-friendliness, and locality of change at the cost of robustness against discipline lapses. A single cross-domain deep import, one escaped cross-cutting hook, one service composing a service, and the locality property degrades from that point outward. This trade-off is deliberate and it is the opposite of malleability-first architectures, which absorb slips gracefully and pay in structure. Choose accordingly: ELDA fits long-lived codebases whose operators will hold a review tier; it is the wrong fit for prototypes and for teams that want the architecture to absorb lapses.
+
+The operational check of the property is **blast radius equals diff**: if a change's effects reach files outside the domains its diff touches, and no contract change was intended, a boundary leaked - find it before merging.
+
+### Three tiers
+
+Brittleness is rational only while the mechanically checkable rules are mechanically checked, so human attention is spent where no machine reaches.
+
+- **Tier 1 - machine-checked invariants**: decidable and unambiguous when violated. Layer boundaries, surface reaches, inner-layer async and try/catch, mutable surface bindings, ambient-declaration placement, owned-vocabulary literals at the shell. These are lint/CI gates ([support/js](./support/js)); reviewer attention starts at Tier 2.
+- **Tier 2 - review judgments**: calls a tool can at most surface. Domain placement and boundary drawing, hook-versus-block, the introduction of a new shared-namespace identifier, an unconsumed export (dead surface, or capability ahead of demand), under-decomposition, translation adequacy at foreign boundaries.
+- **Tier 3 - scheduled maintenance**: obligations the architecture does not self-trigger. Ontology re-evaluation as understanding matures, vocabulary-registry upkeep, and the Gate-1 cycle audit (a whole-graph property) until a graph pass automates it.
+
+### Grades of alignment
+
+The rules above speak in three registers, and the registers are the grading scale. A **violation** breaks a stated invariant: an inner layer importing an outer one, a reach past a surface, a mutable published binding. An **inadvisable** deviation may stand and carries a per-instance justification: the lateral mounting under Composition roots, an effect-only import reaching past its unit, opaque namespace consumption. A **signal** is information addressed to review: an unconsumed export, a domain that has yet to split. Each register has a natural holder - the machine holds the first two, standing practice holds the third - and each holder has a cost shape, so the grades double as an investment ladder: what a team spends once, what it spends per deviation, and what it spends on a cadence.
+
+A grade is claimed over an **enforcement scope**: the set of rules the project's gate holds, declared by the lint configuration itself. Every rule is individually adoptable, and a rule switched off is a **de-regulated seam** - the map's guarantees end there, and the claim shrinks to match, so "aligned over the import seams" is a coherent, permanent position while the unqualified claim of any grade means the full ruleset. A waiver is an exemption and carries its grounding like any other: "this rule is vacuous here" and "we accept this seam unregulated" are both honest declarations, and the second is the smaller claim. Scope stays a flat declaration - the rules carry no ranking into essential and optional, and a named subset would become an identity claim, the carve-out this document refuses everywhere else.
+
+Within its scope, a project's **grade** is the highest register it has discharged, verified by a gate that runs and passes. The grades are residences, each a legitimate permanent position:
+
+- **Aligned** - the violation register is empty. Reaching it costs the migration hump: every standing breach paid down once. Holding it is the cheapest discipline in this document, because the machine gates violations at authoring time and reviewer attention is freed for the other registers. Aligned is the floor at which the locality payoff becomes real: from here, blast radius equals diff is a checked property.
+- **Justified** - the inadvisable register is discharged: every standing deviation carries its justification at the site, as an inline suppression stating the reason. The reasoning was already owed, since a graded deviation carries a per-instance justification by definition; this grade moves it from review memory into a searchable artifact, and a new deviation now announces itself in the diff. Justified is the standing home of bounded looseness: a deviation grounded at its site may stand indefinitely. Cost above aligned: minutes per deviation.
+- **Governed** - the signal register is worked: the reachability pass runs, the cycle audit happens on its cadence, ontology reviews get made and their outcomes recorded. This register is the enforcement residue that stays with humans (see Three tiers), so governed carries the one permanent operating cost; it is held by the operator's practice, and the practices existing is what verifies the claim.
+
+**Adopting** is the transit posture between scopes or grades: every in-scope rule reports, standing findings form the fix-list, and the gate for a change is no new findings in touched files against the accepted baseline - a ratchet toward the target grade. Warn-tier is transit by design: held indefinitely at full scope, it spends recurring review attention on findings a gate would hold for free (see Three tiers). The standing forms of looseness are the other two dials - a narrower scope, gated properly, or grounded deviations under justified. A project may still run everything advisory indefinitely; it holds no grade and claims no guarantee, and the tooling stays useful as a map.
+
+The plugin ([support/js](./support/js)) ships a preset per machine-holdable state: adopting, aligned, justified, each at full scope. A preset is a ratchet - it holds a reached state against regression - and the grade itself is read off the tree under its gate, so a hand-tuned configuration declares its scope and maps to the highest grade whose in-scope gates it fully holds. The grades price the assurance stack; the ceremony of applying the architecture (the framing judgment, inside-out builds, ports, translation at foreign boundaries, surface curation) is the entry price at every grade, and coarseness is its dial: structure starts coarse and splits when a boundary becomes real (see Rule shape), so ceremony grows with the boundaries that have earned it. Choosing a lower grade is a legitimate, priced position under Brittleness as a property: each step up buys more of the locality payoff and more brittleness against lapses.
+
+### Rule shape
+
+The spec states **prohibitions**; the complement is permitted by construction. No rule takes the form of a positive structural mandate ("a domain must have four layers of substance", "split at cohesion X"): positive mandates are ungameable only by cargo-culting, and a tool never enforces an upper bound on coarseness. The dual holds for lists: every enumeration in this document is descriptive, and an allow-list reading (a pattern table read as "only these") forbids the complement by proxy, which is the same disease. Structure starts coarse, splits when boundaries become real, and the tool stays quiet about code that has simply not yet needed a split.
+
+### Advised patterns
+
+Historically good fits per layer, as illustrations of each layer's character - a pattern that clashes with its layer is a placement smell, an unlisted pattern that fits the responsibility fits, and no pattern is ever inserted for its own sake:
+
+| Layer | Patterns that have fit |
+|---|---|
+| Services | Facade, Factory, Composite, Observer |
+| Adapters | Adapter, Decorator, Proxy, Component |
+| Use-Cases | Command, Mediator (coordination policy with one owner), Chain of Responsibility |
+| Entities | Strategy, Composite, Specification, Value Object |
+
+---
+
+## Constraints
+
+The binding ruleset, grouped by the seam each rule guards. IDs are stable; the lint plugin cites them.
+
+### LAYER - within a domain
+
+- **LAYER.1** Inner layers never import outer layers: the rank order is Entities → Use-Cases → Adapters → Services, and an import against it is a violation regardless of path form.
+- **LAYER.2** Upward edges are dependency-inverted structurally: an inner layer declares its needs as parameters and the adjacent outer layer supplies them by ordinary composition. No DI container, no service locator (ROOT.4 carries the bounding argument).
+- **LAYER.3** An inner layer needing an outer layer's module is misplaced logic: split it - the pure part (a function of plain values) moves inward, the binding part moves out to Adapters.
+- **LAYER.4** Use-Cases and Entities traffic only in values: no async/await or promise chains, no try/catch, no throwing calls. Async and throwing shapes are wrapped at Adapters into channel-conforming values; the imperative shell is the only other legitimate host for them (ROOT.2).
+- **LAYER.5** The Adapters layer is triggered by shape mismatch with the concepts (imperative interfaces, throwing APIs, async or promise control flow, mutable global state, request/response). Externality alone never triggers it: an external API that already conforms is consumed directly and orchestrated by use-cases.
+- **LAYER.6** At a foreign boundary (a wire format, a platform SDK, a third-party API) the Adapter translates the foreign shape into the domain's own entity vocabulary; re-shaping that leaves the foreign model in charge of the domain's types is conformity, a violation. In-repo peer domains are exempt: referencing a peer's vocabulary through its surface is the designed path.
+- **LAYER.7** A layer is a classification, never a container: within a domain's tree, grouping nodes express concerns (slices and units), layer membership rides the leaf files, and a container named for or dedicated to a layer is a horizontal bucket, a violation.
+
+### CHANNEL - between domains
+
+- **CHANNEL.1** Domains communicate exclusively through Streams and Generators attached at the use-case layer; the use-case ↔ use-case channel is the only cross-domain crossing, and effects never cross - only data does.
+- **CHANNEL.2** Channels are direct typed references; string-keyed dispatch is not permitted.
+- **CHANNEL.3** Storage shape (event-shaped or state-shaped) is orthogonal to channel direction; both fit both roles, chosen by consumer need; the concrete primitive is a runtime concern.
+- **CHANNEL.4** A published value is immutable from the moment it is published: the producer never mutates it afterward (copy-on-publish where the source is mutable), and consumers hold snapshots they do not own.
+- **CHANNEL.5** Every cross-domain reference cycle encloses a settling element (Gate 1); a channel participating in a cycle is change-gated with a tight equality, never value-retaining replay (Gate 2 conformance).
+- **CHANNEL.6** A mutual dependency between domains never forms: the shared concern extracts downward (`A → S ← B`). The resulting order is sharedness read off the dependency graph, never an importance ranking.
+
+### SURFACE - the domain boundary
+
+- **SURFACE.1** A domain's API and Events interfaces are realized as one or more named public surfaces, split by consumer type whenever a single target would conflate channels or audiences.
+- **SURFACE.2** The consumable surface carries use-cases and vocabulary and never exposes services or adapters; services are published only on the runtime-composition surface, reached by composition roots - and, under OWNER.5's graded exception, by a peer service mounting the block at that surface, never past it.
+- **SURFACE.3** Consumers reference a surface by name and never reach past every surface into a layer's internals; a domain's surface never re-bundles a peer or foreign domain's surface, while curating its own nested domains' capabilities is its job (SURFACE.7).
+- **SURFACE.4** The surface invariant is `consumers ⊆ surface`; a domain may expose more than its consumers currently require, and an unconsumed export is a review signal.
+- **SURFACE.5** A unit is a directory dedicated to one concern-part: intra-unit imports are unrestricted except by layer rank, which LAYER.1 binds regardless of path form; cross-unit rules act on directories, and decomposition is never mandated. An effect-only import reaching past its unit is a smell; effect composition by import belongs to the root.
+- **SURFACE.6** What a file is fixes its classification: a stylesheet is code and classifies by its layer and unit; a pure-data asset is vocabulary, classified as an Entity - importable from any layer, never a service, surface-gated across domains.
+- **SURFACE.7** A domain may nest domains, and a nested domain is internal to its parent: outside the parent only the parent's published surfaces exist, and reaching a nested domain from outside its parent is a reach past the parent's surface. Siblings under one parent are peer domains under the full ruleset. A parent curating an owned child's capability onto its own surfaces is the surface's job.
+
+### OWNER - ownership and vocabulary
+
+- **OWNER.1** A consumer may reference a domain, never re-own it. A domain owns its setup, state, vocabulary, behavior, and cross-cutting placement; an invocation that commits a decision over any of these from outside is the violation. Re-use references the single owner and never re-instances ownership.
+- **OWNER.2** Vocabulary (types, wire schemas, design tokens, shared-namespace identifiers, ambient declarations) is declared once at its owner's entity layer and consumed through the owner's surface; re-declaration, re-bundling, and shadow manifests are violations. Ambient declarations co-locate with their owning domain. A new shared-namespace identifier gets an owner before first use.
+- **OWNER.3** Identity vocabulary: reference by type freely; deriving behavior keyed on an identity value is a smell - the owner publishes the capability its identities imply and consumers branch on that; re-declaring a literal with no type binding is forbidden.
+- **OWNER.4** A cross-cutting concern that owns state, encodes policy, or authors markup consumers would re-author is absorbed into a composition block (a service) composed once by the root; it never escapes as a free-floating hook. A helper owning nothing, returning a pure value over ambient mechanism or published state, stays directly consumable.
+- **OWNER.5** Lateral composition between outer-layer units of peers is graded (a domain composing its own nested domains is self-composition, ROOT.7): a named slot port the root fills is the designed form; a service unit mounting a sibling block - another service unit of its domain, or a peer domain's block at its runtime-composition surface, never past it - is inadvisable and carries a per-instance justification; re-authoring a sibling concern from its use-cases re-owns it and is the violation (OWNER.4). Between Adapters of different units the same grading holds, without the surface case since adapters are published on no surface: the layer above composes the two bindings, or they co-locate into one unit.
+- **OWNER.6** A foreign owner's contract is referenced by name at the layer its kind permits: a type at any layer; a presentation token at Adapters and above, never in an Entity; a foreign implementation detail nowhere.
+
+### ROOT - composition roots
+
+- **ROOT.1** A root's cross-domain license is breadth with depth held at each surface: it consumes consumable surfaces and the runtime-composition surface, and never a layer's internals.
+- **ROOT.2** The imperative shell may sequence (instantiate, supply ports, subscribe, order host primitives, awaiting and catching where boot genuinely needs it); it may never chew: no domain decision, no owned-vocabulary literal.
+- **ROOT.3** The root owns the blast radius: it partitions composition into scopes, an outbound failure terminates the scope that composed the failing piece, and the root decides restart, degrade, or propagate. A domain never supervises another domain.
+- **ROOT.4** No DI container or service locator: the wiring graph is surface-bounded (ROOT.1), published state leaves no lifetimes to manage (CHANNEL.4), and parameter inversion keeps construction type-checked ordinary code; a container is a second wiring graph with no remaining job.
+- **ROOT.5** Roots communicate inter-root only through the transport plane at the Services layer, by serialization; the use-case channel never spans two roots.
+- **ROOT.6** Pure core is dependency-free; any code with an import belongs in a domain above it, and arrows point from domains into core, never back.
+- **ROOT.7** Composition recurses: each domain is the composition root of its own nested domains, reaching their runtime-composition surfaces and composing their blocks, and every composer reaches its direct children only. Nested domains are unaware of their parent as domains are unaware of the root: a slice never references its parent, and content shared between siblings extracts into a sibling slice.
+
+### META - rule shape and enforcement
+
+- **META.1** The spec states prohibitions; the complement is permitted by construction. No rule is a positive structural mandate, and no tool enforces an upper bound on coarseness.
+- **META.2** Every enumeration is descriptive and non-binding; an allow-list reading forbids the complement by proxy and is itself an error.
+- **META.3** Enforcement runs in three tiers: machine-checked invariants as lint/CI gates, review judgments surfaced by tools where possible and decided by humans, and scheduled maintenance for the obligations the architecture does not self-trigger. Choosing ELDA's brittleness without standing Tier 1 is irrational: the locality payoff is bought by enforcement, never by intention.
+- **META.4** Blast radius equals diff: a change whose effects reach past the domains its diff touches is a boundary leak to find before merging.
+- **META.5** An indirection earns its keep as a structural change: the added hop must become the home of a decision - an invariant, a shape translation, a composition authority. An indirection after which every decision lives where it already lived is ceremony. The rule governs hops at architectural boundaries; intra-unit extraction (SURFACE.5) is style, outside its reach.
+- **META.6** The rules speak in three registers - violations, inadvisable deviations carrying per-instance justification, and review signals. A grade is claimed over an enforcement scope: the rule set the gate holds, declared by the configuration, where a waived rule is a de-regulated seam that shrinks the claim and carries its grounding; the unqualified claim of any grade means the full ruleset, and scope is a flat declaration with no ranked or named subsets. Within its scope, a project's grade is the highest register discharged under verification that runs and passes, and each grade is a stationary position: **aligned** empties the violation register (the rational floor of META.3); **justified** additionally discharges the inadvisable register as inline artifacts at each site, the standing home of grounded deviation; **governed** additionally works the signal register on its cadence, held by the operator practices of META.3's second and third tiers. **Adopting** names the transit posture: every in-scope rule reports, standing findings form the fix-list, and a change lands with no new findings in touched files; an indefinite all-advisory configuration holds no grade and makes no claim. A grade is a property of the working tree under its standing gate; a preset supplies the gate.
+
+---
+
+## Appendix: realization in a TypeScript runtime
+
+Non-normative. The concrete primitive is a runtime concern (see Channels) and no list here is an allowed-set (see Rule shape); these are choices that have held up in one TypeScript, fine-grained-reactivity stack, with the reasoning attached so a different stack can re-derive them.
+
+- **Stream, state-shaped**: a fine-grained reactive signal, or an RxJS `BehaviorSubject` piped through `distinctUntilChanged`. A signal is equality-gated on write, so it satisfies the cycle-safety change-gating by default; a bare `BehaviorSubject` replays ungated and conforms only with the distinct gate attached.
+- **Stream, event-shaped**: an RxJS `Subject`, a plain callback registry, host event targets (wrapped only on shape mismatch). Late subscribers miss what came before, by design.
+- **Generator**: a plain function or accessor on the surface. A language `function*` only where consumers genuinely pull a sequence step by step; a Subject-backed intent channel only where real producer-side aggregation exists (multiple consumers, debouncing, conditional flows). "On event, call the producer's published use-case" needs no reactive plumbing.
+- **Async operation**: wrapped at Adapters into a single-emission channel, state-shaped if late subscribers must see the settled value. Never a raw Promise past the Adapter.
+
+Two footguns, both from cycle safety: a value-retaining replay channel (a bare `BehaviorSubject`, Effect's `SubscriptionRef`) placed inside a reference cycle re-fires its retained value forever, so add the equality gate before a channel enters any loop; and a loose "close enough" equality on a change gate can itself sustain a low-amplitude oscillation, so keep the gate's equality tight.
+
+Values and outcomes: published values as `Readonly` shapes so the type system carries the immutability constraint, copy-on-publish where the working state is mutable, and a dev-mode `Object.freeze` on published objects to catch violators empirically. Outcomes are discriminated unions handled by exhaustive `switch` with `never` checks; a biased `Result` library adds the negative-branch semantic the outcome model rejects, and a plain tagged union is the whole mechanism.
+
+The transport codec, where foreign wire shape becomes owned vocabulary: default to a small functional mapper core - two symmetric, type-checked map functions per wire type. Adopt a schema-first codec only when validation is both gating and comprehensive for that boundary and a schema-first workflow is accepted for it; half-adopting a schema library as a type generator forfeits the reason to have it. Whatever the codec, its types stop at the Adapter.
+
+Wiring: routes and handlers instantiate services and pass parameters, and the whole wiring of a mid-sized app is a handful of root files that read top to bottom. A test harness is one more composition root: parameter inversion already hands every inner layer its seam as plain arguments, and the one thing a scheduling substrate genuinely adds at a test root is deterministic clock control. Effect-system libraries sit under the substrate bar stated in Positioning; one vocabulary caution when reading their docs: an Effect `Stream` is pull-driven, which is an ELDA Generator, while ELDA's Stream (push) corresponds to their PubSub and subscription shapes.
+
+Slices and leaves on disk: a domain is a directory, and layer membership rides file names - the bare reserved names (`entities.ts`, `use-cases.ts`, `adapters.tsx`, `services.tsx`) or a stem suffix (`cart-view.adapters.tsx`, `back-nav.adapters.css`); `index` is the consumable surface, the `services` leaf doubles as the runtime-composition surface, and any other slice-root file is a named surface. A unit is a layer-suffixed directory (`back-nav.adapters/` holds that component's parts, all classified by its suffix); a plain-named directory under a domain is a nested slice. The plugin also recognizes the legacy layer-directory layout so a migrating codebase lints correctly, and flags it under `no-layer-branches`.
+
+Enforcement: the lint plugin ([support/js](./support/js)) carries the machine tier; the unconsumed-export review signal rides a reachability tool (knip, entries at the composition roots) as a separate advisory pass; the whole-graph cycle audit stays a scheduled item until a graph pass exists ([support/TODO.md](./support/TODO.md)).
