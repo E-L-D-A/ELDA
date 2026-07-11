@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ELDA dependency diagram</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #1a1a1a; --muted: #777; --box: #fff; --line: #bbb;
+    --services-bg: #dae8fc; --services-bd: #6c8ebf;
+    --adapters-bg: #d5e8d4; --adapters-bd: #82b366;
+    --use-cases-bg: #f8cecc; --use-cases-bd: #b85450;
+    --entities-bg: #fff2cc; --entities-bd: #d6b656;
+    --surface-bg: #f0f0f0; --surface-bd: #999;
+    --root-bg: #dae8fc; --root-bd: #6c8ebf;
+    --ok: #8a8a8a; --type: #b0b0b0; --bad: #d32f2f; --smell: #e05252;
+    --hi-out: #1565c0; --hi-in: #2e7d32;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181c; --fg: #e6e6e6; --muted: #9a9a9a; --box: #1e2126; --line: #444;
+      --services-bg: #24344d; --services-bd: #5b7fae;
+      --adapters-bg: #24402a; --adapters-bd: #6fa05c;
+      --use-cases-bg: #4a2b29; --use-cases-bd: #b06055;
+      --entities-bg: #464023; --entities-bd: #b5a24e;
+      --surface-bg: #2a2d33; --surface-bd: #777;
+      --root-bg: #24344d; --root-bd: #5b7fae;
+      --ok: #7a7a7a; --type: #5c5c5c; --bad: #ef5350; --smell: #e57373;
+      --hi-out: #64b5f6; --hi-in: #81c784;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; width: max-content; min-width: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; user-select: none; cursor: grab; }
+  header, #issues, #bottombar { cursor: default; }
+  header {
+    position: sticky; top: 0; left: 0; z-index: 30; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    width: 100vw; padding: 8px 16px; background: var(--box); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .counts { color: var(--muted); }
+  header .counts b.bad { color: var(--bad); }
+  header label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+  #live { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  #live.on { background: #43a047; }
+  .legend { display: inline-flex; gap: 12px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .legend i { display: inline-block; width: 22px; border-top: 2px solid var(--ok); }
+  .legend i.smell { border-top: 2px dashed var(--smell); }
+  .legend i.violation { border-top: 2px solid var(--bad); }
+  .legend i.type { border-top: 2px dashed var(--type); }
+
+  #wrap { position: relative; padding: 20px; width: max-content; min-width: 100%; }
+  body.panning, body.panning .chip { cursor: grabbing; }
+  #edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+  #edges path.hit { pointer-events: stroke; stroke: transparent; stroke-width: 9; fill: none; }
+  #edges path.edge { fill: none; }
+  #edges path.ok { stroke: var(--ok); stroke-width: 1; opacity: .38; }
+  #edges path.type { stroke: var(--type); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; }
+  #edges path.smell { stroke: var(--smell); stroke-width: 1.6; stroke-dasharray: 6 4; opacity: .95; }
+  #edges path.violation { stroke: var(--bad); stroke-width: 2.2; opacity: 1; }
+  #edges.focused path.edge { opacity: .06; }
+  #edges.focused path.edge.hi-out { stroke: var(--hi-out); opacity: 1; stroke-width: 2; stroke-dasharray: none; }
+  #edges.focused path.edge.hi-in { stroke: var(--hi-in); opacity: 1; stroke-width: 2; stroke-dasharray: none; }
+
+  #root-bar { position: relative; border: 2px solid var(--root-bd); background: var(--root-bg); border-radius: 8px; padding: 4px 10px; margin-bottom: 24px; }
+  #root-bar .bar-title { font-weight: 600; margin-right: 8px; }
+  .root-inner {
+    position: sticky; left: 8px; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px;
+    width: max-content; max-width: calc(100vw - 64px);
+  }
+  .root-inner .hide-btn { position: static; margin-left: 6px; }
+  #main { display: flex; align-items: flex-start; }
+  #nondomains {
+    display: flex; flex-direction: column; gap: 24px; align-items: flex-start;
+    padding-right: 20px; margin-right: 20px; border-right: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+  }
+  #core-box { position: relative; border: 2px solid var(--surface-bd); background: var(--box); border-radius: 8px; padding: 6px 26px 6px 10px; }
+  .hide-btn {
+    position: absolute; top: 3px; right: 4px; z-index: 25; border: 0; background: none; border-radius: 4px;
+    color: var(--muted); font: 12px/1 system-ui, sans-serif; padding: 3px 5px; cursor: pointer;
+  }
+  .hide-btn:hover { color: var(--fg); background: rgba(128, 128, 128, .18); }
+
+  #domains { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 28px; row-gap: 0; justify-content: start; }
+  .domain { display: grid; grid-row: 1 / -1; grid-template-rows: subgrid; border: 2px solid var(--line); background: var(--box); border-radius: 8px; overflow: hidden; }
+  .domain > h2 { grid-row: 1; position: relative; margin: 0; font-size: 13px; font-weight: 700; text-align: center; padding: 5px 24px; border-bottom: 1px solid var(--line); }
+  .grid { grid-row: 2 / -1; display: grid; grid-template-rows: subgrid; gap: 16px; padding: 10px 12px; }
+  .rail { grid-column: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 9px; color: var(--muted); text-align: center; padding: 4px 0; }
+  .grouphead { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px 2px; border-bottom: 1px dotted var(--line); white-space: nowrap; }
+  .colhead { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px; white-space: nowrap; }
+  .cell { padding: 6px; border-radius: 8px; min-width: 86px; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+  .cell.surface { background: color-mix(in srgb, var(--surface-bg) 45%, transparent); }
+  .cell.services { background: color-mix(in srgb, var(--services-bg) 30%, transparent); }
+  .cell.adapters { background: color-mix(in srgb, var(--adapters-bg) 30%, transparent); }
+  .cell.use-cases { background: color-mix(in srgb, var(--use-cases-bg) 30%, transparent); }
+  .cell.entities { background: color-mix(in srgb, var(--entities-bg) 30%, transparent); }
+  .cell:empty { background: none; }
+
+  .chip {
+    position: relative; z-index: 20; display: inline-flex; align-items: center; gap: 4px; justify-content: center;
+    padding: 2px 7px; border-radius: 6px; border: 1.5px solid var(--surface-bd); background: var(--surface-bg);
+    font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .chip.services { background: var(--services-bg); border-color: var(--services-bd); }
+  .chip.adapters { background: var(--adapters-bg); border-color: var(--adapters-bd); }
+  .chip.use-cases { background: var(--use-cases-bg); border-color: var(--use-cases-bd); }
+  .chip.entities { background: var(--entities-bg); border-color: var(--entities-bd); }
+  .chip .badge { font-size: 8px; padding: 0 3px; border-radius: 3px; background: rgba(128,128,128,.25); color: var(--muted); }
+  .chip.pinned { outline: 2px solid var(--hi-out); outline-offset: 1px; }
+  .chip.dim { opacity: .35; }
+  .chip.rel-out { outline: 2px solid var(--hi-out); outline-offset: 1px; }
+  .chip.rel-in { outline: 2px solid var(--hi-in); outline-offset: 1px; }
+  #root-bar .chip, #core-box .chip { margin: 2px 3px; }
+
+  #issues {
+    position: fixed; right: 0; top: 42px; bottom: 0; width: 380px; z-index: 40; overflow-y: auto;
+    background: var(--box); border-left: 1px solid var(--line); padding: 10px 14px; transform: translateX(100%); transition: transform .15s;
+  }
+  #issues.open { transform: none; }
+  #issues h3 { font-size: 12px; margin: 14px 0 6px; }
+  #issues .item { padding: 5px 7px; border-radius: 6px; margin-bottom: 5px; cursor: pointer; border: 1px solid var(--line); }
+  #issues .item:hover { border-color: var(--hi-out); }
+  #issues .item .msg { color: var(--muted); font-size: 11px; white-space: pre-wrap; }
+  #issues .item.violation { border-left: 3px solid var(--bad); }
+  #issues .item.smell { border-left: 3px solid var(--smell); }
+  #issues-btn { margin-left: auto; }
+
+  #tooltip {
+    position: fixed; z-index: 50; max-width: 460px; padding: 6px 9px; border-radius: 6px; pointer-events: none;
+    background: var(--fg); color: var(--bg); font-size: 11px; white-space: pre-wrap; display: none;
+  }
+
+  body { padding-bottom: 64px; }
+  #bottombar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 6px 16px; background: var(--box); border-top: 1px solid var(--line); font-size: 12px;
+  }
+  #bottombar .bar-label { color: var(--muted); }
+  #bottombar label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+  #bottombar label.off { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>ELDA · <span id="app-name"></span></h1>
+  <span class="counts" id="counts"></span>
+  <span class="legend">
+    <span><i class="violation"></i>violation</span>
+    <span><i class="smell"></i>inadvisable</span>
+    <span><i></i>dependency</span>
+    <span><i class="type"></i>type-only</span>
+  </span>
+  <label><input type="checkbox" id="t-ok" checked> deps</label>
+  <label><input type="checkbox" id="t-type"> type-only</label>
+  <label><input type="checkbox" id="t-assets" checked> styles+assets</label>
+  <label><input type="checkbox" id="t-surfaces"> surfaces</label>
+  <button id="issues-btn">issues <span id="issue-count"></span></button>
+  <span id="live" title="live reload"></span>
+</header>
+<div id="wrap">
+  <div id="root-bar"></div>
+  <div id="main">
+    <div id="nondomains" hidden>
+      <div id="core-box" hidden></div>
+    </div>
+    <div id="domains"></div>
+  </div>
+  <svg id="edges"></svg>
+</div>
+<aside id="issues"></aside>
+<nav id="bottombar"></nav>
+<div id="tooltip"></div>
+
+<script>
+const INLINE = /*__DATA__*/null;
+const ROWS = ['surface', 'services', 'adapters', 'use-cases', 'entities'];
+const ROW_LABEL = { surface: 'surfaces', services: 'services', adapters: 'adapters', 'use-cases': 'use-cases', entities: 'entities' };
+
+let data = null;
+let drawn = [];
+let stickyPaths = [];
+let chips = new Map();
+let pinnedPath = null;
+let hiddenBlocks = new Set();
+
+const $ = (id) => document.getElementById(id);
+const wrap = $('wrap'), svg = $('edges'), tooltip = $('tooltip');
+
+// Hidden top-level blocks persist per app across reloads; storage may be unavailable on a file:// snapshot, so degrade to session-only state.
+const storageKey = () => 'elda-viz-hidden:' + (data ? data.app : '');
+function loadHidden() {
+  try { hiddenBlocks = new Set(JSON.parse(localStorage.getItem(storageKey()) ?? '[]')); } catch { hiddenBlocks = new Set(); }
+}
+function saveHidden() {
+  try { localStorage.setItem(storageKey(), JSON.stringify([...hiddenBlocks])); } catch {}
+}
+
+// The corner button that hides a block without reaching for the bottom bar.
+function hideBtn(key) {
+  const btn = document.createElement('button');
+  btn.className = 'hide-btn';
+  btn.textContent = '✕';
+  btn.title = 'hide (restore from the bottom bar)';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    hiddenBlocks.add(key);
+    saveHidden();
+    render();
+  });
+  return btn;
+}
+
+// The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
+function blockOf(f) {
+  const p = place(f);
+  if (p.area === 'root') return '@root';
+  if (p.area === 'core') return '@core';
+  if (p.area === 'domain') return p.domain;
+  return null;
+}
+
+// A layer file belongs to the unit its own name declares; that name is its sub-column, so units line up as concerns the way the diagram draws UI / Network / Data - at the domain root and inside every subdomain alike.
+// Bare reserved-name files (the layer aggregates, the composer) and surfaces are subdomain-wide and stay in the unnamed sub-column.
+function unitCol(r) {
+  if (r.name) return r.name;
+  if (r.via === 'unit-dir' && r.sub.length) return r.sub[0].replace(/\.[^.]+$/, '');
+  if (r.via === 'branch' && r.sub.length > 1) return r.sub[0];
+  return '';
+}
+
+// Which cell a file renders into: the composition-root bar, the core box, or a domain's (subdomain group x unit sub-column x row) cell.
+function place(f) {
+  const r = f.role;
+  if (r.kind === 'composition-root') return { area: 'root' };
+  if (r.kind === 'core') return { area: 'core' };
+  if (r.kind === 'surface') return { area: 'domain', domain: r.chain[0], sub: r.chain.slice(1).join('/'), unit: '', row: 'surface' };
+  if (r.kind === 'domain') return { area: 'domain', domain: r.chain[0], sub: r.chain.slice(1).join('/'), unit: unitCol(r), row: r.layer };
+  return { area: 'other' };
+}
+
+// A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
+function chipParts(f) {
+  const base = f.path.split('/').pop().replace(/\.d\.ts$/, '.dts').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i, '');
+  const segs = base.split('.');
+  const label = segs[0];
+  const badges = segs.slice(1).filter((s) => !ROWS.includes(s));
+  if (f.kind === 'style') badges.push('css');
+  if (f.kind === 'asset') badges.push(f.path.split('.').pop());
+  if (f.role.via === 'branch' || f.role.via === 'unit-dir') badges.push('dir!');
+  return { label, badges };
+}
+
+function makeChip(f) {
+  const el = document.createElement('span');
+  const p = place(f);
+  el.className = 'chip ' + (p.row && p.row !== 'surface' ? p.row : p.area === 'root' ? 'services' : '');
+  const { label, badges } = chipParts(f);
+  el.append(label);
+  for (const b of badges) {
+    const bd = document.createElement('span');
+    bd.className = 'badge';
+    bd.textContent = b;
+    el.append(bd);
+  }
+  el.dataset.id = f.id;
+  el.addEventListener('mouseenter', (e) => { focus(f.id); showTip(e, f.path); });
+  el.addEventListener('mousemove', moveTip);
+  el.addEventListener('mouseleave', () => { if (pinnedPath === null) blur(); hideTip(); });
+  el.addEventListener('click', (e) => { e.stopPropagation(); pinnedPath = pinnedPath === f.path ? null : f.path; render(); });
+  chips.set(f.id, el);
+  return el;
+}
+
+function render() {
+  chips = new Map();
+  const files = data.files;
+  const byId = (id) => files[id];
+  const hideAsset = !$('t-assets').checked;
+  const expunge = !$('t-surfaces').checked;
+  const visible = (f) => !(hideAsset && f.kind !== 'code') && !(expunge && f.role.kind === 'surface') && !hiddenBlocks.has(blockOf(f));
+  const rowList = expunge ? ROWS.slice(1) : ROWS;
+
+  // The composition-root bar, the diagram's Application Runtime strip.
+  const rootBar = $('root-bar');
+  rootBar.replaceChildren();
+  rootBar.style.display = hiddenBlocks.has('@root') ? 'none' : '';
+  const rootInner = document.createElement('div');
+  rootInner.className = 'root-inner';
+  const rootTitle = document.createElement('span');
+  rootTitle.className = 'bar-title';
+  rootTitle.textContent = 'src/' + data.options.compositionRoot;
+  rootInner.append(rootTitle);
+  for (const f of files.filter((f) => place(f).area === 'root' && visible(f)).sort((a, b) => a.path.localeCompare(b.path))) rootInner.append(makeChip(f));
+  rootInner.append(hideBtn('@root'));
+  rootBar.append(rootInner);
+
+  // Non-domain roots render to the left of the domains, past the faint separator.
+  const coreBox = $('core-box');
+  const coreFiles = files.filter((f) => place(f).area === 'core' && visible(f));
+  coreBox.hidden = coreFiles.length === 0;
+  coreBox.replaceChildren('src/core ', hideBtn('@core'));
+  for (const f of coreFiles.sort((a, b) => a.path.localeCompare(b.path))) coreBox.append(makeChip(f));
+  $('nondomains').hidden = coreBox.hidden;
+
+  // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
+  const domains = new Map();
+  for (const f of files) {
+    const p = place(f);
+    if (p.area !== 'domain' || !visible(f)) continue;
+    if (!domains.has(p.domain)) domains.set(p.domain, new Map());
+    const subsOf = domains.get(p.domain);
+    if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
+    const units = subsOf.get(p.sub);
+    if (!units.has(p.unit)) units.set(p.unit, new Map());
+    const rows = units.get(p.unit);
+    if (!rows.has(p.row)) rows.set(p.row, []);
+    rows.get(p.row).push(f);
+  }
+
+  const domainsEl = $('domains');
+  domainsEl.replaceChildren();
+  // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows).
+  domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto)`;
+  const dotFirst = (a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b));
+  for (const [name, subsOf] of [...domains.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const box = document.createElement('section');
+    box.className = 'domain';
+    const h = document.createElement('h2');
+    h.textContent = name;
+    h.append(hideBtn(name));
+    box.append(h);
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    // Flatten the (subdomain, unit) tree into ordered sub-columns, remembering each group's span for its header.
+    const subs = [...subsOf.keys()].sort(dotFirst);
+    const columns = [];
+    for (const sub of subs) {
+      const units = [...subsOf.get(sub).keys()].sort(dotFirst);
+      columns.push(...units.map((unit) => ({ sub, unit, rows: subsOf.get(sub).get(unit) })));
+    }
+    grid.style.gridTemplateColumns = `14px repeat(${columns.length}, minmax(86px, max-content))`;
+    let ci = 2;
+    for (const sub of subs) {
+      const span = [...subsOf.get(sub).keys()].length;
+      const group = document.createElement('div');
+      group.className = 'grouphead';
+      group.textContent = sub === '' ? '·' : sub + ' /';
+      group.style.gridColumn = `${ci} / span ${span}`;
+      group.style.gridRow = '1';
+      grid.append(group);
+      ci += span;
+    }
+    columns.forEach((col, i) => {
+      const head = document.createElement('div');
+      head.className = 'colhead';
+      head.textContent = col.unit === '' ? '·' : col.unit;
+      head.style.gridColumn = String(i + 2);
+      head.style.gridRow = '2';
+      grid.append(head);
+    });
+    rowList.forEach((row, ri) => {
+      const rowHasFiles = columns.some((col) => col.rows.has(row));
+      const rail = document.createElement('div');
+      rail.className = 'rail';
+      rail.textContent = rowHasFiles ? ROW_LABEL[row] : '';
+      rail.style.gridColumn = '1';
+      rail.style.gridRow = String(ri + 3);
+      grid.append(rail);
+      columns.forEach((col, i) => {
+        const cell = document.createElement('div');
+        cell.className = 'cell ' + row;
+        cell.style.gridColumn = String(i + 2);
+        cell.style.gridRow = String(ri + 3);
+        for (const f of (col.rows.get(row) ?? []).sort((a, b) => a.path.localeCompare(b.path))) cell.append(makeChip(f));
+        grid.append(cell);
+      });
+    });
+    box.append(grid);
+    domainsEl.append(box);
+  }
+
+  drawn = flowEdges(expunge);
+  renderBlockBar(domains);
+  renderIssues();
+  requestAnimationFrame(() => { drawEdges(); applyPin(); });
+}
+
+// The drawn dependency flow. With surfaces expunged, an edge into a surface expands through every surface hop to the real carriers; each synthetic edge keeps the consumer's original specifier, records the hop chain, and inherits the worst verdict found along it, so indirection cannot hide a red edge.
+// The expansion is per consumed symbol-blind: a barrel import draws flow to everything the barrel republishes.
+// The issues drawer stays on the raw edges, so surface-level findings survive the expungement.
+function flowEdges(expunge) {
+  if (!expunge) return data.edges;
+  const isSurf = (id) => id != null && data.files[id].role.kind === 'surface';
+  const out = new Map();
+  for (const e of data.edges) {
+    if (!out.has(e.from)) out.set(e.from, []);
+    out.get(e.from).push(e);
+  }
+  const rank = (t) => (t === 'invariant' ? 2 : t === 'smell' ? 1 : 0);
+  const acc = new Map();
+  const push = (edge) => {
+    const key = `${edge.from}>${edge.to}>${edge.typeOnly}`;
+    const prev = acc.get(key);
+    if (!prev) acc.set(key, edge);
+    else if (rank(edge.tier) > rank(prev.tier)) { prev.tier = edge.tier; prev.verdict = edge.verdict; prev.via = edge.via; }
+  };
+  for (const e of data.edges) {
+    if (e.to == null || isSurf(e.from)) continue;
+    if (!isSurf(e.to)) { push({ ...e }); continue; }
+    const seen = new Set([e.from]);
+    const stack = [[e.to, e.typeOnly, e.tier, e.verdict]];
+    while (stack.length) {
+      const [sid, typeOnly, tier, verdict] = stack.pop();
+      if (seen.has(sid)) continue;
+      seen.add(sid);
+      for (const s of out.get(sid) ?? []) {
+        if (s.to == null) continue;
+        const t2 = typeOnly || s.typeOnly;
+        const worse = rank(s.tier) > rank(tier);
+        const tier2 = worse ? s.tier : tier, verdict2 = worse ? s.verdict : verdict;
+        if (isSurf(s.to)) stack.push([s.to, t2, tier2, verdict2]);
+        else push({ from: e.from, to: s.to, spec: e.spec, kind: e.kind, typeOnly: t2, verdict: verdict2, tier: tier2, via: [...seen].slice(1) });
+      }
+    }
+  }
+  return [...acc.values()];
+}
+
+// The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
+function renderBlockBar(domains) {
+  const bar = $('bottombar');
+  bar.replaceChildren();
+  const label = document.createElement('span');
+  label.className = 'bar-label';
+  label.textContent = 'blocks:';
+  bar.append(label);
+  const blocks = [['@root', 'src/' + data.options.compositionRoot]];
+  if (data.files.some((f) => place(f).area === 'core')) blocks.push(['@core', 'src/core']);
+  const domainNames = [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith('@')))].sort();
+  for (const d of domainNames) blocks.push([d, d]);
+  const keys = blocks.map(([k]) => k);
+  const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
+  const allLabel = document.createElement('label');
+  const allCb = document.createElement('input');
+  allCb.type = 'checkbox';
+  allCb.checked = shown === keys.length;
+  allCb.indeterminate = shown > 0 && shown < keys.length;
+  allCb.addEventListener('change', () => {
+    for (const k of keys) hiddenBlocks[allCb.checked ? 'delete' : 'add'](k);
+    saveHidden();
+    render();
+  });
+  allLabel.append(allCb, 'all');
+  bar.append(allLabel);
+  for (const [key, text] of blocks) {
+    const l = document.createElement('label');
+    l.classList.toggle('off', hiddenBlocks.has(key));
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !hiddenBlocks.has(key);
+    cb.addEventListener('change', () => {
+      hiddenBlocks[cb.checked ? 'delete' : 'add'](key);
+      saveHidden();
+      render();
+    });
+    l.append(cb, text);
+    bar.append(l);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Edges.
+
+function edgeClass(e) {
+  if (e.tier === 'invariant') return 'violation';
+  if (e.tier === 'smell') return 'smell';
+  if (e.typeOnly) return 'type';
+  return 'ok';
+}
+
+function edgeVisible(e) {
+  if (e.to == null) return false;
+  if (!chips.has(e.from) || !chips.has(e.to)) return false;
+  const cls = edgeClass(e);
+  if (cls === 'ok' && !$('t-ok').checked) return false;
+  if (cls === 'type' && !$('t-type').checked) return false;
+  return true;
+}
+
+function anchor(rect, side) {
+  if (side === 'l') return [rect.x, rect.y + rect.h / 2];
+  if (side === 'r') return [rect.x + rect.w, rect.y + rect.h / 2];
+  if (side === 't') return [rect.x + rect.w / 2, rect.y];
+  return [rect.x + rect.w / 2, rect.y + rect.h];
+}
+
+// How an edge anchors per ELDA: a reference inside one subdomain column, or one touching the composition root, flows vertically (out the bottom, in at the top); a reference crossing (sub)domains or touching a non-domain block travels laterally through the sides; same-cell references arc beside their cell, and anything unclassified keeps the geometric default.
+function edgeMode(e) {
+  const pf = place(data.files[e.from]), pt = place(data.files[e.to]);
+  if (pf.area === 'root' || pt.area === 'root') return 'v';
+  if (pf.area === 'domain' && pt.area === 'domain' && pf.domain === pt.domain && pf.sub === pt.sub && pf.unit === pt.unit) {
+    return pf.row === pt.row ? 'loop' : 'v';
+  }
+  if ((pf.area === 'domain' || pf.area === 'core') && (pt.area === 'domain' || pt.area === 'core')) return 'h';
+  return 'auto';
+}
+
+function drawEdges() {
+  const wrapRect = wrap.getBoundingClientRect();
+  svg.setAttribute('width', wrap.scrollWidth);
+  svg.setAttribute('height', wrap.scrollHeight);
+  svg.replaceChildren();
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = ['ok', 'type', 'smell', 'violation', 'hi-in', 'hi-out'].map((c) => {
+    const color = { ok: 'var(--ok)', type: 'var(--type)', smell: 'var(--smell)', violation: 'var(--bad)', 'hi-in': 'var(--hi-in)', 'hi-out': 'var(--hi-out)' }[c];
+    return `<marker id="m-${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="${color}"/></marker>`;
+  }).join('');
+  svg.append(defs);
+
+  const rectOf = rectFor(wrapRect);
+  stickyPaths = [];
+  drawn.forEach((e, i) => {
+    if (!edgeVisible(e)) return;
+    const d = edgePath(e, i, rectOf);
+    if (!d) return;
+    const cls = edgeClass(e);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('class', 'edge ' + cls);
+    path.setAttribute('marker-end', `url(#m-${cls})`);
+    path.dataset.from = e.from;
+    path.dataset.to = e.to;
+    svg.append(path);
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hit.setAttribute('d', d);
+    hit.setAttribute('class', 'hit');
+    hit.addEventListener('mouseenter', (ev) => showTip(ev, edgeTip(e)));
+    hit.addEventListener('mousemove', moveTip);
+    hit.addEventListener('mouseleave', hideTip);
+    svg.append(hit);
+    // Only edges touching the viewport-sticky root chips move on scroll; remember them so scrolling rewrites their geometry in place.
+    if (isRootFile(e.from) || isRootFile(e.to)) stickyPaths.push({ e, i, path, hit });
+  });
+}
+
+const isRootFile = (id) => place(data.files[id]).area === 'root';
+const rectFor = (wrapRect) => (id) => {
+  const r = chips.get(id).getBoundingClientRect();
+  return { x: r.left - wrapRect.left, y: r.top - wrapRect.top, w: r.width, h: r.height };
+};
+
+// One edge's bezier, or null for a self-edge; shared by the full rebuild and the on-scroll geometry updates.
+function edgePath(e, i, rectOf) {
+  if (e.from === e.to) return null;
+  const S = rectOf(e.from), T = rectOf(e.to);
+  const dx = (T.x + T.w / 2) - (S.x + S.w / 2), dy = (T.y + T.h / 2) - (S.y + S.h / 2);
+  const jitter = ((i % 5) - 2) * 4;
+  const mode = edgeMode(e);
+  if (mode === 'loop' || (mode === 'auto' && Math.abs(dx) < 40 && Math.abs(dy) < 30)) {
+    const [x1, y1] = anchor(S, 'r'), [x2, y2] = anchor(T, 'r');
+    const off = 34 + jitter;
+    return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
+  }
+  if (mode === 'v') {
+    const [x1, y1] = anchor(S, 'b'), [x2, y2] = anchor(T, 't');
+    const off = Math.max(22, Math.min(Math.abs(y2 - y1) / 2, 110));
+    return `M${x1} ${y1} C${x1 + jitter} ${y1 + off}, ${x2 + jitter} ${y2 - off}, ${x2} ${y2}`;
+  }
+  if (mode === 'h' && Math.abs(dx) < 40) {
+    const [x1, y1] = anchor(S, 'r'), [x2, y2] = anchor(T, 'r');
+    const off = 46 + jitter;
+    return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
+  }
+  if (mode === 'h' || Math.abs(dx) > Math.abs(dy)) {
+    const [x1, y1] = anchor(S, dx > 0 ? 'r' : 'l'), [x2, y2] = anchor(T, dx > 0 ? 'l' : 'r');
+    const off = Math.max(24, Math.min(Math.abs(x2 - x1) / 2, 110)) * (dx > 0 ? 1 : -1);
+    return `M${x1} ${y1} C${x1 + off} ${y1 + jitter}, ${x2 - off} ${y2 + jitter}, ${x2} ${y2}`;
+  }
+  const [x1, y1] = anchor(S, dy > 0 ? 'b' : 't'), [x2, y2] = anchor(T, dy > 0 ? 't' : 'b');
+  const off = Math.min(Math.abs(y2 - y1) / 2, 110) * (dy > 0 ? 1 : -1);
+  return `M${x1} ${y1} C${x1 + jitter} ${y1 + off}, ${x2 + jitter} ${y2 - off}, ${x2} ${y2}`;
+}
+
+// The scroll-time pass: rewrite the sticky-connected paths' geometry in place, touching no other DOM.
+function updateStickyEdges() {
+  if (!stickyPaths.length) return;
+  const rectOf = rectFor(wrap.getBoundingClientRect());
+  for (const s of stickyPaths) {
+    const d = edgePath(s.e, s.i, rectOf);
+    if (!d) continue;
+    s.path.setAttribute('d', d);
+    s.hit.setAttribute('d', d);
+  }
+}
+
+function edgeTip(e) {
+  const from = data.files[e.from].path;
+  let head = `${from}\n  → ${e.spec}${e.typeOnly ? '  (type-only)' : ''}${e.kind === 'dynamic' ? '  (dynamic)' : ''}${e.kind === 'reexport' ? '  (re-export)' : ''}${e.kind === 'side-effect' ? '  (side-effect)' : ''}`;
+  if (e.via && e.via.length) head += '\n  via ' + e.via.map((id) => data.files[id].path).join('\n      ');
+  if (e.to != null) head += `\n  = ${data.files[e.to].path}`;
+  return e.verdict ? head + '\n\n' + e.verdict : head;
+}
+
+// ---------------------------------------------------------------------------
+// Focus: hovering or pinning a chip raises its edges and its neighbors.
+
+function focus(id) {
+  svg.classList.add('focused');
+  const related = new Map();
+  for (const p of svg.querySelectorAll('path.edge')) {
+    const out = Number(p.dataset.from) === id, inc = Number(p.dataset.to) === id;
+    p.classList.toggle('hi-out', out);
+    p.classList.toggle('hi-in', inc);
+    if (out) { p.setAttribute('marker-end', 'url(#m-hi-out)'); related.set(Number(p.dataset.to), 'rel-out'); }
+    else if (inc) { p.setAttribute('marker-end', 'url(#m-hi-in)'); related.set(Number(p.dataset.from), 'rel-in'); }
+    else p.setAttribute('marker-end', `url(#m-${[...p.classList].find((c) => c !== 'edge' && !c.startsWith('hi-'))})`);
+  }
+  for (const [cid, el] of chips) {
+    el.classList.toggle('rel-out', related.get(cid) === 'rel-out');
+    el.classList.toggle('rel-in', related.get(cid) === 'rel-in');
+    el.classList.toggle('dim', cid !== id && !related.has(cid));
+  }
+}
+
+function blur() {
+  svg.classList.remove('focused');
+  for (const p of svg.querySelectorAll('path.edge')) {
+    p.classList.remove('hi-out', 'hi-in');
+    p.setAttribute('marker-end', `url(#m-${[...p.classList].find((c) => c !== 'edge')})`);
+  }
+  for (const el of chips.values()) el.classList.remove('dim', 'rel-out', 'rel-in', 'pinned');
+}
+
+function applyPin() {
+  if (pinnedPath === null) { blur(); return; }
+  const f = data.files.find((f) => f.path === pinnedPath);
+  if (!f || !chips.has(f.id)) { pinnedPath = null; blur(); return; }
+  focus(f.id);
+  chips.get(f.id).classList.add('pinned');
+}
+
+document.body.addEventListener('click', () => { if (!suppressClick && pinnedPath !== null) { pinnedPath = null; applyPin(); } });
+
+// ---------------------------------------------------------------------------
+// Grab panning: dragging the board scrolls the page on both axes, with momentum on release.
+// Interactive elements keep their own pointer behavior, and a drag suppresses the click that would otherwise clear the pin.
+
+const scroller = document.scrollingElement;
+let pan = null, coast = 0, suppressClick = false;
+
+document.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.target.closest('.chip, button, input, label, a, header, #issues, #bottombar')) return;
+  cancelAnimationFrame(coast);
+  pan = { x: e.clientX, y: e.clientY, vx: 0, vy: 0, t: performance.now(), moved: false };
+});
+addEventListener('pointermove', (e) => {
+  if (!pan) return;
+  const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+  if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+  if (!pan.moved) { pan.moved = true; document.body.classList.add('panning'); }
+  const now = performance.now(), dt = Math.max(now - pan.t, 1);
+  pan.vx = 0.75 * (dx / dt * 16) + 0.25 * pan.vx;
+  pan.vy = 0.75 * (dy / dt * 16) + 0.25 * pan.vy;
+  scroller.scrollLeft -= dx;
+  scroller.scrollTop -= dy;
+  pan.x = e.clientX; pan.y = e.clientY; pan.t = now;
+});
+addEventListener('pointerup', () => {
+  if (!pan) return;
+  const { moved } = pan;
+  let { vx, vy } = pan;
+  pan = null;
+  document.body.classList.remove('panning');
+  if (!moved) return;
+  suppressClick = true;
+  setTimeout(() => { suppressClick = false; }, 0);
+  const step = () => {
+    vx *= 0.92; vy *= 0.92;
+    if (Math.abs(vx) < 0.4 && Math.abs(vy) < 0.4) return;
+    scroller.scrollLeft -= vx;
+    scroller.scrollTop -= vy;
+    coast = requestAnimationFrame(step);
+  };
+  coast = requestAnimationFrame(step);
+});
+addEventListener('wheel', () => cancelAnimationFrame(coast), { passive: true });
+
+// ---------------------------------------------------------------------------
+// Issues drawer: every verdict edge, unresolved specifiers, and files the classifier could not place.
+
+function renderIssues() {
+  const el = $('issues');
+  el.replaceChildren();
+  const section = (title, items, build) => {
+    if (!items.length) return;
+    const h = document.createElement('h3');
+    h.textContent = `${title} (${items.length})`;
+    el.append(h);
+    for (const it of items) el.append(build(it));
+  };
+  const verdictItem = (e) => {
+    const div = document.createElement('div');
+    div.className = 'item ' + (e.tier === 'invariant' ? 'violation' : 'smell');
+    div.innerHTML = `<div>${data.files[e.from].path} → <b>${e.spec}</b></div><div class="msg"></div>`;
+    div.querySelector('.msg').textContent = e.verdict;
+    div.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      pinnedPath = data.files[e.from].path;
+      applyPin();
+      chips.get(e.from)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    });
+    return div;
+  };
+  section('Violations', data.edges.filter((e) => e.tier === 'invariant'), verdictItem);
+  section('Inadvisable (graded smells)', data.edges.filter((e) => e.tier === 'smell'), verdictItem);
+  section('Unresolved specifiers', data.edges.filter((e) => e.to == null), (e) => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = `${data.files[e.from].path} → ${e.spec}`;
+    return div;
+  });
+  section('Unclassified files', data.files.filter((f) => place(f).area === 'other'), (f) => {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = f.path;
+    return div;
+  });
+  const bad = data.edges.filter((e) => e.tier === 'invariant').length;
+  const smell = data.edges.filter((e) => e.tier === 'smell').length;
+  $('issue-count').textContent = `${bad + smell}`;
+  $('counts').innerHTML = `${data.files.length} files · ${data.edges.length} edges · <b class="${bad ? 'bad' : ''}">${bad} violations</b> · ${smell} inadvisable`;
+}
+
+$('issues-btn').addEventListener('click', (e) => { e.stopPropagation(); $('issues').classList.toggle('open'); });
+$('bottombar').addEventListener('click', (e) => e.stopPropagation());
+
+// ---------------------------------------------------------------------------
+// Tooltip.
+
+function showTip(ev, text) { tooltip.textContent = text; tooltip.style.display = 'block'; moveTip(ev); }
+function moveTip(ev) {
+  const pad = 12;
+  tooltip.style.left = Math.min(ev.clientX + pad, innerWidth - tooltip.offsetWidth - pad) + 'px';
+  tooltip.style.top = Math.min(ev.clientY + pad, innerHeight - tooltip.offsetHeight - pad) + 'px';
+}
+function hideTip() { tooltip.style.display = 'none'; }
+
+// ---------------------------------------------------------------------------
+// Boot, toggles, live reload.
+
+for (const id of ['t-ok', 't-type', 't-assets', 't-surfaces']) $(id).addEventListener('change', render);
+addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz = setTimeout(() => { drawEdges(); applyPin(); }, 120); });
+
+// The composition-root chips are viewport-sticky, so horizontal scrolling moves them relative to the board; re-aim their arrows once per frame, in place.
+let scrollRaf = 0;
+addEventListener('scroll', () => {
+  if (scrollRaf) return;
+  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; updateStickyEdges(); });
+}, { passive: true });
+
+async function load() {
+  data = INLINE ?? await (await fetch('/data.json')).json();
+  $('app-name').textContent = data.app;
+  document.title = `ELDA · ${data.app}`;
+  loadHidden();
+  render();
+}
+
+if (!INLINE) {
+  const es = new EventSource('/events');
+  es.onopen = () => $('live').classList.add('on');
+  es.onerror = () => $('live').classList.remove('on');
+  es.onmessage = load;
+}
+load();
+</script>
+</body>
+</html>

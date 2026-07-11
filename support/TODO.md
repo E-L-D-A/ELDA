@@ -13,11 +13,14 @@ A whole-project pass over the resolved module graph, complementing the per-file 
   whole-graph property, so until this pass exists the audit runs as a scheduled review item
   (META.3), kept feasible by the by-reference rule making every cycle discoverable through
   references. Trigger to build: the first hot-loop or synchronous re-entry incident in an ELDA
-  codebase, or the first cross-domain reference cycle surfacing in review.
+  codebase, or the first cross-domain reference cycle surfacing in review. The substrate
+  exists: `elda-viz` ([js/visualize.js](./js/visualize.js)) already builds the whole-project
+  resolved reference graph with the shared classification on every node, so the audit reduces to
+  an SCC pass over its cross-domain edges plus the settling-element check per cycle.
 
 - **Declared-versus-emergent boundary comparison (the Signal register's "a domain that has yet to
   split").** Cluster each domain's same-layer value-import graph into connected components and
-  compare against the declared units and slices; report divergence as a review signal - "the tree
+  compare against the declared units and subdomains; report divergence as a review signal - "the tree
   declares one concern here, the imports draw four." This is the general form of an
   under-decomposition detector: it gates nothing (Rule shape bans positive structural mandates)
   and feeds the governed grade's ontology reviews with evidence. Trigger to build: the first
@@ -26,7 +29,7 @@ A whole-project pass over the resolved module graph, complementing the per-file 
 ## Per-file rule refinements (deferred)
 
 - **`no-deep-side-effects` unit semantics.** The rule still reads "same directory = same unit"
-  while the coupling rules read stem clusters; a side-effect import crossing stems inside one
+  while the coupling rules read shared names; a side-effect import crossing unit names inside one
   directory currently passes. Align it with `unitOf` when it next gets touched.
 - **Non-literal dynamic imports.** `import(expr)` with a template or computed specifier is
   invisible to every import-reading rule; statically undecidable, so it stays with review. Noted

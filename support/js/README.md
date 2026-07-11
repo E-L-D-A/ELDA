@@ -19,6 +19,16 @@ Each rule cites the ELDA constraint it enforces by its grouped ID (see [../../RE
 | `no-deep-side-effects` | SURFACE.5 | A side-effect-only import reaching past its unit inside a domain; co-located unit assembly and root-level effect composition stay free. |
 | `vocab-gate` | OWNER.2, ROOT.2 | Literal-keyed shared-namespace writes (`setAttribute`, `setItem`, `setProperty`, `dataset` assignments) at the composition root; route them through the owner's binding surface. |
 
+## Dependency diagram (`elda-viz`)
+
+The package also ships a CLI that renders an app's real dependency graph as the ELDA-Layers diagram: each domain a box with its subdomain columns, every file sorted into its layer x subdomain cell, the composition root as the top strip, and an arrow per reference. The rules and the diagram read one shared module (`model.js`) for path classification and reference verdicts, so every arrow carries the linter's own judgment: a violation draws solid red, an OWNER.5 mounting draws dashed red (the diagrams' "inadvisable" arrows), a type-only reference draws as a weak dash, and a legal dependency stays grey. An edge that looks wrong on the diagram while staying grey is the review signal for a rule that does not exist yet.
+
+```
+elda-viz [appDir] [--port N] [--out file.html] [--no-open]
+```
+
+`appDir` is the app workspace holding `src/` and defaults to the working directory; the tool reads `domainAlias` / `appAlias` / `compositionRoot` from the app's `.oxlintrc.json` when it configures `elda/imports`. The default mode serves a live page at `localhost:5813`, rescanning and re-rendering on every change under `src/`; `--out` writes a self-contained HTML snapshot instead. Hovering a file traces its edges (blue outgoing, green incoming), clicking pins the trace, and the issues drawer lists every verdict, every unresolved specifier, and every file the classifier could not place.
+
 ## Usage
 
 Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js`); they run in your existing pass, alongside your own rules:

@@ -1,14 +1,20 @@
 {
   "name": "@elda/oxlint-plugin",
   "version": "0.1.0",
-  "description": "ELDA architecture rules as an oxlint / ESLint-v9-compatible plugin: layer boundaries, cross-domain surface discipline, immutable publication, the inner-layer async/outcome rule, the integration-surface vocabulary gate, and ambient-declaration ownership.",
+  "description": "ELDA architecture rules as an oxlint / ESLint-v9-compatible plugin: layer boundaries, cross-domain surface discipline, immutable publication, the inner-layer async/outcome rule, the integration-surface vocabulary gate, and ambient-declaration ownership. Ships elda-viz, a CLI that draws an app's dependency graph as the ELDA-Layers diagram with the same verdicts on every edge.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js"
   },
+  "bin": {
+    "elda-viz": "./visualize.js"
+  },
   "files": [
     "index.js",
+    "model.js",
+    "visualize.js",
+    "viewer.html",
     "adopting.json",
     "aligned.json",
     "justified.json",
@@ -21,5 +27,8 @@
     "elda",
     "architecture"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "oxc-parser": "^0.139.0"
+  }
 }
