@@ -1,22 +1,20 @@
-// @elda/oxlint-plugin - ELDA architecture rules as an oxlint plugin (ESLint-v9-compatible API,
-// so the same plugin runs under ESLint too). Add to a project's existing config:
+// @elda/oxlint-plugin - ELDA architecture rules as an oxlint plugin (ESLint-v9-compatible API, so the same plugin runs under ESLint too).
+// Add to a project's existing config:
 //
 //   { "jsPlugins": ["@elda/oxlint-plugin"],
 //     "rules": { "elda/imports": "warn", "elda/no-service-coupling": "warn",
 //                "elda/no-mutable-surface": "warn", "elda/no-async-inner": "warn",
 //                "elda/vocab-gate": "warn", "elda/ambient-ownership": "warn" } }
 //
-// or extend a shipped grade preset (see README): `adopting` reports everything, `aligned` gates
-// the structural invariants, `justified` gates the graded smells too.
-// Rules cite the ELDA constraint they enforce by its grouped ID (ELDA/README.md, "Constraints").
-// The conventions are baked in (layer names as file leaves or suffixes, domains/ as the domain
-// root, nested slices, .d.ts ownership); the legacy layer-directory layout is recognized too, so a
-// migrating codebase lints correctly, and `no-layer-branches` flags it. Only `domainAlias` /
-// `appAlias` / `compositionRoot` vary per project, defaulting to the common `#` / `@` / `routes`.
+// or extend a shipped grade preset - adopting, aligned, or justified (see README).
+// Each rule cites the ELDA constraint it enforces by its grouped ID (ELDA/README.md, "Constraints").
+// The conventions are baked in: layer membership rides file names, and a directory expresses a concern, which makes it a subdomain.
+// Only `domainAlias` / `appAlias` / `compositionRoot` vary per project, defaulting to `#` / `@` / `routes`.
 
+// The layer vocabulary, in rank order; the rank map and the suffix test derive from it.
 const LAYERS = ['entities', 'use-cases', 'adapters', 'services'];
-const LAYER_RANK = { entities: 0, 'use-cases': 1, adapters: 2, services: 3 };
-const LAYER_SUFFIX_RE = /\.(entities|use-cases|adapters|services)$/;
+const LAYER_RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
+const LAYER_SUFFIX_RE = new RegExp(`\\.(${LAYERS.join('|')})$`);
 
 const norm = (p) => String(p ?? '').replace(/\\/g, '/');
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
@@ -30,44 +28,52 @@ function options(context) {
   };
 }
 
-const stripExt = (name) => name.replace(/\.d\.ts$/, '').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less)$/, '');
+// After the real extension, a file name may carry markers the classification sees through: runtime-context markers (`auth.services.server.ts` is server-only) and build-convention compounds (`grid-vars.services.css.ts` is a vanilla-extract module).
+// A marker is a coloring, orthogonal to the layer axis.
+// This list is the marker vocabulary.
+const MARKERS = ['server', 'client', 'css'];
+const MARKER_RE = new RegExp(`\\.(${MARKERS.join('|')})$`);
+const stripExt = (name) => {
+  let n = name.replace(/\.d\.ts$/, '').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less)$/, '');
+  while (MARKER_RE.test(n)) n = n.replace(MARKER_RE, '');
+  return n;
+};
 
-// Classify a path inside domains/ into the slice chain and the layer classification.
-// Directories express concerns: a plain-named directory is a nested slice (SURFACE.7), a
-// layer-suffixed directory (`back-nav.adapters/`) is a unit whose contents classify by the suffix,
-// and a bare layer-named directory is the legacy branch layout (recognized here, flagged by
-// no-layer-branches per LAYER.7). Layer membership otherwise rides the leaf file name: the bare
-// reserved names, or a `<stem>.<layer>` suffix. A trailing plain name is a surface: `index` the
-// consumable barrel, `services` (a layer name, caught above) the composition surface, any other
-// name a named surface.
+// Classify a path inside domains/ into its subdomain chain and its layer.
+// Directories express concerns: a plain-named directory is a nested subdomain (SURFACE.7); a layer-suffixed directory (`back-nav.adapters/`) and a bare layer-named directory are the two legacy layouts (recognized here, flagged by no-layer-branches per LAYER.7).
+// Layer membership otherwise rides the file name: the bare reserved names, or a `<name>.<layer>` suffix.
+// A trailing plain name is a surface: `index` the consumable barrel, `services` (a layer name, caught above) the runtime-composition surface, any other name a named surface.
 function classify(segs) {
   const chain = [];
   let layer = null;
   let via = null;
   const sub = [];
   let surface = null;
+  let name = null;
   let branchDir = false;
   for (let i = 0; i < segs.length; i++) {
     const last = i === segs.length - 1;
-    const name = last ? stripExt(segs[i]) : segs[i];
-    if (layer) { sub.push(name); continue; }
-    if (LAYERS.includes(name)) {
-      layer = name;
+    const seg = last ? stripExt(segs[i]) : segs[i];
+    if (layer) { sub.push(seg); continue; }
+    if (LAYERS.includes(seg)) {
+      layer = seg;
       via = last ? 'leaf' : 'branch';
       if (!last) branchDir = true;
       continue;
     }
-    const sfx = name.match(LAYER_SUFFIX_RE);
+    const sfx = seg.match(LAYER_SUFFIX_RE);
     if (sfx) {
       layer = sfx[1];
       via = last ? 'suffix' : 'unit-dir';
-      if (!last) sub.push(name);
+      // A suffixed file's own name states its part; files sharing a name are one unit (SURFACE.5).
+      if (last) name = seg.slice(0, -sfx[0].length);
+      else sub.push(seg);
       continue;
     }
-    if (last) surface = name;
-    else chain.push(name);
+    if (last) surface = seg;
+    else chain.push(seg);
   }
-  return { chain, layer, via, sub, surface, branchDir, segs };
+  return { chain, layer, via, sub, surface, name, branchDir, segs };
 }
 
 // Where does the current file sit in the ELDA structure?
@@ -84,8 +90,8 @@ function fileRole(filename, compositionRoot) {
   return { kind: 'other' };
 }
 
-// Parse a `#/...` or `@/domains/...` import specifier, or null for anything else (bare packages,
-// `@/core`, ...). A single-segment specifier is the domain's consumable barrel.
+// Parse a `#/...` or `@/domains/...` import specifier, or null for anything else (bare packages, `@/core`, ...).
+// A single-segment specifier is the domain's consumable barrel.
 function parseSpec(spec, domainAlias, appAlias) {
   if (typeof spec !== 'string') return null;
   let rest = null;
@@ -97,8 +103,8 @@ function parseSpec(spec, domainAlias, appAlias) {
   return finishTarget(classify(segs));
 }
 
-// Resolve a relative import against the importing file's path, so the layer and boundary rules
-// apply to relative imports too. Returns null when it resolves outside domains/.
+// Resolve a relative import against the importing file's path, so the layer and boundary rules apply to relative imports too.
+// Returns null when it resolves outside domains/.
 function posixResolve(dir, spec) {
   const out = [];
   for (const p of (dir + '/' + spec).split('/')) {
@@ -120,15 +126,14 @@ function relativeTarget(filename, spec) {
 }
 
 function finishTarget(t) {
-  // A bare `#/x` names x's consumable barrel, never a surface of nothing.
+  // A bare `#/x` is x's consumable barrel: with no chain, the surface name is the domain itself, so read it as chain `x`, surface `index`.
   if (t.chain.length === 0 && t.surface && !t.layer) return { ...t, chain: [t.surface], surface: 'index' };
   return t;
 }
 
-// Pure-data assets (images, fonts, media) carry no behaviour; importing one yields a value. That
-// is vocabulary, classified as `entities` (SURFACE.6): importable from any layer inside the owning
-// domain's tree, surface-gated across boundaries. Stylesheets are deliberately NOT here - CSS is
-// code and classifies by its layer and unit like any module.
+// Pure-data assets (images, fonts, media) carry no behaviour; importing one yields a value.
+// That is vocabulary, classified as `entities` (SURFACE.6): importable from any layer inside the owning domain's tree, surface-gated across boundaries.
+// CSS is deliberately excluded: it is code, and classifies by its layer and unit like any module.
 const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)(\?.*)?$/i;
 
 function targetOf(filename, spec, domainAlias, appAlias) {
@@ -137,9 +142,7 @@ function targetOf(filename, spec, domainAlias, appAlias) {
   return t;
 }
 
-// Relationship between the importer's slice chain and the target's: the shared prefix decides
-// whether the reference stays inside one slice, descends into an owned child, climbs toward an
-// ancestor, or crosses to a peer at the divergence point.
+// Relationship between the importer's subdomain chain and the target's: the shared prefix decides whether the reference stays inside one subdomain, descends into an owned child, climbs toward an ancestor, or crosses to a peer at the divergence point.
 function rel(a, b) {
   let p = 0;
   while (p < a.length && p < b.length && a[p] === b[p]) p++;
@@ -149,25 +152,19 @@ function rel(a, b) {
   return { p, kind: 'peer' };
 }
 
-// A services target in surface form is the runtime-composition surface itself (`x/services` with
-// nothing after it), the thing a composer reaches; anything past it is internals.
+// A services target in surface form is the runtime-composition surface itself (`x/services` with nothing after it), the thing a composer reaches; anything past it is internals.
 const isServicesSurface = (t) => t.layer === 'services' && t.sub.length === 0;
 
 // elda/imports - the hard, decidable layer + boundary invariants (Tier 1):
 //   LAYER.1    an inner layer never imports an outer one (alias and relative paths alike);
 //   ROOT.6     pure core depends on nothing in any domain;
 //   ROOT.1     composition roots compose top-level domains through their surfaces only;
-//   ROOT.7     each domain composes its direct children only, and a slice never references its
-//              parent;
+//   ROOT.7     each domain composes its direct children only, and a subdomain never references its parent;
 //   SURFACE.2  a consumable surface carries use-cases and vocabulary, never services or adapters;
-//   SURFACE.3  a cross-boundary reference goes through a surface, never into a layer's internals,
-//              and a surface never re-bundles a peer or foreign domain's surface;
-//   SURFACE.7  a nested slice is internal to its parent: outside it, only the parent's published
-//              surfaces exist.
-// A trailing plain segment is ambiguous between a named surface of the chain and a nested slice's
-// barrel; the rule tries both readings and stays quiet if either is legal, so it never
-// false-positives on the ambiguity. The graded lateral smells are the separate warn-level rules
-// (no-service-coupling, no-adapter-coupling).
+//   SURFACE.3  a cross-boundary reference goes through a surface, never into a layer's internals, and a surface never re-bundles a peer or foreign domain's surface;
+//   SURFACE.7  a nested subdomain is internal to its parent: outside it, only the parent's published surfaces exist.
+// A trailing plain segment is ambiguous between a named surface of the chain and a nested subdomain's barrel; the rule tries both readings and stays quiet if either is legal, so it never false-positives on the ambiguity.
+// The graded lateral smells are the separate warn-level rules (no-service-coupling, no-adapter-coupling).
 const imports = {
   meta: {
     schema: [{
@@ -199,10 +196,8 @@ const imports = {
       const r = rel(role.chain, t.chain);
 
       if (role.kind === 'surface') {
-        // A surface curates its own slice and its owned children (SURFACE.7); republishing a peer
-        // or foreign domain re-bundles that domain's surface (SURFACE.3). A consumable surface
-        // carries use-cases and vocabulary only; services and adapters belong to the
-        // runtime-composition surface, which the `services` leaf realizes and may reference freely.
+        // A surface curates its own subdomain and its owned children (SURFACE.7); republishing a peer or foreign domain re-bundles that domain's surface (SURFACE.3).
+        // A consumable surface carries use-cases and vocabulary only; services and adapters belong to the runtime-composition surface, which the `services` file realizes and may reference freely.
         if (r.kind === 'peer' || r.kind === 'to-ancestor') {
           return `ELDA SURFACE.3: a domain's surface must not re-bundle a peer or foreign domain's surface (${domainAlias}/${t.chain.join('/')}); reference foreign vocabulary at the point of use, not by republishing it.`;
         }
@@ -232,14 +227,14 @@ const imports = {
         if (t.surface) return null;
         if (t.layer === 'services') {
           if (!isServicesSurface(t)) return `ELDA SURFACE.3: '${child}' is composed at its runtime-composition surface, never past it.`;
-          if (role.layer !== 'services') return `ELDA ROOT.7: composing the slice '${child}' is services work; ${role.layer} consumes it through its surface.`;
+          if (role.layer !== 'services') return `ELDA ROOT.7: composing the subdomain '${child}' is services work; ${role.layer} consumes it through its surface.`;
           return null;
         }
-        return `ELDA SURFACE.3: consume the slice '${child}' through its surface, never its ${t.layer} leaf.`;
+        return `ELDA SURFACE.3: consume the subdomain '${child}' through its surface, never its ${t.layer} files.`;
       }
 
       if (r.kind === 'to-ancestor') {
-        return `ELDA ROOT.7: a slice never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); shared content extracts into a sibling slice.`;
+        return `ELDA ROOT.7: a subdomain never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); shared content extracts into a sibling subdomain.`;
       }
 
       // r.kind === 'peer'
@@ -260,7 +255,7 @@ const imports = {
       if (!t) return;
       const verdictA = judge(t);
       if (verdictA === null) return;
-      // The slice-barrel reading of an ambiguous trailing plain segment.
+      // The subdomain-barrel reading of an ambiguous trailing plain segment.
       if (t.surface && t.surface !== 'index' && !t.layer) {
         const b = { ...t, chain: [...t.chain, t.surface], surface: 'index' };
         if (judge(b) === null) return;
@@ -277,35 +272,37 @@ const imports = {
   },
 };
 
-// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container. A directory
-// named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one
-// classification, and the tree stops encoding concerns at that node. Layer membership rides file
-// names (`entities.ts`, `<stem>.entities.ts`); directories express concerns (slices and units).
-// The analyzers still recognize the branch layout so a migrating codebase lints correctly; this
-// rule is the migration's fix-list.
+// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container.
+// A directory named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one classification, and the tree stops encoding concerns at that node.
+// A layer-SUFFIXED directory (`layouts.services/`) is the same bucket wearing a file's name: it pretends to be one part while hiding a branch underneath - an undeclared subdomain dodging subdomain discipline.
+// Layer membership rides file names (`entities.ts`, `<name>.entities.ts`); a directory expresses a concern, which makes it a subdomain.
+// The analyzers still recognize both legacy layouts so a migrating codebase lints correctly; this rule is the migration's fix-list.
 const noLayerBranches = {
   create(context) {
     const m = filenameOf(context).match(/\/domains\/(.+)$/);
     if (!m) return {};
     const segs = m[1].split('/').filter(Boolean);
-    const bucket = segs.slice(0, -1).find((s) => LAYERS.includes(s));
-    if (!bucket) return {};
-    return {
-      Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<stem>.${bucket}.ts\`) and directories express concerns.` }),
-    };
+    const dirs = segs.slice(0, -1);
+    const bucket = dirs.find((s) => LAYERS.includes(s));
+    if (bucket) {
+      return {
+        Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<name>.${bucket}.ts\`) and directories express concerns.` }),
+      };
+    }
+    const unitDir = dirs.find((s) => LAYER_SUFFIX_RE.test(s));
+    if (unitDir) {
+      return {
+        Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${unitDir}/' is a layer-suffixed directory - a branch wearing a file's name. One part's files share a name (\`back-nav.adapters.tsx\` + \`back-nav.adapters.css\`); a grouping directory is a subdomain (a plain name, layer-suffixed files inside).` }),
+      };
+    }
+    return {};
   },
 };
 
-// elda/no-service-coupling and elda/no-adapter-coupling - OWNER.5 as Tier-2 "inadvisable
-// dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between
-// two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
-// A service should not invoke a sibling service (compose them at the root via a named port, or lift
-// the shared behaviour into a use-case); an adapter should not reach a sibling adapter (the layer
-// above composes the two bindings, or they co-locate into one unit). For services the grading
-// extends across peers: a service unit mounting a peer's block at its runtime-composition surface
-// is OWNER.5's unified-composition case, exempted from the hard surface rule in elda/imports and
-// reported here instead. A domain composing its own slices is self-composition (ROOT.7) and is not
-// flagged. Warn-level - smells, not hard breaches - and separately togglable.
+// elda/no-service-coupling and elda/no-adapter-coupling - OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
+// A service should not invoke a sibling service (compose them at the root via a named port, or lift the shared behaviour into a use-case); an adapter should not reach a sibling adapter (the layer above composes the two bindings, or they co-locate into one unit).
+// For services the grading extends across peers: a service unit mounting a peer's block at its runtime-composition surface is OWNER.5's unified-composition case, exempted from the hard surface rule in elda/imports and reported here instead.
+// Warn-level - smells, not hard breaches - and separately togglable.
 function lateralCoupling(layer, remedy, crossSurface) {
   return {
     meta: {
@@ -325,18 +322,25 @@ function lateralCoupling(layer, remedy, crossSurface) {
       if (!m) return {};
       const role = classify(m[1].split('/').filter(Boolean));
       if (role.layer !== layer || role.chain.length === 0) return {};
-      // A unit is a directory (SURFACE.5): same directory means one unit and co-located imports
-      // are free. The unit label is the path of directories between the slice and the file.
+      // A unit is one concern-part (SURFACE.5, the spec's "Units"): the files sharing one name at a subdomain's root, or the contents of one legacy unit directory.
+      // Same name or same directory means one unit and co-located imports are free; the label is the file's own name, or the directory path.
       const unitOf = (c) => {
-        const dirs = c.via === 'branch' ? [c.layer, ...c.sub.slice(0, -1)] : c.via === 'unit-dir' ? c.sub.slice(0, -1) : [];
-        return dirs.join('/');
+        if (c.via === 'branch') return [c.layer, ...c.sub.slice(0, -1)].join('/');
+        if (c.via === 'unit-dir') return c.sub.slice(0, -1).join('/');
+        if (c.via === 'suffix') return c.name ?? '';
+        // A bare reserved-name file is the subdomain's own layer aggregate.
+        return '';
       };
+      // The subdomain's own composer is exempt from the in-subdomain cross-unit smell: the bare `services` file (and the legacy `services/index` barrel) realizes the runtime-composition surface, and composing owned parts re-owns nothing.
+      // Its peer mountings still grade below.
+      const isComposer = role.via === 'leaf'
+        || (role.via === 'branch' && role.sub.length === 1 && role.sub[0] === 'index');
       const importerUnit = unitOf(role);
       const flag = (node, spec) => {
         const t = targetOf(filename, spec, domainAlias, appAlias);
         if (!t || t.layer !== layer || t.asset) return;
         const r = rel(role.chain, t.chain);
-        if (r.kind === 'into-child') return; // Self-composition of an owned slice (ROOT.7).
+        if (r.kind === 'into-child') return; // Self-composition of an owned subdomain (ROOT.7).
         if (r.kind === 'to-ancestor') return; // The hard breach; elda/imports reports it.
         if (r.kind === 'peer') {
           if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {
@@ -344,13 +348,18 @@ function lateralCoupling(layer, remedy, crossSurface) {
           }
           return;
         }
+        if (isComposer) return; // Composition by the subdomain's own composer.
         const targetUnit = unitOf(t);
-        if (targetUnit === importerUnit) return; // Same directory means same unit.
-        context.report({ node, message: `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || '(slice root)'}' reaches a different ${layer} unit '${targetUnit || '(slice root)'}' in '${role.chain.join('/')}'; ${remedy}` });
+        if (targetUnit === importerUnit) return; // Same unit composing itself.
+        context.report({ node, message: `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || '(subdomain root)'}' reaches a different ${layer} unit '${targetUnit || '(subdomain root)'}' in '${role.chain.join('/')}'; ${remedy}` });
       };
+      // A type-only declaration is a vocabulary reference, deliberately unregulated; the lateral rules act on value edges.
+      // A re-export carries the same lateral edge an import does, so `export ... from` is visited too (`export *` is no-penetration's concern).
+      const isValue = (node) => node.importKind !== 'type' && node.exportKind !== 'type';
       return {
-        ImportDeclaration: (node) => node.source && flag(node, node.source.value),
+        ImportDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
         ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
+        ExportNamedDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
       };
     },
   };
@@ -359,13 +368,12 @@ function lateralCoupling(layer, remedy, crossSurface) {
 const noServiceCoupling = lateralCoupling('services', 'supply it as a named port from the composition root, or lift the shared logic into a use-case.', true);
 const noAdapterCoupling = lateralCoupling('adapters', 'let the layer above compose the two bindings, or co-locate them into one unit.');
 
-// elda/no-penetration - the `*` imports and exports that punch holes in module edges and let the
-// architecture leak through. A namespace import (`import * as ns`) consumes a surface opaquely -
-// every export looks used, so the unconsumed-export review signal (SURFACE.4) goes blind. A
-// re-export-all (`export *`) republishes whatever a module happens to expose, so the surface stops
-// being a deliberate named contract (SURFACE.1). Reference and re-export by name; the rare earned
-// case (a generated barrel, a namespace-only package) takes an inline ignore. Side-effect imports
-// are a separate concern - see no-deep-side-effects. Warn-level and separately togglable.
+// elda/no-penetration - the `*` imports and exports that punch holes in module edges and let the architecture leak through.
+// A namespace import (`import * as ns`) consumes a surface opaquely - every export looks used, so the unconsumed-export review signal (SURFACE.4) goes blind.
+// A re-export-all (`export *`) republishes whatever a module happens to expose, so the surface stops being a deliberate named contract (SURFACE.1).
+// Reference and re-export by name; the rare earned case (a generated barrel, a namespace-only package) takes an inline ignore.
+// Side-effect imports are a separate concern - see no-deep-side-effects.
+// Warn-level and separately togglable.
 const noPenetration = {
   create(context) {
     return {
@@ -381,13 +389,11 @@ const noPenetration = {
   },
 };
 
-// elda/no-deep-side-effects - SURFACE.5: a side-effect-only import (`import './x'`, no binding)
-// runs another module for effect with nothing named crossing the edge. Inside a unit that is fine -
-// a co-located stylesheet is part of the unit - and the composition root composes global effects
-// without restriction (ROOT.2). The smell is a side-effect import that reaches *past the unit* into
-// another module: a deep effect that co-location would make honest, or a named value would make
-// visible. External packages (a polyfill, a vendor stylesheet) are not a reach into the domain tree
-// and pass. Warn-level and separately togglable.
+// elda/no-deep-side-effects - SURFACE.5: a side-effect-only import (`import './x'`, no binding) runs another module for effect with nothing named crossing the edge.
+// Inside a unit that is fine - a co-located stylesheet is part of the unit - and the composition root composes global effects without restriction (ROOT.2).
+// The smell is a side-effect import that reaches *past the unit* into another module: a deep effect that co-location would make honest, or a named value would make visible.
+// External packages (a polyfill, a vendor stylesheet) are not a reach into the domain tree and pass.
+// Warn-level and separately togglable.
 const noDeepSideEffects = {
   meta: {
     schema: [{
@@ -422,9 +428,7 @@ const noDeepSideEffects = {
   },
 };
 
-// elda/no-async-inner - LAYER.4 and the Outcome model: async / await / try-catch stay out of the
-// inner layers (wrapped at adapters into channel-conforming values; outcomes are typed branch
-// values).
+// elda/no-async-inner - LAYER.4 and the Outcome model: async / await / try-catch stay out of the inner layers (wrapped at adapters into channel-conforming values; outcomes are typed branch values).
 const noAsyncInner = {
   create(context) {
     const m = filenameOf(context).match(/\/domains\/(.+)$/);
@@ -443,11 +447,9 @@ const noAsyncInner = {
   },
 };
 
-// elda/no-mutable-surface - CHANNEL.4: state crosses boundaries as published immutable values. A
-// module-level `export let` / `export var` (directly, or exporting a top-level `let` binding by
-// name) is a live mutable binding every importer shares by reference - shared state with none of a
-// channel's delivery semantics - so domain code never exposes one. Publish a constant, an accessor,
-// or a channel instead.
+// elda/no-mutable-surface - CHANNEL.4: state crosses boundaries as published immutable values.
+// A module-level `export let` / `export var` (directly, or exporting a top-level `let` binding by name) is a live mutable binding every importer shares by reference - shared state with none of a channel's delivery semantics - so domain code never exposes one.
+// Publish a constant, an accessor, or a channel instead.
 function patternNames(id, out) {
   if (!id) return;
   switch (id.type) {
@@ -488,8 +490,7 @@ const noMutableSurface = {
   },
 };
 
-// elda/vocab-gate - OWNER.2 / ROOT.2: shared-namespace writes with literal keys at the integration
-// surface (the composition root) introduce out-of-band vocabulary the owner should hold.
+// elda/vocab-gate - OWNER.2 / ROOT.2: shared-namespace writes with literal keys at the integration surface (the composition root) introduce out-of-band vocabulary the owner should hold.
 const vocabGate = {
   meta: {
     schema: [{
@@ -522,8 +523,8 @@ const vocabGate = {
   },
 };
 
-// elda/ambient-ownership - OWNER.2: ambient declarations are vocabulary, owned by a domain. A .d.ts
-// outside src/domains/ is an un-owned catch-all (the type-layer `shared/` column).
+// elda/ambient-ownership - OWNER.2: ambient declarations are vocabulary, owned by a domain.
+// A .d.ts outside src/domains/ is an un-owned catch-all (the type-layer `shared/` column).
 const ambientOwnership = {
   create(context) {
     const f = filenameOf(context);
@@ -550,14 +551,12 @@ const plugin = {
   },
 };
 
-// Presets, one per machine-holdable alignment state (ELDA/README.md, "Grades of alignment";
-// META.6). `adopting` is the migration posture: every rule reports and the fix-list stays visible.
-// `aligned` holds the aligned grade: the structural invariants gate as errors. `justified` holds
-// the justified grade: the graded smells gate too, so a deviation lands only as an inline
-// suppression carrying its justification. A preset supplies the gate; the grade is read off the
-// tree under it. ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends`
-// is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped
-// `<name>.json` by path instead (see README).
+// Presets, one per machine-holdable alignment state (ELDA/README.md, "Grades of alignment"; META.6).
+// `adopting` is the migration posture: every rule reports and the fix-list stays visible.
+// `aligned` holds the aligned grade: the structural invariants gate as errors.
+// `justified` holds the justified grade: the graded smells gate too, so a deviation lands only as an inline suppression carrying its justification.
+// A preset supplies the gate; the grade is read off the tree under it.
+// ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped `<name>.json` by path instead (see README).
 const INVARIANTS = ['imports', 'no-layer-branches', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
 const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-deep-side-effects', 'vocab-gate'];
 const gradePreset = (invariants, smells) => ({
