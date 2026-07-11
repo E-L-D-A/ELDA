@@ -4,6 +4,7 @@
   "rules": {
     "elda/imports": "error",
     "elda/no-layer-branches": "error",
+    "elda/no-diagonal-reach": "error",
     "elda/no-async-inner": "error",
     "elda/no-mutable-surface": "error",
     "elda/ambient-ownership": "error",

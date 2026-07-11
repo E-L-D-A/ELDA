@@ -10,6 +10,7 @@ Each rule cites the ELDA constraint it enforces by its grouped ID (see [../../RE
 |---|---|---|
 | `imports` | LAYER.1, SURFACE.2, SURFACE.3, SURFACE.7, ROOT.1, ROOT.6, ROOT.7 | An inner layer importing an outer one (aliased or relative); a peer reaching into another domain's layer instead of a surface; a reach into a nested subdomain from outside its parent; a subdomain referencing its parent; a parent reaching past its direct children or composing a child from an inner layer; a surface re-bundling a peer or foreign domain; a composition root reaching a layer's internals or a nested subdomain; core importing domain code. One case grades down: a peer *service* importing another domain's `services` surface itself is OWNER.5 mounting, reported by `no-service-coupling` instead. |
 | `no-layer-branches` | LAYER.7 | A layer-named directory (`entities/`, `use-cases/`, ...) - a horizontal bucket; and a layer-suffixed directory (`layouts.services/`) - the same bucket wearing a file's name, an undeclared subdomain dodging subdomain discipline. Layer membership rides file names, and a grouping directory is a subdomain. The analyzers still recognize both legacy layouts, so this rule is a migrating codebase's fix-list. |
+| `no-diagonal-reach` | SURFACE.5 | A value import landing in a different named unit's file at a lower rank than the importer's, inside one subdomain - a reach across both name and rank at once, an arrow no row of the diagram draws, and the shape a misnamed unit hides behind. Equal-rank crossings keep their own semantics (the use-case and entity rows cross freely; the outer rows are the OWNER.5 laterals); the bare layer files are the subdomain's shared base, readable from every unit; type-only imports are vocabulary references and pass; the bare `services` composer is exempt. Fix by renaming the target into the consuming unit, promoting it to the bare layer file, or crossing at equal rank. |
 | `no-async-inner` | LAYER.4 | `async` functions, `await`, `for await`, and `try`/`catch` inside `entities/` or `use-cases/`; those shapes are wrapped at Adapters into channel-conforming values. |
 | `no-mutable-surface` | CHANNEL.4 | `export let` / `export var` (directly, or exporting a top-level `let` by name) anywhere in domain code: a live mutable binding shared by reference is shared state, never published state. |
 | `ambient-ownership` | OWNER.2 | A `.d.ts` outside `src/domains/`: ambient declarations are vocabulary and co-locate with their owning domain. |
@@ -38,6 +39,8 @@ Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js
   "jsPlugins": ["@elda/oxlint-plugin"],
   "rules": {
     "elda/imports": "warn",
+    "elda/no-layer-branches": "warn",
+    "elda/no-diagonal-reach": "warn",
     "elda/no-async-inner": "warn",
     "elda/no-mutable-surface": "warn",
     "elda/ambient-ownership": "warn",
@@ -54,7 +57,7 @@ Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js
 
 The spec grades a project by which rule registers its gate holds ([README](../../README.md), "Grades of alignment"). The plugin ships a preset per machine-holdable state; the governed grade is operator practice on top of these (the reachability pass and the scheduled audits under Scope below).
 
-| Preset | Invariants (`imports`, `no-layer-branches`, `no-async-inner`, `no-mutable-surface`, `ambient-ownership`) | Graded smells (`no-service-coupling`, `no-adapter-coupling`, `no-penetration`, `no-deep-side-effects`, `vocab-gate`) | Holds |
+| Preset | Invariants (`imports`, `no-layer-branches`, `no-diagonal-reach`, `no-async-inner`, `no-mutable-surface`, `ambient-ownership`) | Graded smells (`no-service-coupling`, `no-adapter-coupling`, `no-penetration`, `no-deep-side-effects`, `vocab-gate`) | Holds |
 |---|---|---|---|
 | `adopting` | `warn` | `warn` | The migration posture: everything reports, the fix-list stays visible, and a change lands with no new findings in touched files. |
 | `aligned` | `error` | `warn` | The aligned grade: violations gate at authoring time; smells stay visible for review. |
@@ -77,6 +80,8 @@ Every rule is individually adoptable, and a rule switched off is a de-regulated 
 ```
 
 The package ships `adopting.json`, `aligned.json`, and `justified.json`. In a workspace that hoists dependencies, point at wherever the package resolves (e.g. `../../node_modules/@elda/oxlint-plugin/aligned.json`).
+
+**Known oxlint limitation (alpha host):** `extends` loads the preset's `jsPlugins`, but the extended file's JS-plugin rule *severities* currently degrade to `warn` - an extended `aligned.json` reports every finding while gating none. Until the host fixes this, mirror the chosen preset's `rules` block inline in the consuming config; the preset files remain the canonical grade definitions, and the inline block is the gate's visible declaration. Verify the gate bites after wiring: author one deliberate violation and confirm it reports as `error` with a non-zero exit.
 
 **ESLint** (flat config) spreads the preset object:
 

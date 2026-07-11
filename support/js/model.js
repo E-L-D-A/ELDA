@@ -263,3 +263,19 @@ export function lateralVerdict(role, t, layer, { remedy, crossSurface } = LATERA
   if (targetUnit === importerUnit) return null; // Same unit composing itself.
   return `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || '(subdomain root)'}' reaches a different ${layer} unit '${targetUnit || '(subdomain root)'}' in '${role.chain.join('/')}'; ${remedy}`;
 }
+
+// The diagonal verdict - SURFACE.5's geometry inside one subdomain: a value reference between two named units crosses at its own rank only, and the bare layer files are the subdomain's shared base outside any name.
+// A value reach from one named unit into a lower layer of another unit crosses a name and a rank at once, an arrow no row of the diagram draws - and it is how a misnamed unit hides: the name claims a column the dataflow contradicts.
+// The bare `services` composer is exempt (composing owned parts re-owns nothing); a bare-file target is the shared base, so reading it is vertical; assets are vocabulary from any layer (SURFACE.6); type-only edges are vocabulary references, filtered at the visitor.
+export function diagonalVerdict(role, t) {
+  if (role.kind !== 'domain') return null;
+  if (!t || !t.layer || t.surface || t.asset) return null;
+  if (LAYER_RANK[t.layer] >= LAYER_RANK[role.layer]) return null;
+  if (rel(role.chain, t.chain).kind !== 'same') return null;
+  if (role.layer === 'services' && isComposer(role)) return null;
+  const importerUnit = unitOf(role);
+  const targetUnit = unitOf(t);
+  if (targetUnit === '' || targetUnit === importerUnit) return null;
+  const from = importerUnit ? `unit '${importerUnit}' (${role.layer})` : `the subdomain's bare ${role.layer} file`;
+  return `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${t.layer} - a diagonal reach across both name and rank. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${t.layer} file if the subdomain shares it, or cross at equal rank through this unit's own ${t.layer} row.`;
+}

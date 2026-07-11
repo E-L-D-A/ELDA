@@ -21,6 +21,7 @@ import {
   targetOf,
   importVerdict,
   lateralVerdict,
+  diagonalVerdict,
 } from './model.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
@@ -138,6 +139,40 @@ function lateralCoupling(layer) {
 
 const noServiceCoupling = lateralCoupling('services');
 const noAdapterCoupling = lateralCoupling('adapters');
+
+// elda/no-diagonal-reach - SURFACE.5's in-subdomain geometry: between named units a value reference crosses at its own rank, and a reach into a different unit's lower layer crosses a name and a rank at once (diagonalVerdict in model.js).
+// Error-tier alongside the structural invariants: a declared name binds the way a declared subdomain does, and every hit resolves by a rename, a promotion to the bare file, or an equal-rank crossing.
+const noDiagonalReach = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+        compositionRoot: { type: 'string' },
+      },
+      additionalProperties: false,
+    }],
+  },
+  create(context) {
+    const { domainAlias, appAlias, compositionRoot } = options(context);
+    const filename = filenameOf(context);
+    const role = fileRole(filename, compositionRoot);
+    if (role.kind !== 'domain') return {};
+    const flag = (node, spec) => {
+      const t = targetOf(filename, spec, domainAlias, appAlias);
+      const verdict = diagonalVerdict(role, t);
+      if (verdict) context.report({ node, message: verdict });
+    };
+    // A type-only declaration is a vocabulary reference (OWNER.6: a type at any layer); the rule acts on value edges, re-exports included.
+    const isValue = (node) => node.importKind !== 'type' && node.exportKind !== 'type';
+    return {
+      ImportDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
+      ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
+      ExportNamedDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
+    };
+  },
+};
 
 // elda/no-penetration - the `*` imports and exports that punch holes in module edges and let the architecture leak through.
 // A namespace import (`import * as ns`) consumes a surface opaquely - every export looks used, so the unconsumed-export review signal (SURFACE.4) goes blind.
@@ -311,6 +346,7 @@ const plugin = {
   rules: {
     'imports': imports,
     'no-layer-branches': noLayerBranches,
+    'no-diagonal-reach': noDiagonalReach,
     'no-service-coupling': noServiceCoupling,
     'no-adapter-coupling': noAdapterCoupling,
     'no-penetration': noPenetration,
@@ -328,7 +364,7 @@ const plugin = {
 // `justified` holds the justified grade: the graded smells gate too, so a deviation lands only as an inline suppression carrying its justification.
 // A preset supplies the gate; the grade is read off the tree under it.
 // ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped `<name>.json` by path instead (see README).
-const INVARIANTS = ['imports', 'no-layer-branches', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
+const INVARIANTS = ['imports', 'no-layer-branches', 'no-diagonal-reach', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
 const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-deep-side-effects', 'vocab-gate'];
 const gradePreset = (invariants, smells) => ({
   plugins: { elda: plugin },
