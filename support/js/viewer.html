@@ -527,13 +527,67 @@
     }
     .domain {
       display: grid;
-      grid-row: 1 / -1;
+      grid-row: 1 / -2;
       grid-template-rows: subgrid;
       border: 1px solid var(--line-strong);
       background: var(--box);
       border-radius: 12px;
       overflow: hidden;
       box-shadow: var(--shadow);
+    }
+    /* Only a domain that holds hidden files spans into the shared shelf row, so the other boxes keep their height. */
+    .domain.has-hidden {
+      grid-row: 1 / -1;
+    }
+    .domain.has-hidden > .grid {
+      grid-row: 2 / -2;
+    }
+    .domain > .footer {
+      grid-row: -2;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 3px;
+      padding: 6px 10px;
+      border-top: 1px dashed var(--line);
+      background: rgb(0 0 0 / 0.18);
+    }
+    .footer .flabel {
+      appearance: none;
+      border: 0;
+      background: none;
+      padding: 16px 0;
+      margin: -16px 0;
+      cursor: pointer;
+      font: 700 9px var(--sans);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--faint);
+      margin-right: 4px;
+    }
+    .footer .flabel .act {
+      display: none;
+      color: var(--fg);
+    }
+    .footer .flabel:hover .idle {
+      display: none;
+    }
+    .footer .flabel:hover .act {
+      display: inline;
+    }
+    .chip.ghost {
+      opacity: 0.45;
+      border-style: dashed;
+      box-shadow: none;
+    }
+    .chip.ghost:hover {
+      opacity: 0.85;
+      filter: none;
+    }
+    .chip .gsub {
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 10px;
     }
     .domain > h2 {
       grid-row: 1;
@@ -555,8 +609,14 @@
       grid-row: 2 / -1;
       display: grid;
       grid-template-rows: subgrid;
-      gap: 16px;
+      gap: 16px 12px;
       padding: 12px 14px;
+    }
+    /* The card behind a named subdomain's columns; spacer tracks push the cards apart while unit columns inside share the tighter base gap. */
+    .subpanel {
+      margin: -5px -6px -7px;
+      border-radius: 10px;
+      background: rgb(255 255 255 / 0.02);
     }
     .rail {
       grid-column: 1;
@@ -586,6 +646,9 @@
       text-align: center;
       padding: 0 4px;
       white-space: nowrap;
+    }
+    .grouphead:hover, .colhead:hover {
+      color: var(--fg);
     }
     .cell {
       padding: 6px;
@@ -864,6 +927,23 @@
       text-transform: uppercase;
       margin-right: 4px;
     }
+    #bottombar .bar-btn {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      margin-left: 8px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--box-hi);
+      color: var(--fg);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    #bottombar .bar-btn:hover {
+      border-color: var(--line-strong);
+    }
     </style>
   </head>
   <body>
@@ -933,6 +1013,8 @@
     let pinnedPath = null;
     const initialHidden = new Set(["@root", "@core"]);
     let hiddenBlocks = new Set(initialHidden);
+    // Files banished to their domain's hidden shelf by middle-click; session-only on purpose, keyed by path so live rescans keep them hidden.
+    const hiddenFiles = new Set();
 
     const $ = (id) => document.getElementById(id);
     const wrap = $("wrap"),
@@ -1058,7 +1140,8 @@
     }
 
     // A chip carries its file id, which the delegated pointer handlers and the edge layer's rect lookups both key on.
-    function makeChip(f) {
+    // A ghost chip (a hidden file on its domain's shelf) keeps the id for the restore click yet stays out of the chips map, so edges and focus passes never see it.
+    function makeChip(f, ghost) {
       const p = place(f);
       const { label, badges } = chipParts(f);
       const el = h(
@@ -1070,13 +1153,15 @@
               ? p.row
               : p.area === "root"
                 ? "services"
-                : ""),
+                : "") +
+            (ghost ? " ghost" : ""),
           "data-id": f.id,
         },
+        ghost && p.sub ? h("span", { class: "gsub" }, p.sub + " / ") : null,
         label,
         badges.map((b) => h("span", { class: "badge" }, b)),
       );
-      chips.set(f.id, el);
+      if (!ghost) chips.set(f.id, el);
       return el;
     }
 
@@ -1084,13 +1169,16 @@
       chips = new Map();
       const hideAsset = !$("t-assets").checked;
       const expunge = !$("t-surfaces").checked;
-      const visible = (f) =>
+      const passes = (f) =>
         !(hideAsset && f.kind !== "code") &&
         !(expunge && f.role.kind === "surface") &&
         !hiddenBlocks.has(blockOf(f));
+      const visible = (f) => passes(f) && !hiddenFiles.has(f.path);
+      // A ghost renders on its domain's hidden shelf: banished by middle-click yet passing every other filter.
+      const ghost = (f) => passes(f) && hiddenFiles.has(f.path);
       renderRootBar(visible);
       renderCoreBox(visible);
-      renderDomains(visible, expunge ? ROWS.slice(1) : ROWS);
+      renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS);
       // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
       drawn = expunge ? data.flows : data.edges;
       renderBlockBar();
@@ -1113,7 +1201,7 @@
           data.files
             .filter((f) => place(f).area === "root" && visible(f))
             .sort(byPath)
-            .map(makeChip),
+            .map((f) => makeChip(f)),
           hideBtn("@root"),
         ),
       );
@@ -1129,17 +1217,24 @@
       box.replaceChildren(
         "src/core ",
         hideBtn("@core"),
-        ...coreFiles.map(makeChip),
+        ...coreFiles.map((f) => makeChip(f)),
       );
       $("nondomains").hidden = box.hidden;
     }
 
     // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
-    function renderDomains(visible, rowList) {
+    function renderDomains(visible, ghost, rowList) {
       const domains = new Map();
+      const shelves = new Map();
       for (const f of data.files) {
         const p = place(f);
-        if (p.area !== "domain" || !visible(f)) continue;
+        if (p.area !== "domain") continue;
+        if (ghost(f)) {
+          if (!shelves.has(p.domain)) shelves.set(p.domain, []);
+          shelves.get(p.domain).push(f);
+          continue;
+        }
+        if (!visible(f)) continue;
         if (!domains.has(p.domain)) domains.set(p.domain, new Map());
         const subsOf = domains.get(p.domain);
         if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
@@ -1149,11 +1244,14 @@
         if (!rows.has(p.row)) rows.set(p.row, []);
         rows.get(p.row).push(f);
       }
+      // A domain whose every file sits on the shelf still renders, so its files stay restorable.
+      for (const d of shelves.keys())
+        if (!domains.has(d)) domains.set(d, new Map());
 
       const domainsEl = $("domains");
       domainsEl.replaceChildren();
-      // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows).
-      domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto)`;
+      // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows, then the hidden shelf).
+      domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto) auto`;
       const dotFirst = (a, b) =>
         a === "" ? -1 : b === "" ? 1 : a.localeCompare(b);
 
@@ -1162,47 +1260,67 @@
       });
 
       for (const [name, subsOf] of sortedDomains) {
-        // Flatten the (subdomain, unit) tree into ordered sub-columns, remembering each group's span for its header.
+        // Flatten the (subdomain, unit) tree into ordered sub-columns, laying explicit tracks so a thin spacer separates the subdomain groups while unit columns inside a group share the tighter base gap.
         const subs = [...subsOf.keys()].sort(dotFirst);
         const columns = [];
+        const groups = [];
+        const tracks = [];
+        let track = 2;
         for (const sub of subs) {
           const units = [...subsOf.get(sub).keys()].sort(dotFirst);
-          columns.push(
-            ...units.map((unit) => ({
-              sub,
-              unit,
-              rows: subsOf.get(sub).get(unit),
-            })),
-          );
+          if (tracks.length) {
+            tracks.push("2px");
+            track++;
+          }
+          groups.push({ sub, start: track, span: units.length });
+          for (const unit of units) {
+            tracks.push("minmax(86px, max-content)");
+            columns.push({ sub, unit, rows: subsOf.get(sub).get(unit), track: track++ });
+          }
         }
         const grid = h("div", {
           class: "grid",
-          style: `grid-template-columns: 14px repeat(${columns.length}, minmax(86px, max-content))`,
+          style: `grid-template-columns: 14px${tracks.length ? " " + tracks.join(" ") : ""}`,
         });
-        let ci = 2;
-        for (const sub of subs) {
-          const span = subsOf.get(sub).size;
+        for (const g of groups) {
+          // Named subdomains render as cards: a panel behind the group's columns, appended first so the cells paint above it.
+          if (g.sub !== "")
+            grid.append(
+              h("div", {
+                class: "subpanel",
+                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 1 / -1`,
+              }),
+            );
           grid.append(
             h(
               "div",
               {
                 class: "grouphead",
-                style: `grid-column: ${ci} / span ${span}; grid-row: 1`,
+                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 1`,
+                "data-domain": name,
+                "data-sub": g.sub,
+                title: "middle-click hides the subdomain",
               },
-              sub === "" ? "·" : sub + " /",
+              g.sub === "" ? "·" : g.sub + " /",
             ),
           );
-          ci += span;
         }
-        columns.forEach((col, i) => {
+        for (const col of columns) {
           grid.append(
             h(
               "div",
-              { class: "colhead", style: `grid-column: ${i + 2}; grid-row: 2` },
+              {
+                class: "colhead",
+                style: `grid-column: ${col.track}; grid-row: 2`,
+                "data-domain": name,
+                "data-sub": col.sub,
+                "data-unit": col.unit,
+                title: "middle-click hides the column",
+              },
               col.unit === "" ? "·" : col.unit,
             ),
           );
-        });
+        }
         rowList.forEach((row, ri) => {
           const rowHasFiles = columns.some((col) => col.rows.has(row));
           grid.append(
@@ -1212,21 +1330,48 @@
               rowHasFiles ? ROW_LABEL[row] : "",
             ),
           );
-          columns.forEach((col, i) => {
+          columns.forEach((col) => {
             grid.append(
               h(
                 "div",
                 {
                   class: "cell " + row,
-                  style: `grid-column: ${i + 2}; grid-row: ${ri + 3}`,
+                  style: `grid-column: ${col.track}; grid-row: ${ri + 3}`,
                 },
-                (col.rows.get(row) ?? []).sort(byPath).map(makeChip),
+                (col.rows.get(row) ?? []).sort(byPath).map((f) => makeChip(f)),
               ),
             );
           });
         });
+        const shelf = shelves.get(name);
         domainsEl.append(
-          h("section", { class: "domain" }, h("h2", {}, name, hideBtn(name)), grid),
+          h(
+            "section",
+            { class: "domain" + (shelf ? " has-hidden" : "") },
+            h("h2", {}, name, hideBtn(name)),
+            grid,
+            shelf
+              ? h(
+                  "div",
+                  { class: "footer" },
+                  h(
+                    "button",
+                    {
+                      class: "flabel",
+                      title: "unhide this domain's files",
+                      onclick: (ev) => {
+                        ev.stopPropagation();
+                        for (const f of shelf) hiddenFiles.delete(f.path);
+                        render();
+                      },
+                    },
+                    h("span", { class: "idle" }, "hidden"),
+                    h("span", { class: "act" }, "unhide"),
+                  ),
+                  shelf.sort(byPath).map((f) => makeChip(f, true)),
+                )
+              : null,
+          ),
         );
       }
     }
@@ -1276,6 +1421,21 @@
             text,
           ),
         ),
+        ...(hiddenFiles.size
+          ? [
+              h(
+                "button",
+                {
+                  class: "bar-btn",
+                  onclick: () => {
+                    hiddenFiles.clear();
+                    render();
+                  },
+                },
+                `unhide ${hiddenFiles.size} file${hiddenFiles.size > 1 ? "s" : ""}`,
+              ),
+            ]
+          : []),
       );
     }
 
@@ -1614,6 +1774,10 @@
       const chip = e.target.closest(".chip");
       if (!chip || chip.contains(e.relatedTarget)) return;
       const f = data.files[Number(chip.dataset.id)];
+      if (chip.classList.contains("ghost")) {
+        showTip(e, `${f.path}\nhidden - click to restore`);
+        return;
+      }
       focus(f.id, true);
       showTip(e, f.path);
     });
@@ -1635,11 +1799,55 @@
       if (!chip) return;
       e.stopPropagation();
       const f = data.files[Number(chip.dataset.id)];
+      if (chip.classList.contains("ghost")) {
+        hiddenFiles.delete(f.path);
+        hideTip();
+        render();
+        return;
+      }
       if (e.ctrlKey || e.altKey) {
         window.location.href = ("vscode://file/" + data.cwd + "/" + f.path);
       }
       pinnedPath = pinnedPath === f.path ? null : f.path;
       render();
+    });
+    // A file joins the hidden shelf with its pin cleared when it was the pinned one.
+    function banish(f) {
+      hiddenFiles.add(f.path);
+      if (pinnedPath === f.path) pinnedPath = null;
+    }
+
+    // Middle-click banishes a domain file to its domain's hidden shelf, taking every edge that touches it along; the shelf chip's ordinary click brings it back.
+    // On a subdomain or column head, the same click banishes every file the head spans.
+    wrap.addEventListener("auxclick", (e) => {
+      if (e.button !== 1) return;
+      const head = e.target.closest(".grouphead, .colhead");
+      const chip = e.target.closest(".chip");
+      if (!head && !chip) return;
+      e.preventDefault();
+      if (head) {
+        const { domain, sub, unit } = head.dataset;
+        for (const f of data.files) {
+          const p = place(f);
+          if (p.area !== "domain" || p.domain !== domain || p.sub !== sub) continue;
+          if (unit !== undefined && p.unit !== unit) continue;
+          banish(f);
+        }
+      } else {
+        const f = data.files[Number(chip.dataset.id)];
+        if (chip.classList.contains("ghost")) hiddenFiles.delete(f.path);
+        else {
+          if (place(f).area !== "domain") return;
+          banish(f);
+        }
+      }
+      hideTip();
+      render();
+    });
+    // Canceling the middle-button pointerdown keeps the browser's autoscroll mode off the hideable targets.
+    wrap.addEventListener("pointerdown", (e) => {
+      if (e.button === 1 && e.target.closest(".chip, .grouphead, .colhead"))
+        e.preventDefault();
     });
     document.body.addEventListener("click", () => {
       if (!suppressClick && pinnedPath !== null) {
