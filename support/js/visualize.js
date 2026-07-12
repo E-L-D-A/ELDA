@@ -7,13 +7,14 @@
 // appDir is the app workspace holding src/ (defaults to the working directory); its .oxlintrc.json supplies the elda/imports options when present.
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
-import { readFileSync, readdirSync, existsSync, writeFileSync, watch } from 'node:fs';
-import { createServer } from 'node:http';
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { norm, posixResolve, classify, fileRole, targetOf, importVerdict, lateralVerdict, diagonalVerdict, landedVerdict } from './model.js';
-import { moduleInfo, createWalker, CODE_RE, EXT_CANDIDATES } from './flow.js';
+import { existsSync, readFileSync, readdirSync, watch, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
+import { classify, diagonalVerdict, fileRole, importVerdict, landedVerdict, lateralVerdict, norm, posixResolve, targetOf } from './model.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -165,6 +166,7 @@ function buildGraph() {
     files,
     edges,
     flows: expandFlows(files, edges, walker, appDir, byPath),
+    cwd: norm(appDir)
   };
 }
 
@@ -241,7 +243,7 @@ const viewerPath = join(dirname(fileURLToPath(import.meta.url)), 'viewer.html');
 const viewerHtml = () => readFileSync(viewerPath, 'utf8');
 
 if (outFile) {
-  const html = viewerHtml().replace('/*__DATA__*/null', JSON.stringify(buildGraph()));
+  const html = viewerHtml().replace(/\/\*\s*__DATA__\s*\*\/\s*null/, JSON.stringify(buildGraph()));
   writeFileSync(resolve(outFile), html);
   console.log(`Wrote ${resolve(outFile)}`);
   process.exit(0);

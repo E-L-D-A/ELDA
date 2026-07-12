@@ -1,723 +1,1927 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ELDA dependency diagram</title>
-<style>
-  :root {
-    --bg: #fafafa; --fg: #1a1a1a; --muted: #777; --box: #fff; --line: #bbb;
-    --services-bg: #dae8fc; --services-bd: #6c8ebf;
-    --adapters-bg: #d5e8d4; --adapters-bd: #82b366;
-    --use-cases-bg: #f8cecc; --use-cases-bd: #b85450;
-    --entities-bg: #fff2cc; --entities-bd: #d6b656;
-    --surface-bg: #f0f0f0; --surface-bd: #999;
-    --root-bg: #dae8fc; --root-bd: #6c8ebf;
-    --ok: #8a8a8a; --type: #b0b0b0; --bad: #d32f2f; --smell: #e05252;
-    --hi-out: #1565c0; --hi-in: #2e7d32;
-  }
-  @media (prefers-color-scheme: dark) {
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ELDA dependency diagram</title>
+    <style>
     :root {
-      --bg: #16181c; --fg: #e6e6e6; --muted: #9a9a9a; --box: #1e2126; --line: #444;
-      --services-bg: #24344d; --services-bd: #5b7fae;
-      --adapters-bg: #24402a; --adapters-bd: #6fa05c;
-      --use-cases-bg: #4a2b29; --use-cases-bd: #b06055;
-      --entities-bg: #464023; --entities-bd: #b5a24e;
-      --surface-bg: #2a2d33; --surface-bd: #777;
-      --root-bg: #24344d; --root-bd: #5b7fae;
-      --ok: #7a7a7a; --type: #5c5c5c; --bad: #ef5350; --smell: #e57373;
-      --hi-out: #64b5f6; --hi-in: #81c784;
+      color-scheme: dark;
+      --bg: #0f1217;
+      --fg: #e2e6ec;
+      --muted: #8d96a4;
+      --faint: #5c6572;
+      --box: #161a20;
+      --box-hi: #1b2028;
+      --line: #262c36;
+      --line-strong: #39414e;
+      --dot: #1c222b;
+      --services-bg: #24344d;
+      --services-bd: #5b7fae;
+      --adapters-bg: #24402a;
+      --adapters-bd: #6fa05c;
+      --use-cases-bg: #4a2b29;
+      --use-cases-bd: #b06055;
+      --entities-bg: #464023;
+      --entities-bd: #b5a24e;
+      --surface-bg: #2a2d33;
+      --surface-bd: #7d8694;
+      --root-bg: #24344d;
+      --root-bd: #5b7fae;
+      --ok: #77839a;
+      --type: #515b6b;
+      --bad: #e34f44;
+      --smell: #c68118;
+      --hi-out: #3f8de0;
+      --hi-in: #1ba46c;
+      --accent: #3f8de0;
+      --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.45), 0 10px 28px -14px rgb(0 0 0 / 0.6);
+      --drawer-w: 500px;
     }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; width: max-content; min-width: 100%; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; user-select: none; cursor: grab; }
-  header, #issues, #bottombar { cursor: default; }
-  header {
-    position: sticky; top: 0; left: 0; z-index: 30; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    width: 100vw; padding: 8px 16px; background: var(--box); border-bottom: 1px solid var(--line);
-  }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .counts { color: var(--muted); }
-  header .counts b.bad { color: var(--bad); }
-  header label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
-  #live { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-  #live.on { background: #43a047; }
-  .legend { display: inline-flex; gap: 12px; color: var(--muted); }
-  .legend span { display: inline-flex; align-items: center; gap: 4px; }
-  .legend i { display: inline-block; width: 22px; border-top: 2px solid var(--ok); }
-  .legend i.smell { border-top: 2px dashed var(--smell); }
-  .legend i.violation { border-top: 2px solid var(--bad); }
-  .legend i.type { border-top: 2px dashed var(--type); }
+    /* The open drawer covers the viewport's right strip, so programmatic scrolls (issue clicks) must treat that strip as off-screen. */
+    html:has(#issues.open) {
+      scroll-padding-right: calc(var(--drawer-w) + 24px);
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html {
+      display: table;
+      min-height: 100%;
+    }
+    body {
+      display: table-cell;
+      margin: 0;
+      width: max-content;
+      min-width: 100%;
+      padding-bottom: 64px;
+      background: var(--bg) radial-gradient(var(--dot) 1.2px, transparent 1.2px)
+        0 0 / 24px 24px;
+      color: var(--fg);
+      font: 13px/1.45 var(--sans);
+      user-select: none;
+      cursor: grab;
+    }
+    header, #issues, #bottombar {
+      cursor: default;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      left: 0;
+      z-index: 30;
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      width: 100vw;
+      padding: 8px 14px;
+      background: color-mix(in srgb, var(--box) 82%, transparent);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--line);
+    }
+    header .sep {
+      align-self: center;
+      position: relative;
+      height: 30px;
+      margin: -10px 0;
+      margin-right: 2px;
+      width: 1px;
+      background: linear-gradient(
+        0deg,
+        transparent,
+        var(--line),
+        var(--line),
+        transparent
+      );
+    }
+    header h1 {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 8px;
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    header h1 .brand {
+      font-size: 16px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      color: var(--faint);
+    }
+    .counts {
+      display: inline-flex;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .counts .stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .counts .stat b {
+      color: var(--fg);
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    .counts .stat .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--faint);
+    }
+    .counts .sev-zero {
+      color: var(--faint);
+    }
+    .counts .sev-zero b {
+      color: var(--muted);
+    }
+    .counts .sev-bad .dot {
+      background: var(--bad);
+    }
+    .counts .sev-bad b {
+      color: var(--bad);
+    }
+    .counts .sev-smell .dot {
+      background: var(--smell);
+    }
+    .counts .sev-smell b {
+      color: var(--smell);
+    }
+    .bottom {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      z-index: 30;
+    }
+    .legend {
+      display: flex;
+      padding: 20px;
+      gap: 12px;
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11.5px;
+      background: linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--box) 82%, transparent),
+        transparent
+      );
+      pointer-events: none;
+    }
+    .legend .col {
+      display: flex;
+      flex-direction: column;
+      justify-content: end;
+      gap: 12px;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .legend i {
+      display: inline-block;
+      width: 22px;
+      border-top: 2px solid var(--ok);
+      border-radius: 2px;
+    }
+    .legend i.smell {
+      border-top: 2px dashed var(--smell);
+    }
+    .legend i.violation {
+      border-top: 2px solid var(--bad);
+    }
+    .legend i.type {
+      border-top: 2px dotted var(--type);
+    }
+    .legend i.in {
+      border-top: 2px solid var(--hi-in);
+    }
+    .legend i.out {
+      border-top: 2px solid var(--hi-out);
+    }
+    .toggles {
+      display: inline-flex;
+      gap: 6px;
+    }
+    header label, #bottombar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 10px 3px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--box-hi);
+      font-size: 11.5px;
+      cursor: pointer;
+      user-select: none;
+    }
+    header label:hover, #bottombar label:hover {
+      border-color: var(--line-strong);
+    }
+    header label:has(input:not(:checked)), #bottombar label.off {
+      color: var(--muted);
+      background: transparent;
+    }
+    label * {
+      cursor: pointer;
+      line-height: 0;
+    }
+    input[type="checkbox"] {
+      appearance: none;
+      width: 13px;
+      height: 13px;
+      margin: 0;
+      flex: none;
+      border-radius: 4px;
+      border: 1px solid var(--line-strong);
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type="checkbox"]:checked {
+      border-color: var(--accent);
+      background: var(--accent)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.4 4.1 7.5 8 3' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+        center / 9px 9px no-repeat;
+    }
+    input[type="checkbox"]:indeterminate {
+      border-color: var(--accent);
+      background: var(--accent)
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2.6 5h4.8' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E")
+        center / 9px 9px no-repeat;
+    }
+    input[type="checkbox"]:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+      outline-offset: 1px;
+    }
+    #issues-btn {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      align-self: center;
+      gap: 6px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--box-hi);
+      color: var(--fg);
+      font: inherit;
+      font-size: 11.5px;
+      cursor: pointer;
+      line-height: 0;
+    }
+    #issues-btn:hover {
+      border-color: var(--line-strong);
+    }
+    #issue-count {
+      min-width: 16px;
+      padding: 0 5px;
+      border-radius: 999px;
+      background: var(--line);
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 16px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+    #issue-count.hot {
+      background: color-mix(in srgb, var(--bad) 24%, transparent);
+      color: #ee8d84;
+    }
 
-  #wrap { position: relative; padding: 20px; width: max-content; min-width: 100%; }
-  body.panning, body.panning .chip { cursor: grabbing; }
-  #edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
-  #edges path.hit { pointer-events: stroke; stroke: transparent; stroke-width: 9; fill: none; }
-  #edges path.edge { fill: none; }
-  #edges path.ok { stroke: var(--ok); stroke-width: 1; opacity: .38; }
-  #edges path.type { stroke: var(--type); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; }
-  #edges path.smell { stroke: var(--smell); stroke-width: 1.6; stroke-dasharray: 6 4; opacity: .95; }
-  #edges path.violation { stroke: var(--bad); stroke-width: 2.2; opacity: 1; }
-  #edges.focused path.edge { opacity: .06; }
-  #edges.focused path.edge.hi-out { stroke: var(--hi-out); opacity: 1; stroke-width: 2; stroke-dasharray: none; }
-  #edges.focused path.edge.hi-in { stroke: var(--hi-in); opacity: 1; stroke-width: 2; stroke-dasharray: none; }
+    /* ----------------------------------------- */
+    /*  Status Indicators with Pulsing Animation */
+    /* ----------------------------------------- */
 
-  #root-bar { position: relative; border: 2px solid var(--root-bd); background: var(--root-bg); border-radius: 8px; padding: 4px 10px; margin-bottom: 24px; }
-  #root-bar .bar-title { font-weight: 600; margin-right: 8px; }
-  .root-inner {
-    position: sticky; left: 8px; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px;
-    width: max-content; max-width: calc(100vw - 64px);
-  }
-  .root-inner .hide-btn { position: static; margin-left: 6px; }
-  #main { display: flex; align-items: flex-start; }
-  #nondomains {
-    display: flex; flex-direction: column; gap: 24px; align-items: flex-start;
-    padding-right: 20px; margin-right: 20px; border-right: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
-  }
-  #core-box { position: relative; border: 2px solid var(--surface-bd); background: var(--box); border-radius: 8px; padding: 6px 26px 6px 10px; }
-  .hide-btn {
-    position: absolute; top: 3px; right: 4px; z-index: 25; border: 0; background: none; border-radius: 4px;
-    color: var(--muted); font: 12px/1 system-ui, sans-serif; padding: 3px 5px; cursor: pointer;
-  }
-  .hide-btn:hover { color: var(--fg); background: rgba(128, 128, 128, .18); }
+    #live {
+      --indicator-size: 8px;
+    }
 
-  #domains { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 28px; row-gap: 0; justify-content: start; }
-  .domain { display: grid; grid-row: 1 / -1; grid-template-rows: subgrid; border: 2px solid var(--line); background: var(--box); border-radius: 8px; overflow: hidden; }
-  .domain > h2 { grid-row: 1; position: relative; margin: 0; font-size: 13px; font-weight: 700; text-align: center; padding: 5px 24px; border-bottom: 1px solid var(--line); }
-  .grid { grid-row: 2 / -1; display: grid; grid-template-rows: subgrid; gap: 16px; padding: 10px 12px; }
-  .rail { grid-column: 1; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 9px; color: var(--muted); text-align: center; padding: 4px 0; }
-  .grouphead { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px 2px; border-bottom: 1px dotted var(--line); white-space: nowrap; }
-  .colhead { font-size: 10px; color: var(--muted); text-align: center; padding: 0 4px; white-space: nowrap; }
-  .cell { padding: 6px; border-radius: 8px; min-width: 86px; display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
-  .cell.surface { background: color-mix(in srgb, var(--surface-bg) 45%, transparent); }
-  .cell.services { background: color-mix(in srgb, var(--services-bg) 30%, transparent); }
-  .cell.adapters { background: color-mix(in srgb, var(--adapters-bg) 30%, transparent); }
-  .cell.use-cases { background: color-mix(in srgb, var(--use-cases-bg) 30%, transparent); }
-  .cell.entities { background: color-mix(in srgb, var(--entities-bg) 30%, transparent); }
-  .cell:empty { background: none; }
+    #live {
+      display: flex;
+      align-items: center;
+      align-self: center;
+      gap: 10px;
+      margin: -10px 0;
+    }
 
-  .chip {
-    position: relative; z-index: 20; display: inline-flex; align-items: center; gap: 4px; justify-content: center;
-    padding: 2px 7px; border-radius: 6px; border: 1.5px solid var(--surface-bd); background: var(--surface-bg);
-    font-size: 11px; cursor: pointer; white-space: nowrap;
-  }
-  .chip.services { background: var(--services-bg); border-color: var(--services-bd); }
-  .chip.adapters { background: var(--adapters-bg); border-color: var(--adapters-bd); }
-  .chip.use-cases { background: var(--use-cases-bg); border-color: var(--use-cases-bd); }
-  .chip.entities { background: var(--entities-bg); border-color: var(--entities-bd); }
-  .chip .badge { font-size: 8px; padding: 0 3px; border-radius: 3px; background: rgba(128,128,128,.25); color: var(--muted); }
-  .chip.pinned { outline: 2px solid var(--hi-out); outline-offset: 1px; }
-  .chip.dim { opacity: .35; }
-  .chip.rel-out { outline: 2px solid var(--hi-out); outline-offset: 1px; }
-  .chip.rel-in { outline: 2px solid var(--hi-in); outline-offset: 1px; }
-  #root-bar .chip, #core-box .chip { margin: 2px 3px; }
+    #live .status-dot {
+      width: var(--indicator-size);
+      height: var(--indicator-size);
+      border-radius: 50%;
+      position: relative;
+      background-color: var(--faint);
+      margin-top: 1px;
+    }
 
-  #issues {
-    position: fixed; right: 0; top: 42px; bottom: 0; width: 380px; z-index: 40; overflow-y: auto;
-    background: var(--box); border-left: 1px solid var(--line); padding: 10px 14px; transform: translateX(100%); transition: transform .15s;
-  }
-  #issues.open { transform: none; }
-  #issues h3 { font-size: 12px; margin: 14px 0 6px; }
-  #issues .item { padding: 5px 7px; border-radius: 6px; margin-bottom: 5px; cursor: pointer; border: 1px solid var(--line); }
-  #issues .item:hover { border-color: var(--hi-out); }
-  #issues .item .msg { color: var(--muted); font-size: 11px; white-space: pre-wrap; }
-  #issues .item.violation { border-left: 3px solid var(--bad); }
-  #issues .item.smell { border-left: 3px solid var(--smell); }
-  #issues-btn { margin-left: auto; }
+    #live .status-dot::before,
+    #live .status-dot::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 100%;
+      height: 100%;
+      background: inherit;
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      opacity: 0.3;
+    }
 
-  #tooltip {
-    position: fixed; z-index: 50; max-width: 460px; padding: 6px 9px; border-radius: 6px; pointer-events: none;
-    background: var(--fg); color: var(--bg); font-size: 11px; white-space: pre-wrap; display: none;
-  }
+    #live .status-dot::after {
+      animation-delay: 1s;
+    }
 
-  body { padding-bottom: 64px; }
-  #bottombar {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 6px 16px; background: var(--box); border-top: 1px solid var(--line); font-size: 12px;
-  }
-  #bottombar .bar-label { color: var(--muted); }
-  #bottombar label { display: inline-flex; align-items: center; gap: 4px; user-select: none; }
-  label * { cursor: pointer; }
-  #bottombar label.off { color: var(--muted); }
-</style>
-</head>
-<body>
-<header>
-  <h1>ELDA · <span id="app-name"></span></h1>
-  <span class="counts" id="counts"></span>
-  <span class="legend">
-    <span><i class="violation"></i>violation</span>
-    <span><i class="smell"></i>inadvisable</span>
-    <span><i></i>dependency</span>
-    <span><i class="type"></i>type-only</span>
-  </span>
-  <label><input type="checkbox" id="t-ok" checked> deps</label>
-  <label><input type="checkbox" id="t-type"> type-only</label>
-  <label><input type="checkbox" id="t-assets" checked> styles+assets</label>
-  <label><input type="checkbox" id="t-surfaces"> surfaces</label>
-  <button id="issues-btn">issues <span id="issue-count"></span></button>
-  <span id="live" title="live reload"></span>
-</header>
-<div id="wrap">
-  <div id="root-bar"></div>
-  <div id="main">
-    <div id="nondomains" hidden>
-      <div id="core-box" hidden></div>
+    @keyframes indicator-pulse {
+      0% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.6;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(2.5);
+        opacity: 0;
+      }
+    }
+
+    @keyframes indicator-pulse-bad {
+      0% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 0;
+      }
+    }
+
+    #live .status-dot.on {
+      background-color: var(--hi-in);
+    }
+    #live .status-dot.on::before,
+    #live .status-dot.on::after {
+      animation: indicator-pulse 2s infinite linear;
+    }
+    #live .status-dot.off {
+      background-color: var(--bad);
+    }
+    #live .status-dot.off::before,
+    #live .status-dot.off::after {
+      animation: indicator-pulse-bad 1s infinite linear;
+    }
+
+    #wrap {
+      position: relative;
+      padding: 24px 24px 20px;
+      width: max-content;
+      min-width: 100%;
+    }
+    body.panning, body.panning .chip {
+      cursor: grabbing;
+    }
+    #edges {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #edges path.hit {
+      pointer-events: stroke;
+      stroke: transparent;
+      stroke-width: 10;
+      fill: none;
+    }
+    #edges path.edge {
+      fill: none;
+      stroke-linecap: round;
+    }
+    #edges path.ok {
+      stroke: var(--ok);
+      stroke-width: 1.1;
+      opacity: 0.45;
+    }
+    #edges path.type {
+      stroke: var(--type);
+      stroke-width: 1;
+      stroke-dasharray: 2 4;
+      opacity: 0.6;
+    }
+    #edges path.smell {
+      stroke: var(--smell);
+      stroke-width: 1.6;
+      stroke-dasharray: 7 5;
+      opacity: 0.95;
+    }
+    #edges path.violation {
+      stroke: var(--bad);
+      stroke-width: 2;
+      opacity: 1;
+      filter: drop-shadow(
+        0 0 3px color-mix(in srgb, var(--bad) 45%, transparent)
+      );
+    }
+    #edges.focused path.edge {
+      opacity: 0.05;
+      filter: none;
+    }
+    #edges.focused path.edge.hi-out {
+      stroke: var(--hi-out);
+      opacity: 1;
+      stroke-width: 1.8;
+      stroke-dasharray: none;
+      filter: drop-shadow(
+        0 0 4px color-mix(in srgb, var(--hi-out) 50%, transparent)
+      );
+    }
+    #edges.focused path.edge.hi-in {
+      stroke: var(--hi-in);
+      opacity: 1;
+      stroke-width: 1.8;
+      stroke-dasharray: none;
+      filter: drop-shadow(
+        0 0 4px color-mix(in srgb, var(--hi-in) 50%, transparent)
+      );
+    }
+
+    #root-bar {
+      position: relative;
+      margin-bottom: 28px;
+      padding: 6px 12px;
+      border: 1px solid color-mix(in srgb, var(--root-bd) 45%, var(--line));
+      background: color-mix(in srgb, var(--root-bg) 45%, var(--box));
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+    #root-bar .bar-title {
+      margin-right: 10px;
+      font: 600 11.5px var(--mono);
+      color: color-mix(in srgb, var(--root-bd) 55%, var(--fg));
+    }
+    .root-inner {
+      position: sticky;
+      left: 8px;
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 3px;
+      width: max-content;
+      max-width: calc(100vw - 64px);
+    }
+    .root-inner .hide-btn {
+      position: static;
+      margin-left: 6px;
+    }
+    #main {
+      display: flex;
+      align-items: flex-start;
+    }
+    #nondomains {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      align-items: flex-start;
+      padding-right: 24px;
+      margin-right: 24px;
+      border-right: 1px dashed var(--line);
+    }
+    #core-box {
+      position: relative;
+      border: 1px solid var(--line-strong);
+      background: var(--box);
+      border-radius: 12px;
+      padding: 8px 30px 8px 12px;
+      box-shadow: var(--shadow);
+      font: 600 11.5px var(--mono);
+      color: var(--muted);
+    }
+    .hide-btn {
+      position: absolute;
+      top: 4px;
+      right: 5px;
+      z-index: 25;
+      border: 0;
+      background: none;
+      border-radius: 5px;
+      color: var(--faint);
+      font: 11px/1 var(--sans);
+      padding: 3px 5px;
+      cursor: pointer;
+    }
+    .hide-btn:hover {
+      color: var(--fg);
+      background: rgb(128 128 128 / 0.18);
+    }
+
+    #domains {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      column-gap: 32px;
+      row-gap: 0;
+      justify-content: start;
+    }
+    .domain {
+      display: grid;
+      grid-row: 1 / -1;
+      grid-template-rows: subgrid;
+      border: 1px solid var(--line-strong);
+      background: var(--box);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .domain > h2 {
+      grid-row: 1;
+      position: relative;
+      margin: 0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-align: center;
+      padding: 6px 26px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(
+        180deg,
+        rgb(255 255 255 / 0.035),
+        transparent
+      );
+    }
+    .grid {
+      grid-row: 2 / -1;
+      display: grid;
+      grid-template-rows: subgrid;
+      gap: 16px;
+      padding: 12px 14px;
+    }
+    .rail {
+      grid-column: 1;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 8.5px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--faint);
+      text-align: center;
+      padding: 4px 0;
+    }
+    .grouphead {
+      font-size: 9.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: center;
+      padding: 0 4px 3px;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+    }
+    .colhead {
+      font-size: 10px;
+      color: var(--muted);
+      text-align: center;
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+    .cell {
+      padding: 6px;
+      border-radius: 8px;
+      min-width: 86px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: stretch;
+    }
+    .cell.surface {
+      background: color-mix(in srgb, var(--surface-bg) 45%, transparent);
+    }
+    .cell.services {
+      background: color-mix(in srgb, var(--services-bg) 30%, transparent);
+    }
+    .cell.adapters {
+      background: color-mix(in srgb, var(--adapters-bg) 30%, transparent);
+    }
+    .cell.use-cases {
+      background: color-mix(in srgb, var(--use-cases-bg) 30%, transparent);
+    }
+    .cell.entities {
+      background: color-mix(in srgb, var(--entities-bg) 30%, transparent);
+    }
+    .cell:empty {
+      background: none;
+    }
+
+    .chip {
+      position: relative;
+      z-index: 20;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      justify-content: center;
+      padding: 2.5px 8px;
+      border-radius: 6px;
+      border: 1.5px solid var(--surface-bd);
+      background: var(--surface-bg);
+      font: 500 11px/1.5 var(--sans);
+      color: var(--fg);
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+    }
+    .chip:hover {
+      filter: brightness(1.12);
+    }
+    .chip.services {
+      background: var(--services-bg);
+      border-color: var(--services-bd);
+    }
+    .chip.adapters {
+      background: var(--adapters-bg);
+      border-color: var(--adapters-bd);
+    }
+    .chip.use-cases {
+      background: var(--use-cases-bg);
+      border-color: var(--use-cases-bd);
+    }
+    .chip.entities {
+      background: var(--entities-bg);
+      border-color: var(--entities-bd);
+    }
+    .chip .badge {
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: rgb(0 0 0 / 0.3);
+      color: var(--muted);
+    }
+    .chip.pinned {
+      outline: 2px solid var(--hi-out);
+      outline-offset: 1px;
+    }
+    .chip.dim {
+      opacity: 0.22;
+    }
+    .chip.rel-out {
+      outline: 2px solid var(--hi-out);
+      outline-offset: 1px;
+    }
+    .chip.rel-in {
+      outline: 2px solid var(--hi-in);
+      outline-offset: 1px;
+    }
+    #root-bar .chip, #core-box .chip {
+      margin: 2px 3px;
+    }
+
+    #issues {
+      position: fixed;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: var(--drawer-w);
+      z-index: 40;
+      overflow-y: hidden;
+      background: color-mix(in srgb, var(--box) 92%, transparent);
+      backdrop-filter: blur(12px);
+      border-left: 1px solid var(--line);
+      box-shadow: -12px 0 32px rgb(0 0 0 / 0.4);
+      transform: translateX(100%);
+      transition: transform 0.15s;
+
+      display: flex;
+      flex-direction: column;
+    }
+    #issues.open {
+      transform: none;
+    }
+    .drawer-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: inherit;
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--line);
+    }
+    .drawer-body {
+      overflow-y: auto;
+      padding: 0 14px 14px;
+    }
+    *::-webkit-scrollbar {
+      background: color-mix(in srgb, var(--box) 82%, transparent);
+      width: 10px;
+      height: 10px;
+    }
+    *::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border-radius: 5px;
+      border: 2px solid var(--box);
+    }
+    .drawer-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .drawer-close {
+      border: 0;
+      background: none;
+      color: var(--muted);
+      font: 12px/1 var(--sans);
+      padding: 4px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .drawer-close:hover {
+      color: var(--fg);
+      background: rgb(128 128 128 / 0.18);
+    }
+    .drawer-empty {
+      margin-top: 28px;
+      text-align: center;
+      color: var(--faint);
+      font-size: 12px;
+    }
+    #issues h3 {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 16px 0 8px;
+    }
+    #issues .item {
+      padding: 7px 9px;
+      padding-left: 16px;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--box-hi);
+      font: 11px/1.5 var(--mono);
+    }
+    #issues .item:hover {
+      border-color: var(--line-strong);
+      background: #202634;
+    }
+    #issues .item .msg {
+      color: var(--muted);
+      font-size: 10.5px;
+      white-space: pre-wrap;
+      margin-top: 3px;
+    }
+    #issues .item.violation {
+      background: linear-gradient(110deg, var(--bad), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
+    #issues .item.smell {
+      background: linear-gradient(110deg, var(--smell), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
+
+    #tooltip {
+      position: fixed;
+      z-index: 50;
+      max-width: 480px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+      background: rgb(11 14 19 / 0.95);
+      border: 1px solid var(--line-strong);
+      color: #dbe2ea;
+      font: 11px/1.5 var(--mono);
+      white-space: pre-wrap;
+      display: none;
+      box-shadow: 0 12px 32px rgb(0 0 0 / 0.55);
+    }
+    #tooltip .t-src {
+      font-weight: 700;
+      color: var(--fg);
+    }
+    #tooltip .t-row {
+      margin-top: 2px;
+    }
+    #tooltip .t-spec {
+      color: color-mix(in srgb, var(--hi-out) 55%, var(--fg));
+    }
+    #tooltip .t-kind {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 0 4px;
+      border-radius: 4px;
+      background: rgb(255 255 255 / 0.08);
+      color: var(--muted);
+      font-size: 9.5px;
+    }
+    #tooltip .t-names {
+      color: color-mix(in srgb, var(--hi-in) 55%, var(--fg));
+    }
+    #tooltip .t-via, #tooltip .t-land {
+      color: var(--muted);
+    }
+    #tooltip .t-verdict {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--line-strong);
+      font: 11px/1.5 var(--sans);
+      color: #c8cfd9;
+      white-space: normal;
+    }
+    #tooltip .t-rule {
+      font-family: var(--mono);
+      font-weight: 700;
+    }
+    #tooltip .t-rule.violation {
+      color: var(--bad);
+    }
+    #tooltip .t-rule.smell {
+      color: var(--smell);
+    }
+
+    #bottombar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      padding: 7px 14px;
+      background: color-mix(in srgb, var(--box) 82%, transparent);
+      backdrop-filter: blur(10px);
+      border-top: 1px solid var(--line);
+      font-size: 11.5px;
+    }
+    #bottombar .bar-label {
+      color: var(--faint);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-right: 4px;
+    }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span id="live" title="Static snapshot">
+        <span class="status-dot"></span>
+      </span>
+      <h1>
+        <span class="brand">ELDA</span>
+        <div class="sep"></div>
+        <span id="app-name"></span>
+      </h1>
+      <span class="counts" id="counts"></span>
+      <div style="flex-grow: 1"></div>
+      <span class="toggles">
+        <label><input type="checkbox" id="t-ok" checked> deps</label>
+        <label><input type="checkbox" id="t-type"> type-only</label>
+        <label><input type="checkbox" id="t-assets" checked>
+          styles+assets</label>
+        <label><input type="checkbox" id="t-surfaces"> surfaces</label>
+      </span>
+      <button id="issues-btn">issues <span id="issue-count"></span></button>
+    </header>
+    <div id="wrap">
+      <div id="root-bar"></div>
+      <div id="main">
+        <div id="nondomains" hidden>
+          <div id="core-box" hidden></div>
+        </div>
+        <div id="domains"></div>
+      </div>
+      <svg id="edges"></svg>
     </div>
-    <div id="domains"></div>
-  </div>
-  <svg id="edges"></svg>
-</div>
-<aside id="issues"></aside>
-<nav id="bottombar"></nav>
-<div id="tooltip"></div>
+    <aside id="issues"></aside>
+    <div class="bottom">
+      <div class="legend">
+        <div class="col">
+          <span><i class="violation"></i>violation</span>
+          <span><i class="smell"></i>inadvisable</span>
+          <span><i class="type"></i>type-only</span>
+        </div>
+        <div class="col">
+          <span><i></i>dependency</span>
+          <span><i class="in"></i>dependency of</span>
+          <span><i class="out"></i>depends on</span>
+        </div>
+      </div>
+      <nav id="bottombar"></nav>
+    </div>
+    <div id="tooltip"></div>
 
-<script type="module">
-const INLINE = /*__DATA__*/null;
-const ROWS = ['surface', 'services', 'adapters', 'use-cases', 'entities'];
-const ROW_LABEL = { surface: 'surfaces', services: 'services', adapters: 'adapters', 'use-cases': 'use-cases', entities: 'entities' };
+    <script type="module">
+    const INLINE = /*__DATA__*/ null;
+    const ROWS = ["surface", "services", "adapters", "use-cases", "entities"];
+    const ROW_LABEL = {
+      surface: "surfaces",
+      services: "services",
+      adapters: "adapters",
+      "use-cases": "use-cases",
+      entities: "entities",
+    };
 
-let data = null;
-let drawn = [];
-let stickyPaths = [];
-let chips = new Map();
-let pinnedPath = null;
-let hiddenBlocks = new Set();
+    let data = null;
+    let drawn = [];
+    let stickyPaths = [];
+    let chips = new Map();
+    let pinnedPath = null;
+    const initialHidden = new Set(["@root", "@core"]);
+    let hiddenBlocks = new Set(initialHidden);
 
-const $ = (id) => document.getElementById(id);
-const wrap = $('wrap'), svg = $('edges'), tooltip = $('tooltip');
-const byPath = (a, b) => a.path.localeCompare(b.path);
+    const $ = (id) => document.getElementById(id);
+    const wrap = $("wrap"),
+      svg = $("edges"),
+      tooltip = $("tooltip");
+    const byPath = (a, b) => a.path.localeCompare(b.path);
 
-// Hidden top-level blocks persist per app across reloads; storage may be unavailable on a file:// snapshot, so degrade to session-only state.
-const storageKey = () => 'elda-viz-hidden:' + (data ? data.app : '');
-function loadHidden() {
-  try { hiddenBlocks = new Set(JSON.parse(localStorage.getItem(storageKey()) ?? '[]')); } catch { hiddenBlocks = new Set(); }
-}
-function saveHidden() {
-  try { localStorage.setItem(storageKey(), JSON.stringify([...hiddenBlocks])); } catch {}
-}
+    // Hidden top-level blocks persist per app across reloads; storage may be unavailable on a file:// snapshot, so degrade to session-only state.
+    const storageKey = () => "elda-viz-hidden:" + (data ? data.app : "");
+    function loadHidden() {
+      try {
+        const stored = localStorage.getItem(storageKey());
 
-// ---------------------------------------------------------------------------
-// Placement: where a file renders, derived from the role the scanner assigned.
-
-// The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
-function blockOf(f) {
-  const p = place(f);
-  if (p.area === 'root') return '@root';
-  if (p.area === 'core') return '@core';
-  if (p.area === 'domain') return p.domain;
-  return null;
-}
-
-// A layer file belongs to the unit its own name declares; that name is its sub-column, so units line up as concerns the way the diagram draws UI / Network / Data - at the domain root and inside every subdomain alike.
-// Bare reserved-name files (the layer aggregates, the composer) and surfaces are subdomain-wide and stay in the unnamed sub-column.
-function unitCol(r) {
-  if (r.name) return r.name;
-  if (r.via === 'unit-dir' && r.sub.length) return r.sub[0].replace(/\.[^.]+$/, '');
-  if (r.via === 'branch' && r.sub.length > 1) return r.sub[0];
-  return '';
-}
-
-// Which cell a file renders into: the composition-root bar, the core box, or a domain's (subdomain group x unit sub-column x row) cell.
-function place(f) {
-  const r = f.role;
-  if (r.kind === 'composition-root') return { area: 'root' };
-  if (r.kind === 'core') return { area: 'core' };
-  if (r.kind === 'surface') return { area: 'domain', domain: r.chain[0], sub: r.chain.slice(1).join('/'), unit: '', row: 'surface' };
-  if (r.kind === 'domain') return { area: 'domain', domain: r.chain[0], sub: r.chain.slice(1).join('/'), unit: unitCol(r), row: r.layer };
-  return { area: 'other' };
-}
-
-// A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
-function chipParts(f) {
-  const base = f.path.split('/').pop().replace(/\.d\.ts$/, '.dts').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i, '');
-  const segs = base.split('.');
-  const label = segs[0];
-  const badges = segs.slice(1).filter((s) => !ROWS.includes(s));
-  if (f.kind === 'style') badges.push('css');
-  if (f.kind === 'asset') badges.push(f.path.split('.').pop());
-  if (f.role.via === 'branch' || f.role.via === 'unit-dir') badges.push('dir!');
-  return { label, badges };
-}
-
-// ---------------------------------------------------------------------------
-// DOM building.
-
-// Element builder: `class` and `style` arrive as strings, any other key assigns an element property when one exists (checked, hidden, on* handlers) and an attribute otherwise.
-// Child arrays flatten one level and nullish children drop, so callers can pass map results directly.
-function h(tag, props = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'class') el.className = v;
-    else if (k === 'style') el.style.cssText = v;
-    else if (k in el) el[k] = v;
-    else el.setAttribute(k, v);
-  }
-  el.append(...children.flat().filter((c) => c != null));
-  return el;
-}
-
-// The corner button that hides a block without reaching for the bottom bar.
-function hideBtn(key) {
-  return h('button', {
-    class: 'hide-btn',
-    title: 'hide (restore from the bottom bar)',
-    onclick: (e) => { e.stopPropagation(); hiddenBlocks.add(key); saveHidden(); render(); },
-  }, '✕');
-}
-
-// A chip carries its file id, which the delegated pointer handlers and the edge layer's rect lookups both key on.
-function makeChip(f) {
-  const p = place(f);
-  const { label, badges } = chipParts(f);
-  const el = h('span', { class: 'chip ' + (p.row && p.row !== 'surface' ? p.row : p.area === 'root' ? 'services' : ''), 'data-id': f.id },
-    label, badges.map((b) => h('span', { class: 'badge' }, b)));
-  chips.set(f.id, el);
-  return el;
-}
-
-function render() {
-  chips = new Map();
-  const hideAsset = !$('t-assets').checked;
-  const expunge = !$('t-surfaces').checked;
-  const visible = (f) => !(hideAsset && f.kind !== 'code') && !(expunge && f.role.kind === 'surface') && !hiddenBlocks.has(blockOf(f));
-  renderRootBar(visible);
-  renderCoreBox(visible);
-  renderDomains(visible, expunge ? ROWS.slice(1) : ROWS);
-  // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
-  drawn = expunge ? data.flows : data.edges;
-  renderBlockBar();
-  renderIssues();
-  requestAnimationFrame(() => { drawEdges(); applyPin(); });
-}
-
-// The composition-root bar, the diagram's Application Runtime strip.
-function renderRootBar(visible) {
-  const bar = $('root-bar');
-  bar.style.display = hiddenBlocks.has('@root') ? 'none' : '';
-  bar.replaceChildren(h('div', { class: 'root-inner' },
-    h('span', { class: 'bar-title' }, 'src/' + data.options.compositionRoot),
-    data.files.filter((f) => place(f).area === 'root' && visible(f)).sort(byPath).map(makeChip),
-    hideBtn('@root')));
-}
-
-// Non-domain roots render to the left of the domains, past the faint separator.
-function renderCoreBox(visible) {
-  const box = $('core-box');
-  const coreFiles = data.files.filter((f) => place(f).area === 'core' && visible(f)).sort(byPath);
-  box.hidden = coreFiles.length === 0;
-  box.replaceChildren('src/core ', hideBtn('@core'), ...coreFiles.map(makeChip));
-  $('nondomains').hidden = box.hidden;
-}
-
-// Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
-function renderDomains(visible, rowList) {
-  const domains = new Map();
-  for (const f of data.files) {
-    const p = place(f);
-    if (p.area !== 'domain' || !visible(f)) continue;
-    if (!domains.has(p.domain)) domains.set(p.domain, new Map());
-    const subsOf = domains.get(p.domain);
-    if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
-    const units = subsOf.get(p.sub);
-    if (!units.has(p.unit)) units.set(p.unit, new Map());
-    const rows = units.get(p.unit);
-    if (!rows.has(p.row)) rows.set(p.row, []);
-    rows.get(p.row).push(f);
-  }
-
-  const domainsEl = $('domains');
-  domainsEl.replaceChildren();
-  // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows).
-  domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto)`;
-  const dotFirst = (a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b));
-  for (const [name, subsOf] of [...domains.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    // Flatten the (subdomain, unit) tree into ordered sub-columns, remembering each group's span for its header.
-    const subs = [...subsOf.keys()].sort(dotFirst);
-    const columns = [];
-    for (const sub of subs) {
-      const units = [...subsOf.get(sub).keys()].sort(dotFirst);
-      columns.push(...units.map((unit) => ({ sub, unit, rows: subsOf.get(sub).get(unit) })));
+        hiddenBlocks = stored ? new Set(JSON.parse(stored)) : new Set(initialHidden);
+      } catch {
+        hiddenBlocks = new Set(initialHidden);
+      }
     }
-    const grid = h('div', { class: 'grid', style: `grid-template-columns: 14px repeat(${columns.length}, minmax(86px, max-content))` });
-    let ci = 2;
-    for (const sub of subs) {
-      const span = subsOf.get(sub).size;
-      grid.append(h('div', { class: 'grouphead', style: `grid-column: ${ci} / span ${span}; grid-row: 1` }, sub === '' ? '·' : sub + ' /'));
-      ci += span;
+    function saveHidden() {
+      try {
+        localStorage.setItem(storageKey(), JSON.stringify([...hiddenBlocks]));
+      } catch {}
     }
-    columns.forEach((col, i) => {
-      grid.append(h('div', { class: 'colhead', style: `grid-column: ${i + 2}; grid-row: 2` }, col.unit === '' ? '·' : col.unit));
-    });
-    rowList.forEach((row, ri) => {
-      const rowHasFiles = columns.some((col) => col.rows.has(row));
-      grid.append(h('div', { class: 'rail', style: `grid-column: 1; grid-row: ${ri + 3}` }, rowHasFiles ? ROW_LABEL[row] : ''));
-      columns.forEach((col, i) => {
-        grid.append(h('div', { class: 'cell ' + row, style: `grid-column: ${i + 2}; grid-row: ${ri + 3}` },
-          (col.rows.get(row) ?? []).sort(byPath).map(makeChip)));
+
+    // ---------------------------------------------------------------------------
+    // Placement: where a file renders, derived from the role the scanner assigned.
+
+    // The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
+    function blockOf(f) {
+      const p = place(f);
+      if (p.area === "root") return "@root";
+      if (p.area === "core") return "@core";
+      if (p.area === "domain") return p.domain;
+      return null;
+    }
+
+    // A layer file belongs to the unit its own name declares; that name is its sub-column, so units line up as concerns the way the diagram draws UI / Network / Data - at the domain root and inside every subdomain alike.
+    // Bare reserved-name files (the layer aggregates, the composer) and surfaces are subdomain-wide and stay in the unnamed sub-column.
+    function unitCol(r) {
+      if (r.name) return r.name;
+      if (r.via === "unit-dir" && r.sub.length)
+        return r.sub[0].replace(/\.[^.]+$/, "");
+      if (r.via === "branch" && r.sub.length > 1) return r.sub[0];
+      return "";
+    }
+
+    // Which cell a file renders into: the composition-root bar, the core box, or a domain's (subdomain group x unit sub-column x row) cell.
+    function place(f) {
+      const r = f.role;
+      if (r.kind === "composition-root") return { area: "root" };
+      if (r.kind === "core") return { area: "core" };
+      if (r.kind === "surface")
+        return {
+          area: "domain",
+          domain: r.chain[0],
+          sub: r.chain.slice(1).join("/"),
+          unit: "",
+          row: "surface",
+        };
+      if (r.kind === "domain")
+        return {
+          area: "domain",
+          domain: r.chain[0],
+          sub: r.chain.slice(1).join("/"),
+          unit: unitCol(r),
+          row: r.layer,
+        };
+      return { area: "other" };
+    }
+
+    // A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
+    function chipParts(f) {
+      const base = f.path
+        .split("/")
+        .pop()
+        .replace(/\.d\.ts$/, ".dts")
+        .replace(
+          /\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i,
+          "",
+        );
+      const segs = base.split(".");
+      const label = segs[0];
+      const badges = segs.slice(1).filter((s) => !ROWS.includes(s));
+      if (f.kind === "style") badges.push("css");
+      if (f.kind === "asset") badges.push(f.path.split(".").pop());
+      if (f.role.via === "branch" || f.role.via === "unit-dir") badges.push("dir!");
+      return { label, badges };
+    }
+
+    // ---------------------------------------------------------------------------
+    // DOM building.
+
+    // Element builder: `class` and `style` arrive as strings, any other key assigns an element property when one exists (checked, hidden, on* handlers) and an attribute otherwise.
+    // Child arrays flatten one level and nullish children drop, so callers can pass map results directly.
+    function h(tag, props = {}, ...children) {
+      const el = document.createElement(tag);
+      for (const [k, v] of Object.entries(props)) {
+        if (k === "class") el.className = v;
+        else if (k === "style") el.style.cssText = v;
+        else if (k in el) el[k] = v;
+        else el.setAttribute(k, v);
+      }
+      el.append(...children.flat().filter((c) => c != null));
+      return el;
+    }
+
+    // The corner button that hides a block without reaching for the bottom bar.
+    function hideBtn(key) {
+      return h(
+        "button",
+        {
+          class: "hide-btn",
+          title: "hide (restore from the bottom bar)",
+          onclick: (e) => {
+            e.stopPropagation();
+            hiddenBlocks.add(key);
+            saveHidden();
+            render();
+          },
+        },
+        "✕",
+      );
+    }
+
+    // A chip carries its file id, which the delegated pointer handlers and the edge layer's rect lookups both key on.
+    function makeChip(f) {
+      const p = place(f);
+      const { label, badges } = chipParts(f);
+      const el = h(
+        "span",
+        {
+          class:
+            "chip " +
+            (p.row && p.row !== "surface"
+              ? p.row
+              : p.area === "root"
+                ? "services"
+                : ""),
+          "data-id": f.id,
+        },
+        label,
+        badges.map((b) => h("span", { class: "badge" }, b)),
+      );
+      chips.set(f.id, el);
+      return el;
+    }
+
+    function render() {
+      chips = new Map();
+      const hideAsset = !$("t-assets").checked;
+      const expunge = !$("t-surfaces").checked;
+      const visible = (f) =>
+        !(hideAsset && f.kind !== "code") &&
+        !(expunge && f.role.kind === "surface") &&
+        !hiddenBlocks.has(blockOf(f));
+      renderRootBar(visible);
+      renderCoreBox(visible);
+      renderDomains(visible, expunge ? ROWS.slice(1) : ROWS);
+      // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
+      drawn = expunge ? data.flows : data.edges;
+      renderBlockBar();
+      renderIssues();
+      requestAnimationFrame(() => {
+        drawEdges();
+        applyPin();
       });
+    }
+
+    // The composition-root bar, the diagram's Application Runtime strip.
+    function renderRootBar(visible) {
+      const bar = $("root-bar");
+      bar.style.display = hiddenBlocks.has("@root") ? "none" : "";
+      bar.replaceChildren(
+        h(
+          "div",
+          { class: "root-inner" },
+          h("span", { class: "bar-title" }, "src/" + data.options.compositionRoot),
+          data.files
+            .filter((f) => place(f).area === "root" && visible(f))
+            .sort(byPath)
+            .map(makeChip),
+          hideBtn("@root"),
+        ),
+      );
+    }
+
+    // Non-domain roots render to the left of the domains, past the faint separator.
+    function renderCoreBox(visible) {
+      const box = $("core-box");
+      const coreFiles = data.files
+        .filter((f) => place(f).area === "core" && visible(f))
+        .sort(byPath);
+      box.hidden = coreFiles.length === 0;
+      box.replaceChildren(
+        "src/core ",
+        hideBtn("@core"),
+        ...coreFiles.map(makeChip),
+      );
+      $("nondomains").hidden = box.hidden;
+    }
+
+    // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
+    function renderDomains(visible, rowList) {
+      const domains = new Map();
+      for (const f of data.files) {
+        const p = place(f);
+        if (p.area !== "domain" || !visible(f)) continue;
+        if (!domains.has(p.domain)) domains.set(p.domain, new Map());
+        const subsOf = domains.get(p.domain);
+        if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
+        const units = subsOf.get(p.sub);
+        if (!units.has(p.unit)) units.set(p.unit, new Map());
+        const rows = units.get(p.unit);
+        if (!rows.has(p.row)) rows.set(p.row, []);
+        rows.get(p.row).push(f);
+      }
+
+      const domainsEl = $("domains");
+      domainsEl.replaceChildren();
+      // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows).
+      domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto)`;
+      const dotFirst = (a, b) =>
+        a === "" ? -1 : b === "" ? 1 : a.localeCompare(b);
+
+      const sortedDomains = [...domains.entries()].sort((a, b) => {
+        return (b[1].size - a[1].size) || a[0].localeCompare(b[0]);
+      });
+
+      for (const [name, subsOf] of sortedDomains) {
+        // Flatten the (subdomain, unit) tree into ordered sub-columns, remembering each group's span for its header.
+        const subs = [...subsOf.keys()].sort(dotFirst);
+        const columns = [];
+        for (const sub of subs) {
+          const units = [...subsOf.get(sub).keys()].sort(dotFirst);
+          columns.push(
+            ...units.map((unit) => ({
+              sub,
+              unit,
+              rows: subsOf.get(sub).get(unit),
+            })),
+          );
+        }
+        const grid = h("div", {
+          class: "grid",
+          style: `grid-template-columns: 14px repeat(${columns.length}, minmax(86px, max-content))`,
+        });
+        let ci = 2;
+        for (const sub of subs) {
+          const span = subsOf.get(sub).size;
+          grid.append(
+            h(
+              "div",
+              {
+                class: "grouphead",
+                style: `grid-column: ${ci} / span ${span}; grid-row: 1`,
+              },
+              sub === "" ? "·" : sub + " /",
+            ),
+          );
+          ci += span;
+        }
+        columns.forEach((col, i) => {
+          grid.append(
+            h(
+              "div",
+              { class: "colhead", style: `grid-column: ${i + 2}; grid-row: 2` },
+              col.unit === "" ? "·" : col.unit,
+            ),
+          );
+        });
+        rowList.forEach((row, ri) => {
+          const rowHasFiles = columns.some((col) => col.rows.has(row));
+          grid.append(
+            h(
+              "div",
+              { class: "rail", style: `grid-column: 1; grid-row: ${ri + 3}` },
+              rowHasFiles ? ROW_LABEL[row] : "",
+            ),
+          );
+          columns.forEach((col, i) => {
+            grid.append(
+              h(
+                "div",
+                {
+                  class: "cell " + row,
+                  style: `grid-column: ${i + 2}; grid-row: ${ri + 3}`,
+                },
+                (col.rows.get(row) ?? []).sort(byPath).map(makeChip),
+              ),
+            );
+          });
+        });
+        domainsEl.append(
+          h("section", { class: "domain" }, h("h2", {}, name, hideBtn(name)), grid),
+        );
+      }
+    }
+
+    // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
+    function renderBlockBar() {
+      const blocks = [["@root", "src/" + data.options.compositionRoot]];
+      if (data.files.some((f) => place(f).area === "core"))
+        blocks.push(["@core", "src/core"]);
+      for (const d of [
+        ...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith("@"))),
+      ].sort())
+        blocks.push([d, d]);
+      const keys = blocks.map(([k]) => k);
+      const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
+      $("bottombar").replaceChildren(
+        h("span", { class: "bar-label" }, "blocks:"),
+        h(
+          "label",
+          {},
+          h("input", {
+            type: "checkbox",
+            checked: shown === keys.length,
+            indeterminate: shown > 0 && shown < keys.length,
+            onchange: (e) => {
+              for (const k of keys)
+                hiddenBlocks[e.target.checked ? "delete" : "add"](k);
+              saveHidden();
+              render();
+            },
+          }),
+          "all",
+        ),
+        ...blocks.map(([key, text]) =>
+          h(
+            "label",
+            { class: hiddenBlocks.has(key) ? "off" : "" },
+            h("input", {
+              type: "checkbox",
+              checked: !hiddenBlocks.has(key),
+              onchange: (e) => {
+                hiddenBlocks[e.target.checked ? "delete" : "add"](key);
+                saveHidden();
+                render();
+              },
+            }),
+            text,
+          ),
+        ),
+      );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Edges.
+
+    function edgeClass(e) {
+      if (e.tier === "invariant") return "violation";
+      if (e.tier === "smell") return "smell";
+      if (e.typeOnly) return "type";
+      return "ok";
+    }
+
+    function edgeVisible(e) {
+      if (e.to == null) return false;
+      if (!chips.has(e.from) || !chips.has(e.to)) return false;
+      const cls = edgeClass(e);
+      if (cls === "ok" && !$("t-ok").checked) return false;
+      if (cls === "type" && !$("t-type").checked) return false;
+      return true;
+    }
+
+    // How an edge anchors per ELDA: a reference inside one subdomain column, or one touching the composition root, flows vertically; a reference crossing (sub)domains or touching a non-domain block travels laterally through the sides; same-cell references arc beside their cell, and anything unclassified keeps the geometric default.
+    function edgeMode(e) {
+      const pf = place(data.files[e.from]),
+        pt = place(data.files[e.to]);
+      if (pf.area === "root" || pt.area === "root") return "v";
+      if (
+        pf.area === "domain" &&
+        pt.area === "domain" &&
+        pf.domain === pt.domain &&
+        pf.sub === pt.sub &&
+        pf.unit === pt.unit
+      ) {
+        return pf.row === pt.row ? "loop" : "v";
+      }
+      if (
+        (pf.area === "domain" || pf.area === "core") &&
+        (pt.area === "domain" || pt.area === "core")
+      )
+        return "h";
+      return "auto";
+    }
+
+    // The concrete sides an edge occupies: vertical runs leave and land on the facing horizontal sides, lateral runs on the facing vertical sides, and same-cell arcs pair the two right sides.
+    function edgeSides(e, rectOf) {
+      const S = rectOf(e.from),
+        T = rectOf(e.to);
+      const dx = T.x + T.w / 2 - (S.x + S.w / 2),
+        dy = T.y + T.h / 2 - (S.y + S.h / 2);
+      const mode = edgeMode(e);
+      const vert = () => ({
+        kind: "v",
+        from: dy > 0 ? "b" : "t",
+        to: dy > 0 ? "t" : "b",
+      });
+      const horiz = () => ({
+        kind: "h",
+        from: dx > 0 ? "r" : "l",
+        to: dx > 0 ? "l" : "r",
+      });
+      if (
+        mode === "loop" ||
+        (mode === "auto" && Math.abs(dx) < 40 && Math.abs(dy) < 30)
+      )
+        return { kind: "arc", from: "r", to: "r" };
+      if (mode === "v") return vert();
+      if (mode === "h")
+        return Math.abs(dx) < 40 ? { kind: "arc", from: "r", to: "r" } : horiz();
+      return Math.abs(dx) > Math.abs(dy) ? horiz() : vert();
+    }
+
+    // Every endpoint sharing a chip side gets its own evenly spaced port, ordered by where the opposite endpoint sits, so a fan of edges spreads cleanly along the side.
+    function assignPorts(entries, rectOf) {
+      const groups = new Map();
+      for (const en of entries) {
+        for (const end of ["from", "to"]) {
+          const side = en.sides[end];
+          const other = rectOf(end === "from" ? en.e.to : en.e.from);
+          const pos =
+            side === "t" || side === "b"
+              ? other.x + other.w / 2
+              : other.y + other.h / 2;
+          const key = (end === "from" ? en.e.from : en.e.to) + ":" + side;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push({ en, end, pos });
+        }
+      }
+      for (const arr of groups.values()) {
+        arr.sort((a, b) => a.pos - b.pos);
+        arr.forEach((s, i) => {
+          s.en[s.end + "Frac"] = (i + 1) / (arr.length + 1);
+          s.en[s.end + "Idx"] = i;
+        });
+      }
+    }
+
+    // The pixel position of a port: a fraction along its side, inset so the outermost ports keep clear of the chip's corners.
+    function port(rect, side, frac) {
+      const padX = Math.min(7, rect.w / 4),
+        padY = Math.min(5, rect.h / 4);
+      if (side === "t") return [rect.x + padX + (rect.w - 2 * padX) * frac, rect.y];
+      if (side === "b")
+        return [rect.x + padX + (rect.w - 2 * padX) * frac, rect.y + rect.h];
+      if (side === "l") return [rect.x, rect.y + padY + (rect.h - 2 * padY) * frac];
+      return [rect.x + rect.w, rect.y + padY + (rect.h - 2 * padY) * frac];
+    }
+
+    function drawEdges() {
+      const wrapRect = wrap.getBoundingClientRect();
+      svg.setAttribute("width", wrap.scrollWidth);
+      svg.setAttribute("height", wrap.scrollHeight);
+      svg.replaceChildren();
+      const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+      defs.innerHTML = ["ok", "type", "smell", "violation", "hi-in", "hi-out"]
+        .map((c) => {
+          const color = {
+            ok: "var(--ok)",
+            type: "var(--type)",
+            smell: "var(--smell)",
+            violation: "var(--bad)",
+            "hi-in": "var(--hi-in)",
+            "hi-out": "var(--hi-out)",
+          }[c];
+          return `<marker id="m-${c}" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.8 L9.5 5 L0 9.2 L2.6 5 z" fill="${color}"/></marker>`;
+        })
+        .join("");
+      svg.append(defs);
+
+      const rectOf = rectFor(wrapRect);
+      const entries = [];
+      drawn.forEach((e, i) => {
+        if (!edgeVisible(e) || e.from === e.to) return;
+        entries.push({ e, i, sides: edgeSides(e, rectOf) });
+      });
+      assignPorts(entries, rectOf);
+      stickyPaths = [];
+      for (const en of entries) {
+        const d = edgePath(en, rectOf);
+        const cls = edgeClass(en.e);
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        path.setAttribute("class", "edge " + cls);
+        path.setAttribute("marker-end", `url(#m-${cls})`);
+        path.dataset.from = en.e.from;
+        path.dataset.to = en.e.to;
+        svg.append(path);
+        const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        hit.setAttribute("d", d);
+        hit.setAttribute("class", "hit");
+        hit.dataset.i = en.i;
+        svg.append(hit);
+        // Only edges touching the viewport-sticky root chips move on scroll; remember them so scrolling rewrites their geometry in place.
+        if (isRootFile(en.e.from) || isRootFile(en.e.to))
+          stickyPaths.push({ en, path, hit });
+      }
+    }
+
+    const isRootFile = (id) => place(data.files[id]).area === "root";
+    const rectFor = (wrapRect) => (id) => {
+      const r = chips.get(id).getBoundingClientRect();
+      return {
+        x: r.left - wrapRect.left,
+        y: r.top - wrapRect.top,
+        w: r.width,
+        h: r.height,
+      };
+    };
+
+    // One edge's cubic through its assigned ports: curvature scales with the distance covered plus a share of the cross-axis distance so long fans stay rounded, and same-cell arcs nest by port index; shared by the full rebuild and the on-scroll geometry updates.
+    function edgePath(en, rectOf) {
+      const { sides } = en;
+      const S = rectOf(en.e.from),
+        T = rectOf(en.e.to);
+      const [x1, y1] = port(S, sides.from, en.fromFrac);
+      const [x2, y2] = port(T, sides.to, en.toFrac);
+      if (sides.kind === "arc") {
+        const off = 26 + 8 * en.fromIdx;
+        return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
+      }
+      if (sides.kind === "v") {
+        const off =
+          Math.min(Math.abs(y2 - y1) * 0.5, 130) +
+          Math.min(Math.abs(x2 - x1) * 0.12, 60) +
+          14;
+        const c1 = y1 + (sides.from === "b" ? off : -off);
+        const c2 = y2 + (sides.to === "t" ? -off : off);
+        return `M${x1} ${y1} C${x1} ${c1}, ${x2} ${c2}, ${x2} ${y2}`;
+      }
+      const off =
+        Math.min(Math.abs(x2 - x1) * 0.5, 130) +
+        Math.min(Math.abs(y2 - y1) * 0.12, 60) +
+        14;
+      const c1 = x1 + (sides.from === "r" ? off : -off);
+      const c2 = x2 + (sides.to === "l" ? -off : off);
+      return `M${x1} ${y1} C${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
+    }
+
+    // The scroll-time pass: rewrite the sticky-connected paths' geometry in place through their frozen ports, touching no other DOM.
+    function updateStickyEdges() {
+      if (!stickyPaths.length) return;
+      const rectOf = rectFor(wrap.getBoundingClientRect());
+      for (const s of stickyPaths) {
+        const d = edgePath(s.en, rectOf);
+        s.path.setAttribute("d", d);
+        s.hit.setAttribute("d", d);
+      }
+    }
+
+    // The edge tooltip, each fact in its own register: the source module, the authored specifier with its kind badges, the bindings taken, the re-export chain ridden, the module landed on, and the verdict as a separated prose block with the rule id in its tier color.
+    function edgeTip(e) {
+      const kinds = [];
+      if (e.typeOnly) kinds.push("type-only");
+      if (e.kind === "dynamic") kinds.push("dynamic");
+      if (e.kind === "reexport") kinds.push("re-export");
+      if (e.kind === "side-effect") kinds.push("side-effect");
+      const tip = h(
+        "div",
+        {},
+        h("div", { class: "t-src" }, data.files[e.from].path),
+        h(
+          "div",
+          { class: "t-row t-spec" },
+          `→ ${e.spec}`,
+          kinds.map((k) => h("span", { class: "t-kind" }, k)),
+        ),
+        Array.isArray(e.names) && e.names.length
+          ? h("div", { class: "t-row t-names" }, `{ ${e.names.join(", ")} }`)
+          : null,
+        e.via && e.via.length
+          ? h(
+              "div",
+              { class: "t-row t-via" },
+              e.via.map((id) => h("div", {}, `via ${data.files[id].path}`)),
+            )
+          : null,
+        e.to != null
+          ? h("div", { class: "t-row t-land" }, `= ${data.files[e.to].path}`)
+          : null,
+      );
+      if (e.verdict) {
+        const m = e.verdict.match(/^(ELDA [A-Z]+\.\d+(?: \([^)]+\))?):\s*([\s\S]*)$/);
+        const cls = e.tier === "invariant" ? "violation" : "smell";
+        tip.append(
+          m
+            ? h(
+                "div",
+                { class: "t-verdict" },
+                h("b", { class: "t-rule " + cls }, m[1]),
+                ` ${m[2]}`,
+              )
+            : h("div", { class: "t-verdict" }, e.verdict),
+        );
+      }
+      return tip;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Focus: hovering or pinning a chip raises its edges and its neighbors.
+
+    let focused = null;
+
+    function focus(id, pointerover) {
+      svg.classList.add("focused");
+      if (!pointerover) {
+        focused = id;
+      }
+      const related = new Map();
+      for (const p of svg.querySelectorAll("path.edge")) {
+        const out = Number(p.dataset.from) === id,
+          inc = Number(p.dataset.to) === id;
+        p.classList.toggle("hi-out", out);
+        p.classList.toggle("hi-in", inc);
+        if (out) {
+          p.setAttribute("marker-end", "url(#m-hi-out)");
+          related.set(Number(p.dataset.to), "rel-out");
+        } else if (inc) {
+          p.setAttribute("marker-end", "url(#m-hi-in)");
+          related.set(Number(p.dataset.from), "rel-in");
+        } else
+          p.setAttribute(
+            "marker-end",
+            `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
+          );
+      }
+      for (const [cid, el] of chips) {
+        el.classList.toggle("rel-out", related.get(cid) === "rel-out");
+        el.classList.toggle("rel-in", related.get(cid) === "rel-in");
+        el.classList.toggle("dim", cid !== id && !related.has(cid));
+      }
+    }
+
+    function blur(pinned, pointerout) {
+      if (!pinned && pointerout) {
+        focus(focused);
+        return;
+      }
+      focused = null;
+      svg.classList.remove("focused");
+      for (const p of svg.querySelectorAll("path.edge")) {
+        p.classList.remove("hi-out", "hi-in");
+        p.setAttribute(
+          "marker-end",
+          `url(#m-${[...p.classList].find((c) => c !== "edge")})`,
+        );
+      }
+      for (const el of chips.values())
+        el.classList.remove("dim", "rel-out", "rel-in", "pinned");
+    }
+
+    function applyPin() {
+      if (pinnedPath === null) {
+        blur();
+        return;
+      }
+      const f = data.files.find((f) => f.path === pinnedPath);
+      if (!f || !chips.has(f.id)) {
+        pinnedPath = null;
+        blur();
+        return;
+      }
+      focus(f.id);
+      chips.get(f.id).classList.add("pinned");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Interactions: delegated hover and pinning, grab panning, the tooltip.
+
+    // Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
+    // The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
+    wrap.addEventListener("pointerover", (e) => {
+      if (e.target.classList.contains("hit")) {
+        showTip(e, edgeTip(drawn[Number(e.target.dataset.i)]));
+        return;
+      }
+      const chip = e.target.closest(".chip");
+      if (!chip || chip.contains(e.relatedTarget)) return;
+      const f = data.files[Number(chip.dataset.id)];
+      focus(f.id, true);
+      showTip(e, f.path);
     });
-    domainsEl.append(h('section', { class: 'domain' }, h('h2', {}, name, hideBtn(name)), grid));
-  }
-}
+    wrap.addEventListener("pointerout", (e) => {
+      if (e.target.classList.contains("hit")) {
+        hideTip();
+        return;
+      }
+      const chip = e.target.closest(".chip");
+      if (!chip || chip.contains(e.relatedTarget)) return;
+      blur(pinnedPath === null, true);
+      hideTip();
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (tooltip.style.display === "block") moveTip(e);
+    });
+    wrap.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      e.stopPropagation();
+      const f = data.files[Number(chip.dataset.id)];
+      if (e.ctrlKey || e.altKey) {
+        window.location.href = ("vscode://file/" + data.cwd + "/" + f.path);
+      }
+      pinnedPath = pinnedPath === f.path ? null : f.path;
+      render();
+    });
+    document.body.addEventListener("click", () => {
+      if (!suppressClick && pinnedPath !== null) {
+        pinnedPath = null;
+        applyPin();
+      }
+    });
 
-// The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
-function renderBlockBar() {
-  const blocks = [['@root', 'src/' + data.options.compositionRoot]];
-  if (data.files.some((f) => place(f).area === 'core')) blocks.push(['@core', 'src/core']);
-  for (const d of [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith('@')))].sort()) blocks.push([d, d]);
-  const keys = blocks.map(([k]) => k);
-  const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
-  $('bottombar').replaceChildren(
-    h('span', { class: 'bar-label' }, 'blocks:'),
-    h('label', {}, h('input', {
-      type: 'checkbox',
-      checked: shown === keys.length,
-      indeterminate: shown > 0 && shown < keys.length,
-      onchange: (e) => {
-        for (const k of keys) hiddenBlocks[e.target.checked ? 'delete' : 'add'](k);
-        saveHidden();
-        render();
+    // Grab panning: dragging the board scrolls the page on both axes, with momentum on release.
+    // Interactive elements keep their own pointer behavior, and a drag suppresses the click that would otherwise clear the pin.
+
+    const scroller = document.scrollingElement;
+    let pan = null,
+      coast = 0,
+      suppressClick = false;
+
+    document.addEventListener("pointerdown", (e) => {
+      if (
+        e.button !== 0 ||
+        e.target.closest(
+          ".chip, button, input, label, a, header, #issues, #bottombar",
+        )
+      )
+        return;
+      cancelAnimationFrame(coast);
+      pan = {
+        x: e.clientX,
+        y: e.clientY,
+        vx: 0,
+        vy: 0,
+        t: performance.now(),
+        moved: false,
+      };
+    });
+    addEventListener("pointermove", (e) => {
+      if (!pan) return;
+      const dx = e.clientX - pan.x,
+        dy = e.clientY - pan.y;
+      if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+      if (!pan.moved) {
+        pan.moved = true;
+        document.body.classList.add("panning");
+      }
+      const now = performance.now(),
+        dt = Math.max(now - pan.t, 1);
+      pan.vx = 0.75 * ((dx / dt) * 16) + 0.25 * pan.vx;
+      pan.vy = 0.75 * ((dy / dt) * 16) + 0.25 * pan.vy;
+      scroller.scrollLeft -= dx;
+      scroller.scrollTop -= dy;
+      pan.x = e.clientX;
+      pan.y = e.clientY;
+      pan.t = now;
+    });
+    addEventListener("pointerup", () => {
+      if (!pan) return;
+      const { moved } = pan;
+      let { vx, vy } = pan;
+      pan = null;
+      document.body.classList.remove("panning");
+      if (!moved) return;
+      suppressClick = true;
+      setTimeout(() => {
+        suppressClick = false;
+      }, 0);
+      const step = () => {
+        vx *= 0.92;
+        vy *= 0.92;
+        if (Math.abs(vx) < 0.4 && Math.abs(vy) < 0.4) return;
+        scroller.scrollLeft -= vx;
+        scroller.scrollTop -= vy;
+        coast = requestAnimationFrame(step);
+      };
+      coast = requestAnimationFrame(step);
+    });
+    addEventListener("wheel", () => cancelAnimationFrame(coast), { passive: true });
+
+    // The tip content is a plain string for chips and a built element for edges.
+    function showTip(ev, content) {
+      if (typeof content === "string") tooltip.textContent = content;
+      else tooltip.replaceChildren(content);
+      tooltip.style.display = "block";
+      moveTip(ev);
+    }
+    function moveTip(ev) {
+      const pad = 12;
+      tooltip.style.left =
+        Math.min(ev.clientX + pad, innerWidth - tooltip.offsetWidth - pad) + "px";
+      tooltip.style.top =
+        Math.min(ev.clientY + pad, innerHeight - tooltip.offsetHeight - pad) + "px";
+    }
+    function hideTip() {
+      tooltip.style.display = "none";
+    }
+
+    // ---------------------------------------------------------------------------
+    // Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
+
+    // A header stat: the count and its label; the severity stats add a dot that takes the severity color while the count is nonzero.
+    const stat = (n, label, sev) =>
+      h(
+        "span",
+        { class: "stat" + (sev ? " " + sev : "") },
+        sev ? h("i", { class: "dot" }) : null,
+        h("b", {}, `${n}`),
+        ` ${label}`,
+      );
+
+    function renderIssues() {
+      const el = $("issues");
+      el.replaceChildren(
+        h(
+          "div",
+          { class: "drawer-head" },
+          h("span", { class: "drawer-title" }, "Issues"),
+          h(
+            "button",
+            {
+              class: "drawer-close",
+              title: "close",
+              onclick: (ev) => {
+                ev.stopPropagation();
+                el.classList.remove("open");
+              },
+            },
+            "✕",
+          ),
+        ),
+      );
+      const issuesBody = h("div", { class: "drawer-body" });
+      el.append(issuesBody);
+      const section = (title, items, build) => {
+        if (!items.length) return;
+        issuesBody.append(
+          h("h3", {}, `${title} (${items.length})`),
+          ...items.map(build),
+        );
+      };
+      const pinFrom = (e) => (ev) => {
+        ev.stopPropagation();
+        pinnedPath = data.files[e.from].path;
+        applyPin();
+        chips.get(e.from)?.scrollIntoView({
+          block: "center",
+          inline: "center",
+          behavior: "smooth",
+        });
+      };
+      const verdictItem = (e) =>
+        h(
+          "div",
+          {
+            class: "item " + (e.tier === "invariant" ? "violation" : "smell"),
+            onclick: pinFrom(e),
+          },
+          h("div", {}, `${data.files[e.from].path} → `, h("b", {}, e.spec)),
+          h("div", { class: "msg" }, e.verdict),
+        );
+      section(
+        "Violations",
+        data.edges.filter((e) => e.tier === "invariant"),
+        verdictItem,
+      );
+      section(
+        "Inadvisable (graded smells)",
+        data.edges.filter((e) => e.tier === "smell"),
+        verdictItem,
+      );
+      // Findings the per-file rules cannot see: every hop is clean, the landed flow is not.
+      section(
+        "Laundered through indirection (graph-only)",
+        data.flows.filter((f) => f.laundered),
+        (f) =>
+          h(
+            "div",
+            {
+              class: "item " + (f.tier === "invariant" ? "violation" : "smell"),
+              onclick: pinFrom(f),
+            },
+            h("div", {}, `${data.files[f.from].path} ⇒ ${data.files[f.to].path}`),
+            h(
+              "div",
+              { class: "msg" },
+              `via ${f.via.map((id) => data.files[id].path).join("\n   via ")}\n${f.verdict}`,
+            ),
+          ),
+      );
+      section(
+        "Unresolved specifiers",
+        data.edges.filter((e) => e.to == null),
+        (e) =>
+          h("div", { class: "item" }, `${data.files[e.from].path} → ${e.spec}`),
+      );
+      section(
+        "Unclassified files",
+        data.files.filter((f) => place(f).area === "other"),
+        (f) => h("div", { class: "item" }, f.path),
+      );
+      if (issuesBody.childElementCount === 1)
+        issuesBody.append(h("div", { class: "drawer-empty" }, "No findings"));
+      const bad = data.edges.filter((e) => e.tier === "invariant").length;
+      const smell = data.edges.filter((e) => e.tier === "smell").length;
+      const laundered = data.flows.filter((f) => f.laundered).length;
+      $("issue-count").textContent = `${bad + smell + laundered}`;
+      $("issue-count").classList.toggle("hot", bad + smell + laundered > 0);
+      $("counts").replaceChildren(
+        stat(data.files.length, "files"),
+        stat(data.edges.length, "edges"),
+        stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
+        stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
+        stat(laundered, "laundered", laundered ? "sev-bad" : "sev-zero"),
+      );
+    }
+
+    $("issues-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      $("issues").classList.toggle("open");
+    });
+    $("bottombar").addEventListener("click", (e) => e.stopPropagation());
+
+    // ---------------------------------------------------------------------------
+    // Boot, toggles, live reload.
+
+    for (const id of ["t-ok", "t-type", "t-assets", "t-surfaces"])
+      $(id).addEventListener("change", render);
+
+    let resizeTimer = 0;
+    addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        drawEdges();
+        applyPin();
+      }, 120);
+    });
+
+    // The composition-root chips are viewport-sticky, so horizontal scrolling moves them relative to the board; re-aim their arrows once per frame, in place.
+    let scrollRaf = 0;
+    addEventListener(
+      "scroll",
+      () => {
+        if (scrollRaf) return;
+        scrollRaf = requestAnimationFrame(() => {
+          scrollRaf = 0;
+          updateStickyEdges();
+        });
       },
-    }), 'all'),
-    ...blocks.map(([key, text]) => h('label', { class: hiddenBlocks.has(key) ? 'off' : '' }, h('input', {
-      type: 'checkbox',
-      checked: !hiddenBlocks.has(key),
-      onchange: (e) => {
-        hiddenBlocks[e.target.checked ? 'delete' : 'add'](key);
-        saveHidden();
+      { passive: true },
+    );
+
+    async function load() {
+      try {
+        data = INLINE ?? (await (await fetch("/data.json")).json());
+        $("app-name").textContent = data.app;
+        document.title = `ELDA · ${data.app}`;
+        loadHidden();
         render();
-      },
-    }), text)));
-}
+      } catch (error) {
+        if (INLINE) return;
+        const dot = $("live").querySelector(".status-dot");
+        dot.classList.remove("on");
+        dot.classList.add("off");
+        dot.setAttribute("title", "Live reload: off");
+      }
+    }
 
-// ---------------------------------------------------------------------------
-// Edges.
-
-function edgeClass(e) {
-  if (e.tier === 'invariant') return 'violation';
-  if (e.tier === 'smell') return 'smell';
-  if (e.typeOnly) return 'type';
-  return 'ok';
-}
-
-function edgeVisible(e) {
-  if (e.to == null) return false;
-  if (!chips.has(e.from) || !chips.has(e.to)) return false;
-  const cls = edgeClass(e);
-  if (cls === 'ok' && !$('t-ok').checked) return false;
-  if (cls === 'type' && !$('t-type').checked) return false;
-  return true;
-}
-
-function anchor(rect, side) {
-  if (side === 'l') return [rect.x, rect.y + rect.h / 2];
-  if (side === 'r') return [rect.x + rect.w, rect.y + rect.h / 2];
-  if (side === 't') return [rect.x + rect.w / 2, rect.y];
-  return [rect.x + rect.w / 2, rect.y + rect.h];
-}
-
-// How an edge anchors per ELDA: a reference inside one subdomain column, or one touching the composition root, flows vertically (out the bottom, in at the top); a reference crossing (sub)domains or touching a non-domain block travels laterally through the sides; same-cell references arc beside their cell, and anything unclassified keeps the geometric default.
-function edgeMode(e) {
-  const pf = place(data.files[e.from]), pt = place(data.files[e.to]);
-  if (pf.area === 'root' || pt.area === 'root') return 'v';
-  if (pf.area === 'domain' && pt.area === 'domain' && pf.domain === pt.domain && pf.sub === pt.sub && pf.unit === pt.unit) {
-    return pf.row === pt.row ? 'loop' : 'v';
-  }
-  if ((pf.area === 'domain' || pf.area === 'core') && (pt.area === 'domain' || pt.area === 'core')) return 'h';
-  return 'auto';
-}
-
-function drawEdges() {
-  const wrapRect = wrap.getBoundingClientRect();
-  svg.setAttribute('width', wrap.scrollWidth);
-  svg.setAttribute('height', wrap.scrollHeight);
-  svg.replaceChildren();
-  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  defs.innerHTML = ['ok', 'type', 'smell', 'violation', 'hi-in', 'hi-out'].map((c) => {
-    const color = { ok: 'var(--ok)', type: 'var(--type)', smell: 'var(--smell)', violation: 'var(--bad)', 'hi-in': 'var(--hi-in)', 'hi-out': 'var(--hi-out)' }[c];
-    return `<marker id="m-${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="${color}"/></marker>`;
-  }).join('');
-  svg.append(defs);
-
-  const rectOf = rectFor(wrapRect);
-  stickyPaths = [];
-  drawn.forEach((e, i) => {
-    if (!edgeVisible(e)) return;
-    const d = edgePath(e, i, rectOf);
-    if (!d) return;
-    const cls = edgeClass(e);
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('class', 'edge ' + cls);
-    path.setAttribute('marker-end', `url(#m-${cls})`);
-    path.dataset.from = e.from;
-    path.dataset.to = e.to;
-    svg.append(path);
-    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    hit.setAttribute('d', d);
-    hit.setAttribute('class', 'hit');
-    hit.dataset.i = i;
-    svg.append(hit);
-    // Only edges touching the viewport-sticky root chips move on scroll; remember them so scrolling rewrites their geometry in place.
-    if (isRootFile(e.from) || isRootFile(e.to)) stickyPaths.push({ e, i, path, hit });
-  });
-}
-
-const isRootFile = (id) => place(data.files[id]).area === 'root';
-const rectFor = (wrapRect) => (id) => {
-  const r = chips.get(id).getBoundingClientRect();
-  return { x: r.left - wrapRect.left, y: r.top - wrapRect.top, w: r.width, h: r.height };
-};
-
-// One edge's bezier, or null for a self-edge; shared by the full rebuild and the on-scroll geometry updates.
-function edgePath(e, i, rectOf) {
-  if (e.from === e.to) return null;
-  const S = rectOf(e.from), T = rectOf(e.to);
-  const dx = (T.x + T.w / 2) - (S.x + S.w / 2), dy = (T.y + T.h / 2) - (S.y + S.h / 2);
-  const jitter = ((i % 5) - 2) * 4;
-  const mode = edgeMode(e);
-  if (mode === 'loop' || (mode === 'auto' && Math.abs(dx) < 40 && Math.abs(dy) < 30)) {
-    const [x1, y1] = anchor(S, 'r'), [x2, y2] = anchor(T, 'r');
-    const off = 34 + jitter;
-    return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
-  }
-  if (mode === 'v') {
-    const [x1, y1] = anchor(S, 'b'), [x2, y2] = anchor(T, 't');
-    const off = Math.max(22, Math.min(Math.abs(y2 - y1) / 2, 110));
-    return `M${x1} ${y1} C${x1 + jitter} ${y1 + off}, ${x2 + jitter} ${y2 - off}, ${x2} ${y2}`;
-  }
-  if (mode === 'h' && Math.abs(dx) < 40) {
-    const [x1, y1] = anchor(S, 'r'), [x2, y2] = anchor(T, 'r');
-    const off = 46 + jitter;
-    return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
-  }
-  if (mode === 'h' || Math.abs(dx) > Math.abs(dy)) {
-    const [x1, y1] = anchor(S, dx > 0 ? 'r' : 'l'), [x2, y2] = anchor(T, dx > 0 ? 'l' : 'r');
-    const off = Math.max(24, Math.min(Math.abs(x2 - x1) / 2, 110)) * (dx > 0 ? 1 : -1);
-    return `M${x1} ${y1} C${x1 + off} ${y1 + jitter}, ${x2 - off} ${y2 + jitter}, ${x2} ${y2}`;
-  }
-  const [x1, y1] = anchor(S, dy > 0 ? 'b' : 't'), [x2, y2] = anchor(T, dy > 0 ? 't' : 'b');
-  const off = Math.min(Math.abs(y2 - y1) / 2, 110) * (dy > 0 ? 1 : -1);
-  return `M${x1} ${y1} C${x1 + jitter} ${y1 + off}, ${x2 + jitter} ${y2 - off}, ${x2} ${y2}`;
-}
-
-// The scroll-time pass: rewrite the sticky-connected paths' geometry in place, touching no other DOM.
-function updateStickyEdges() {
-  if (!stickyPaths.length) return;
-  const rectOf = rectFor(wrap.getBoundingClientRect());
-  for (const s of stickyPaths) {
-    const d = edgePath(s.e, s.i, rectOf);
-    if (!d) continue;
-    s.path.setAttribute('d', d);
-    s.hit.setAttribute('d', d);
-  }
-}
-
-function edgeTip(e) {
-  const from = data.files[e.from].path;
-  let head = `${from}\n  → ${e.spec}${e.typeOnly ? '  (type-only)' : ''}${e.kind === 'dynamic' ? '  (dynamic)' : ''}${e.kind === 'reexport' ? '  (re-export)' : ''}${e.kind === 'side-effect' ? '  (side-effect)' : ''}`;
-  if (Array.isArray(e.names) && e.names.length) head += `\n  { ${e.names.join(', ')} }`;
-  if (e.via && e.via.length) head += '\n  via ' + e.via.map((id) => data.files[id].path).join('\n      ');
-  if (e.to != null) head += `\n  = ${data.files[e.to].path}`;
-  return e.verdict ? head + '\n\n' + e.verdict : head;
-}
-
-// ---------------------------------------------------------------------------
-// Focus: hovering or pinning a chip raises its edges and its neighbors.
-
-function focus(id) {
-  svg.classList.add('focused');
-  const related = new Map();
-  for (const p of svg.querySelectorAll('path.edge')) {
-    const out = Number(p.dataset.from) === id, inc = Number(p.dataset.to) === id;
-    p.classList.toggle('hi-out', out);
-    p.classList.toggle('hi-in', inc);
-    if (out) { p.setAttribute('marker-end', 'url(#m-hi-out)'); related.set(Number(p.dataset.to), 'rel-out'); }
-    else if (inc) { p.setAttribute('marker-end', 'url(#m-hi-in)'); related.set(Number(p.dataset.from), 'rel-in'); }
-    else p.setAttribute('marker-end', `url(#m-${[...p.classList].find((c) => c !== 'edge' && !c.startsWith('hi-'))})`);
-  }
-  for (const [cid, el] of chips) {
-    el.classList.toggle('rel-out', related.get(cid) === 'rel-out');
-    el.classList.toggle('rel-in', related.get(cid) === 'rel-in');
-    el.classList.toggle('dim', cid !== id && !related.has(cid));
-  }
-}
-
-function blur() {
-  svg.classList.remove('focused');
-  for (const p of svg.querySelectorAll('path.edge')) {
-    p.classList.remove('hi-out', 'hi-in');
-    p.setAttribute('marker-end', `url(#m-${[...p.classList].find((c) => c !== 'edge')})`);
-  }
-  for (const el of chips.values()) el.classList.remove('dim', 'rel-out', 'rel-in', 'pinned');
-}
-
-function applyPin() {
-  if (pinnedPath === null) { blur(); return; }
-  const f = data.files.find((f) => f.path === pinnedPath);
-  if (!f || !chips.has(f.id)) { pinnedPath = null; blur(); return; }
-  focus(f.id);
-  chips.get(f.id).classList.add('pinned');
-}
-
-// ---------------------------------------------------------------------------
-// Interactions: delegated hover and pinning, grab panning, the tooltip.
-
-// Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
-// The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
-wrap.addEventListener('pointerover', (e) => {
-  if (e.target.classList.contains('hit')) { showTip(e, edgeTip(drawn[Number(e.target.dataset.i)])); return; }
-  const chip = e.target.closest('.chip');
-  if (!chip || chip.contains(e.relatedTarget)) return;
-  const f = data.files[Number(chip.dataset.id)];
-  focus(f.id);
-  showTip(e, f.path);
-});
-wrap.addEventListener('pointerout', (e) => {
-  if (e.target.classList.contains('hit')) { hideTip(); return; }
-  const chip = e.target.closest('.chip');
-  if (!chip || chip.contains(e.relatedTarget)) return;
-  if (pinnedPath === null) blur();
-  hideTip();
-});
-wrap.addEventListener('pointermove', (e) => {
-  if (tooltip.style.display === 'block') moveTip(e);
-});
-wrap.addEventListener('click', (e) => {
-  const chip = e.target.closest('.chip');
-  if (!chip) return;
-  e.stopPropagation();
-  const f = data.files[Number(chip.dataset.id)];
-  pinnedPath = pinnedPath === f.path ? null : f.path;
-  render();
-});
-document.body.addEventListener('click', () => { if (!suppressClick && pinnedPath !== null) { pinnedPath = null; applyPin(); } });
-
-// Grab panning: dragging the board scrolls the page on both axes, with momentum on release.
-// Interactive elements keep their own pointer behavior, and a drag suppresses the click that would otherwise clear the pin.
-
-const scroller = document.scrollingElement;
-let pan = null, coast = 0, suppressClick = false;
-
-document.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target.closest('.chip, button, input, label, a, header, #issues, #bottombar')) return;
-  cancelAnimationFrame(coast);
-  pan = { x: e.clientX, y: e.clientY, vx: 0, vy: 0, t: performance.now(), moved: false };
-});
-addEventListener('pointermove', (e) => {
-  if (!pan) return;
-  const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
-  if (!pan.moved && Math.hypot(dx, dy) < 4) return;
-  if (!pan.moved) { pan.moved = true; document.body.classList.add('panning'); }
-  const now = performance.now(), dt = Math.max(now - pan.t, 1);
-  pan.vx = 0.75 * (dx / dt * 16) + 0.25 * pan.vx;
-  pan.vy = 0.75 * (dy / dt * 16) + 0.25 * pan.vy;
-  scroller.scrollLeft -= dx;
-  scroller.scrollTop -= dy;
-  pan.x = e.clientX; pan.y = e.clientY; pan.t = now;
-});
-addEventListener('pointerup', () => {
-  if (!pan) return;
-  const { moved } = pan;
-  let { vx, vy } = pan;
-  pan = null;
-  document.body.classList.remove('panning');
-  if (!moved) return;
-  suppressClick = true;
-  setTimeout(() => { suppressClick = false; }, 0);
-  const step = () => {
-    vx *= 0.92; vy *= 0.92;
-    if (Math.abs(vx) < 0.4 && Math.abs(vy) < 0.4) return;
-    scroller.scrollLeft -= vx;
-    scroller.scrollTop -= vy;
-    coast = requestAnimationFrame(step);
-  };
-  coast = requestAnimationFrame(step);
-});
-addEventListener('wheel', () => cancelAnimationFrame(coast), { passive: true });
-
-function showTip(ev, text) { tooltip.textContent = text; tooltip.style.display = 'block'; moveTip(ev); }
-function moveTip(ev) {
-  const pad = 12;
-  tooltip.style.left = Math.min(ev.clientX + pad, innerWidth - tooltip.offsetWidth - pad) + 'px';
-  tooltip.style.top = Math.min(ev.clientY + pad, innerHeight - tooltip.offsetHeight - pad) + 'px';
-}
-function hideTip() { tooltip.style.display = 'none'; }
-
-// ---------------------------------------------------------------------------
-// Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
-
-function renderIssues() {
-  const el = $('issues');
-  el.replaceChildren();
-  const section = (title, items, build) => {
-    if (!items.length) return;
-    el.append(h('h3', {}, `${title} (${items.length})`), ...items.map(build));
-  };
-  const pinFrom = (e) => (ev) => {
-    ev.stopPropagation();
-    pinnedPath = data.files[e.from].path;
-    applyPin();
-    chips.get(e.from)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  };
-  const verdictItem = (e) => h('div', { class: 'item ' + (e.tier === 'invariant' ? 'violation' : 'smell'), onclick: pinFrom(e) },
-    h('div', {}, `${data.files[e.from].path} → `, h('b', {}, e.spec)),
-    h('div', { class: 'msg' }, e.verdict));
-  section('Violations', data.edges.filter((e) => e.tier === 'invariant'), verdictItem);
-  section('Inadvisable (graded smells)', data.edges.filter((e) => e.tier === 'smell'), verdictItem);
-  // Findings the per-file rules cannot see: every hop is clean, the landed flow is not.
-  section('Laundered through indirection (graph-only)', data.flows.filter((f) => f.laundered), (f) =>
-    h('div', { class: 'item ' + (f.tier === 'invariant' ? 'violation' : 'smell'), onclick: pinFrom(f) },
-      h('div', {}, `${data.files[f.from].path} ⇒ ${data.files[f.to].path}`),
-      h('div', { class: 'msg' }, `via ${f.via.map((id) => data.files[id].path).join('\n   via ')}\n${f.verdict}`)));
-  section('Unresolved specifiers', data.edges.filter((e) => e.to == null), (e) =>
-    h('div', { class: 'item' }, `${data.files[e.from].path} → ${e.spec}`));
-  section('Unclassified files', data.files.filter((f) => place(f).area === 'other'), (f) =>
-    h('div', { class: 'item' }, f.path));
-  const bad = data.edges.filter((e) => e.tier === 'invariant').length;
-  const smell = data.edges.filter((e) => e.tier === 'smell').length;
-  const laundered = data.flows.filter((f) => f.laundered).length;
-  $('issue-count').textContent = `${bad + smell + laundered}`;
-  $('counts').replaceChildren(`${data.files.length} files · ${data.edges.length} edges · `,
-    h('b', { class: bad ? 'bad' : '' }, `${bad} violations`),
-    ` · ${smell} inadvisable · `,
-    h('b', { class: laundered ? 'bad' : '' }, `${laundered} laundered`));
-}
-
-$('issues-btn').addEventListener('click', (e) => { e.stopPropagation(); $('issues').classList.toggle('open'); });
-$('bottombar').addEventListener('click', (e) => e.stopPropagation());
-
-// ---------------------------------------------------------------------------
-// Boot, toggles, live reload.
-
-for (const id of ['t-ok', 't-type', 't-assets', 't-surfaces']) $(id).addEventListener('change', render);
-
-let resizeTimer = 0;
-addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { drawEdges(); applyPin(); }, 120); });
-
-// The composition-root chips are viewport-sticky, so horizontal scrolling moves them relative to the board; re-aim their arrows once per frame, in place.
-let scrollRaf = 0;
-addEventListener('scroll', () => {
-  if (scrollRaf) return;
-  scrollRaf = requestAnimationFrame(() => { scrollRaf = 0; updateStickyEdges(); });
-}, { passive: true });
-
-async function load() {
-  data = INLINE ?? await (await fetch('/data.json')).json();
-  $('app-name').textContent = data.app;
-  document.title = `ELDA · ${data.app}`;
-  loadHidden();
-  render();
-}
-
-if (!INLINE) {
-  const es = new EventSource('/events');
-  es.onopen = () => $('live').classList.add('on');
-  es.onerror = () => $('live').classList.remove('on');
-  es.onmessage = load;
-}
-await load();
-</script>
-</body>
+    if (!INLINE) {
+      const es = new EventSource("/events");
+      es.onopen = () => {
+        if (INLINE) return;
+        const dot = $("live").querySelector(".status-dot");
+        dot.classList.add("on");
+        dot.setAttribute("title", "Live reload: on");
+      }
+      es.onerror = () => {
+        if (INLINE) return;
+        const dot = $("live").querySelector(".status-dot");
+        dot.classList.remove("on");
+        dot.classList.add("off");
+        dot.setAttribute("title", "Live reload: off");
+      }
+      es.onmessage = load;
+    }
+    await load();
+    </script>
+  </body>
 </html>
