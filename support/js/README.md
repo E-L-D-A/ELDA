@@ -10,7 +10,7 @@ Each rule cites the ELDA constraint it enforces by its grouped ID (see [../../RE
 |---|---|---|
 | `imports` | LAYER.1, SURFACE.2, SURFACE.3, SURFACE.7, ROOT.1, ROOT.6, ROOT.7 | An inner layer importing an outer one (aliased or relative); a peer reaching into another domain's layer instead of a surface; a reach into a nested subdomain from outside its parent; a subdomain referencing its parent; a parent reaching past its direct children or composing a child from an inner layer; a surface re-bundling a peer or foreign domain; a composition root reaching a layer's internals or a nested subdomain; core importing domain code. One case grades down: a peer *service* importing another domain's `services` surface itself is OWNER.5 mounting, reported by `no-service-coupling` instead. |
 | `no-layer-branches` | LAYER.7 | A layer-named directory (`entities/`, `use-cases/`, ...) - a horizontal bucket; and a layer-suffixed directory (`layouts.services/`) - the same bucket wearing a file's name, an undeclared subdomain dodging subdomain discipline. Layer membership rides file names, and a grouping directory is a subdomain. The analyzers still recognize both legacy layouts, so this rule is a migrating codebase's fix-list. |
-| `no-diagonal-reach` | SURFACE.5 | A value reference whose binding *lands* below the consumer's own rank across any name - a sibling unit, a child subdomain, a peer, a foreign domain. The rule follows every import name by name through surfaces and re-export chains (`flow.js`) to the files that own the bindings, so the diagonal reports whether it is direct or laundered through a barrel; the finding names the landing and the hop chain. Equal-rank crossings keep their own semantics (the use-case and entity rows cross freely; the outer rows are the OWNER.5 laterals); within one subdomain the bare layer files are the shared base, readable from every unit, and the bare `services` composer is exempt there; type-only imports are vocabulary references and pass. Fix by renaming the target into the consuming unit, promoting it to the bare layer file, or crossing at equal rank. |
+| `no-diagonal-reach` (+ `no-diagonal-reach-gate`) | SURFACE.5 | A value reference whose binding *lands* below the consumer's own rank across any name. One check, graded by the width of the crossed boundary - severity grows with it - through three tri-state options (`'error' \| 'warn' \| 'off'`): `withinSubdomain` (sibling unit; default `warn`), `acrossSubdomains` (another subdomain of the same domain; default `warn`), `acrossDomains` (a foreign domain; default `error`). The lint host binds one level per rule ID, so the mapping is realized as a preset-managed pair sharing one implementation and one option map: `no-diagonal-reach` (configured `warn`) reports the classes mapped `warn`, `no-diagonal-reach-gate` (configured `error`) reports the classes mapped `error` - a partition, nothing reports twice, and the pair travels together. The walk (`flow.js`) follows every import name by name to its landing: surfaces are transparent (rank-less curation, so a barrel cannot launder a diagonal), while a rank-bearing file is a terminus - a named re-export there *adopts* the binding at that file's own rank, the spec's legal seam, and the adopting file's own edges are judged per-file. Equal-rank crossings keep their own semantics (the use-case and entity rows cross freely; the outer rows are the OWNER.5 laterals); within one subdomain the bare layer files are the shared base and the bare `services` composer is exempt; type-only imports are vocabulary references and pass. Fix by renaming the target into the consuming unit, promoting it to the bare layer file, or adopting it at the consuming unit's own matching rank. |
 | `no-async-inner` | LAYER.4 | `async` functions, `await`, `for await`, and `try`/`catch` inside `entities/` or `use-cases/`; those shapes are wrapped at Adapters into channel-conforming values. |
 | `no-mutable-surface` | CHANNEL.4 | `export let` / `export var` (directly, or exporting a top-level `let` by name) anywhere in domain code: a live mutable binding shared by reference is shared state, never published state. |
 | `ambient-ownership` | OWNER.2 | A `.d.ts` outside `src/domains/`: ambient declarations are vocabulary and co-locate with their owning domain. |
@@ -32,7 +32,7 @@ elda-viz [appDir] [--port N] [--out file.html] [--no-open]
 
 ### The landed-flow pass
 
-Alongside the per-reference verdicts, every scan expands where each binding actually lands: an import is followed name by name through barrels, named surfaces, and re-export chains to the file that owns it, so a barrel import fans out only to the bindings the consumer really takes. The walk is `flow.js`, the same one `elda/no-diagonal-reach` enforces with - the linter is this logic's primary consumer, and the diagram is its projection. On top of the shared walk the scan inherits each authored hop's verdict along the chain, judges clean-hop landings with the geometry verdicts (`landedVerdict`, the OWNER.5 laterals), and marks a fresh verdict as **laundered** in the issues drawer with the hop chain and the landed names. With surfaces expunged (the default view), the drawn arrows are these landed flows.
+Alongside the per-reference verdicts, every scan expands where each binding actually lands: an import is followed name by name through barrels and named surfaces to the file that owns or adopts it, so a barrel import fans out only to the bindings the consumer really takes, and a rank-bearing file's named re-export ends the walk as an adoption at its own rank (the spec's re-ownership section). The walk is `flow.js`, the same one the `no-diagonal-reach` family enforces with - the linter is this logic's primary consumer, and the diagram is its projection. On top of the shared walk the scan inherits each authored hop's verdict along the chain, judges clean-hop landings with the geometry verdicts (`landedVerdict`, the OWNER.5 laterals), and marks a fresh verdict as **laundered** in the issues drawer with the hop chain and the landed names. With surfaces expunged (the default view), the drawn arrows are these landed flows.
 
 ## Usage
 
@@ -44,7 +44,7 @@ Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js
   "rules": {
     "elda/imports": "warn",
     "elda/no-layer-branches": "warn",
-    "elda/no-diagonal-reach": "warn",
+    "elda/no-diagonal-reach": ["warn", { "acrossDomains": "warn", "acrossSubdomains": "warn", "withinSubdomain": "warn" }],
     "elda/no-async-inner": "warn",
     "elda/no-mutable-surface": "warn",
     "elda/ambient-ownership": "warn",
@@ -61,11 +61,13 @@ Add the plugin and rules to your existing `.oxlintrc.json` (or `eslint.config.js
 
 The spec grades a project by which rule registers its gate holds ([README](../../README.md), "Grades of alignment"). The plugin ships a preset per machine-holdable state; the governed grade is operator practice on top of these (the reachability pass and the scheduled audits under Scope below).
 
-| Preset | Invariants (`imports`, `no-layer-branches`, `no-diagonal-reach`, `no-async-inner`, `no-mutable-surface`, `ambient-ownership`) | Graded smells (`no-service-coupling`, `no-adapter-coupling`, `no-penetration`, `no-deep-side-effects`, `vocab-gate`) | Holds |
-|---|---|---|---|
-| `adopting` | `warn` | `warn` | The migration posture: everything reports, the fix-list stays visible, and a change lands with no new findings in touched files. |
-| `aligned` | `error` | `warn` | The aligned grade: violations gate at authoring time; smells stay visible for review. |
-| `justified` | `error` | `error` | The justified grade: a deviation lands only as an inline suppression carrying its justification at the site. |
+| Preset | Invariants (`imports`, `no-layer-branches`, `no-async-inner`, `no-mutable-surface`, `ambient-ownership`) | Graded smells (`no-service-coupling`, `no-adapter-coupling`, `no-penetration`, `no-deep-side-effects`, `vocab-gate`) | Diagonal class map (`acrossDomains` / `acrossSubdomains` / `withinSubdomain`) | Holds |
+|---|---|---|---|---|
+| `adopting` | `warn` | `warn` | `warn` / `warn` / `warn` | The migration posture: everything reports, the fix-list stays visible, and a change lands with no new findings in touched files. |
+| `aligned` | `error` | `warn` | `error` / `warn` / `warn` | The aligned grade: violations gate at authoring time; smells stay visible for review. |
+| `justified` | `error` | `error` | `error` / `error` / `error` | The justified grade: a deviation lands only as an inline suppression carrying its justification at the site. |
+
+Every preset carries the `no-diagonal-reach` pair with the grade's class map mirrored on both entries; the two IDs project the map's halves, so the gradient holds within one config.
 
 `vocab-gate` sits with the graded smells because its detector over-approximates - a literal-keyed write can be a genuinely local string - and at `justified` the confirmed-local cases take the same inline-suppression route.
 
@@ -113,11 +115,11 @@ The ELDA conventions are baked in: `domains/` as the domain root, and inside it 
 - `appAlias` - import prefix that resolves to `src` (so `@/domains/<domain>/…` is also a domain import).
 - `compositionRoot` - the directory that holds composition roots (TanStack `routes/`, server handlers, …).
 
-`elda/no-service-coupling` and `elda/no-adapter-coupling` read `domainAlias`/`appAlias`; `elda/no-deep-side-effects` reads `domainAlias`/`appAlias`/`compositionRoot`; `elda/vocab-gate` reads `compositionRoot`.
+`elda/no-service-coupling` and `elda/no-adapter-coupling` read `domainAlias`/`appAlias`; `elda/no-deep-side-effects` reads `domainAlias`/`appAlias`/`compositionRoot`; `elda/vocab-gate` reads `compositionRoot`. The `no-diagonal-reach` pair reads all three plus its class map (`acrossDomains`/`acrossSubdomains`/`withinSubdomain`, each `'error' | 'warn' | 'off'`; defaults `error`/`warn`/`warn`) - set the same map on both entries of the pair.
 
 ## Scope: what stays outside a per-file linter
 
-Every rule except `no-diagonal-reach` is file-local - decidable from one file plus its import specifiers. `no-diagonal-reach` is the one graph-reading rule: it resolves each reference's landings by reading the imported modules through `flow.js` (mtime-cached, so a lint pass parses each conduit at most once), and falls back to the direct spec-classified judgment for a specifier that resolves to no file. Two ELDA checks live outside the linter by construction:
+Every rule outside the `no-diagonal-reach` family is file-local - decidable from one file plus its import specifiers. The family is the graph-reading exception: it resolves each reference's landings by reading the imported modules through `flow.js` (mtime-cached, so a lint pass parses each conduit at most once), and falls back to the direct spec-classified judgment for a specifier that resolves to no file. Two ELDA checks live outside the linter by construction:
 
 - **`surface ⊆ consumers` (SURFACE.4)** is whole-project reachability from the runtime roots; it belongs to [knip](https://knip.dev) (entries = composition roots + server + tooling) and runs as a separate advisory pass, because an unconsumed export is a review signal rather than a violation.
 - **The Gate-1 cycle audit (CHANNEL.5)** - every cross-domain reference cycle encloses a settling element - is a whole-graph property. Until a dedicated pass exists it is a scheduled review item (META.3); the by-reference rule keeps every cycle discoverable by following references, and the `flow.js` resolved graph is the substrate the pass will ride ([../TODO.md](../TODO.md)).

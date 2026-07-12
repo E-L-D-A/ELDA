@@ -1,10 +1,27 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
-  "jsPlugins": ["@elda/oxlint-plugin"],
+  "jsPlugins": [
+    "@elda/oxlint-plugin"
+  ],
   "rules": {
     "elda/imports": "warn",
     "elda/no-layer-branches": "warn",
-    "elda/no-diagonal-reach": "warn",
+    "elda/no-diagonal-reach": [
+      "warn",
+      {
+        "acrossDomains": "warn",
+        "acrossSubdomains": "warn",
+        "withinSubdomain": "warn"
+      }
+    ],
+    "elda/no-diagonal-reach-gate": [
+      "error",
+      {
+        "acrossDomains": "warn",
+        "acrossSubdomains": "warn",
+        "withinSubdomain": "warn"
+      }
+    ],
     "elda/no-async-inner": "warn",
     "elda/no-mutable-surface": "warn",
     "elda/ambient-ownership": "warn",

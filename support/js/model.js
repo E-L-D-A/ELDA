@@ -295,3 +295,12 @@ export function landedVerdict(role, t) {
   const where = r.kind === 'into-child' ? `its child '${t.chain.join('/')}'` : `'${t.chain.join('/')}'`;
   return `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${t.layer}, below its own rank - a diagonal no row of the diagram draws. Cross at equal rank: reference it from this unit's own ${t.layer} row, and let its own column climb.`;
 }
+
+// The diagonal's distance class - how wide a boundary the landed flow crosses: within one subdomain, across subdomains of one domain, or across domains.
+// Severity grows with the width, and a lint level binds per rule, so each class reports through its own rule and the presets map the gradient onto the levels.
+export function diagonalScope(role, t) {
+  const r = rel(role.chain, t.chain);
+  if (r.kind === 'same') return 'within-subdomain';
+  if (r.kind === 'peer' && r.p === 0) return 'across-domains';
+  return 'across-subdomains';
+}

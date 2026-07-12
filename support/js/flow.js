@@ -1,10 +1,12 @@
-// Filesystem-backed binding-flow analysis, shared by the lint rule (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one and the same graph.
-// A module's binding table says which export names it owns, which pass through to another module, and which modules `export *` forwards to; a walk follows an import name by name to the files that own it, so a barrel import fans out only to the bindings the consumer really takes.
+// Filesystem-backed binding-flow analysis, shared by the lint rules (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one and the same graph.
+// A module's binding table says which export names it owns, which pass through to another module, and which modules `export *` forwards to; a walk follows an import name by name to where it lands, so a barrel import fans out only to the bindings the consumer really takes.
+// Only surfaces are transparent to the walk: they hold no rank and curate for outsiders, so what a consumer takes through them is judged where it lands.
+// A rank-bearing file is a terminus - a named re-export there re-owns the binding at that file's rank (the seam is the declaration, and a body arrives when logic forms), and the re-owning file's own edges are judged per-file at its own rank.
 // Tables are cached by mtime, so a lint pass or a rescan parses each conduit at most once and an editor session stays correct across edits.
 
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { parseSync } from 'oxc-parser';
-import { norm } from './model.js';
+import { norm, classify } from './model.js';
 
 export const CODE_RE = /\.(m|c)?[tj]sx?$/;
 export const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs', '.d.ts'];
@@ -79,6 +81,14 @@ export function moduleInfo(absPath) {
   return info;
 }
 
+// A surface is a plain-named file inside domains/ (a barrel, a named surface): rank-less curation, the walk's only conduit.
+const isSurface = (absPath) => {
+  const m = norm(absPath).match(/\/domains\/(.+)$/);
+  if (!m) return false;
+  const c = classify(m[1].split('/').filter(Boolean));
+  return !c.layer && !!c.surface && c.chain.length > 0;
+};
+
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
 const normalizePath = (p) => {
   const out = [];
@@ -127,6 +137,8 @@ export function createWalker({ srcDir, domainAlias, appAlias }) {
       const key = `${p}|${nkey(want)}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      // A rank-bearing file (or anything unparseable) is a terminus: everything requested lands here, re-owned; whether the names truly exist there is the type checker's concern.
+      if (!isSurface(p)) { out.push({ path: p, names: want === '*' ? '*' : [...want], via, hops }); continue; }
       const info = moduleInfo(p);
       if (!info) { out.push({ path: p, names: want === '*' ? '*' : [...want], via, hops }); continue; }
       const { table } = info;
