@@ -13,6 +13,7 @@
   "files": [
     "index.js",
     "model.js",
+    "flow.js",
     "visualize.js",
     "viewer.html",
     "adopting.json",

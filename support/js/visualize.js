@@ -12,8 +12,8 @@ import { createServer } from 'node:http';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { parseSync } from 'oxc-parser';
-import { norm, posixResolve, classify, fileRole, targetOf, importVerdict, lateralVerdict } from './model.js';
+import { norm, posixResolve, classify, fileRole, targetOf, importVerdict, lateralVerdict, diagonalVerdict, landedVerdict } from './model.js';
+import { moduleInfo, createWalker, CODE_RE, EXT_CANDIDATES } from './flow.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -66,10 +66,8 @@ const { domainAlias, appAlias, compositionRoot } = readOptions();
 // ---------------------------------------------------------------------------
 // Scan: walk the ELDA-relevant roots and classify every file.
 
-const CODE_RE = /\.(m|c)?[tj]sx?$/;
 const STYLE_RE = /\.(css|scss|sass|less)$/;
 const ASSET_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i;
-const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs', '.d.ts'];
 
 function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -121,39 +119,16 @@ function buildGraph() {
     return { external: false, node: null };
   };
 
-  // Pull every reference a module makes: static imports (side-effect ones have no entries), re-exports carrying a module request, and literal dynamic imports.
-  const referencesOf = (path, code) => {
-    const parsed = parseSync(path, code);
-    const refs = [];
-    for (const si of parsed.module.staticImports) {
-      refs.push({
-        spec: si.moduleRequest.value,
-        kind: si.entries.length === 0 ? 'side-effect' : 'import',
-        typeOnly: si.entries.length > 0 && si.entries.every((e) => e.isType),
-      });
-    }
-    for (const se of parsed.module.staticExports) {
-      const req = se.entries.filter((e) => e.moduleRequest);
-      if (req.length) refs.push({ spec: req[0].moduleRequest.value, kind: 'reexport', typeOnly: req.every((e) => e.isType) });
-    }
-    for (const di of parsed.module.dynamicImports) {
-      const text = code.slice(di.moduleRequest.start, di.moduleRequest.end);
-      const m = text.match(/^(['"`])((?:(?!\1)[^\\$])*)\1$/);
-      if (m) refs.push({ spec: m[2], kind: 'dynamic', typeOnly: false });
-    }
-    return refs;
-  };
-
   const edges = [];
   for (const file of files) {
     if (file.kind !== 'code') continue;
-    let code;
-    try { code = readFileSync(join(appDir, file.path), 'utf8'); } catch { continue; }
-    let refs;
-    try { refs = referencesOf(file.path, code); } catch (e) {
-      console.warn(`Parse failed for ${file.path}: ${e.message}`);
+    // The mtime-cached analysis from flow.js: the same references and binding tables the lint rule walks.
+    const info = moduleInfo(join(appDir, file.path));
+    if (!info) {
+      console.warn(`Parse failed for ${file.path}`);
       continue;
     }
+    const refs = info.refs;
     const relPath = '/' + file.path;
     const relDir = file.path.slice(0, file.path.lastIndexOf('/'));
     const importerDir = (relPath.match(/\/domains\/(.+)$/)?.[1] ?? '').split('/').slice(0, -1).join('/');
@@ -167,24 +142,96 @@ function buildGraph() {
         verdict = importVerdict(file.role, t, domainAlias);
         if (verdict) tier = 'invariant';
         else if (!ref.typeOnly && file.role.kind === 'domain') {
-          verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'adapters');
-          if (verdict) tier = 'smell';
+          verdict = diagonalVerdict(file.role, t);
+          if (verdict) tier = 'invariant';
+          else {
+            verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'adapters');
+            if (verdict) tier = 'smell';
+          }
         }
         if (!verdict && ref.kind === 'side-effect' && t.segs && t.segs.slice(0, -1).join('/') !== importerDir) {
           verdict = `ELDA SURFACE.5: side-effect import '${ref.spec}' runs another module for effect with nothing named crossing the edge; co-locate it in the unit, compose it at the root, or import a named value.`;
           tier = 'smell';
         }
       }
-      edges.push({ from: file.id, to: node, spec: ref.spec, kind: ref.kind, typeOnly: ref.typeOnly, verdict, tier });
+      edges.push({ from: file.id, to: node, spec: ref.spec, kind: ref.kind, typeOnly: ref.typeOnly, names: ref.names, verdict, tier });
     }
   }
 
+  const walker = createWalker({ srcDir, domainAlias, appAlias });
   return {
     app: norm(appDir).split('/').pop(),
     options: { domainAlias, appAlias, compositionRoot },
     files,
     edges,
+    flows: expandFlows(files, edges, walker, appDir, byPath),
   };
+}
+
+// The whole-graph flow pass: which binding actually lands where, once re-export indirection is followed name by name.
+// The walk itself lives in flow.js and is the same one the lint rule enforces with; here each landing additionally inherits the worst authored-edge verdict along its hops, and clean-hop landings are judged by the geometry verdicts - the landed diagonal and the lateral coupling - because those constrain the dataflow itself, and a re-export chain does not change where a value lives.
+// The boundary verdicts stay per-reference, since consuming internals through a surface is exactly what a surface is for.
+// A fresh verdict on a clean-hop landing is a laundered finding: real in the graph, invisible to any per-file judgment of a single reference.
+function expandFlows(files, edges, walker, appDir, byPath) {
+  const rank = (t) => (t === 'invariant' ? 2 : t === 'smell' ? 1 : 0);
+  const rootAbs = norm(appDir);
+  const absOf = (id) => rootAbs + '/' + files[id].path;
+  const idOf = (abs) => byPath.get(norm(abs).slice(rootAbs.length + 1));
+  // The worst authored edge per (module, specifier), for inheriting hop verdicts along a walk.
+  const edgeAt = new Map();
+  for (const e of edges) {
+    if (e.to == null) continue;
+    const key = `${e.from}>${e.spec}`;
+    const prev = edgeAt.get(key);
+    if (!prev || rank(e.tier) > rank(prev.tier)) edgeAt.set(key, e);
+  }
+  const acc = new Map();
+  const push = (flow) => {
+    const key = `${flow.from}>${flow.to}>${flow.typeOnly}`;
+    const prev = acc.get(key);
+    if (!prev) acc.set(key, flow);
+    else {
+      if (rank(flow.tier) > rank(prev.tier)) Object.assign(prev, flow);
+      if (Array.isArray(prev.names) && Array.isArray(flow.names)) prev.names = [...new Set([...prev.names, ...flow.names])];
+    }
+  };
+  for (const e of edges) {
+    if (e.to == null || files[e.from].role.kind === 'surface') continue;
+    const src = files[e.from];
+    // Side-effect imports execute the target rather than take bindings, and type-only edges are vocabulary; both draw as authored and do not expand.
+    if (e.kind === 'side-effect' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
+    const judge = (toId) => {
+      if (src.role.kind !== 'domain') return null;
+      const t = { ...files[toId].role, asset: files[toId].kind === 'asset' };
+      const dv = landedVerdict(src.role, t);
+      if (dv) return { verdict: dv, tier: 'invariant' };
+      const lv = lateralVerdict(src.role, t, 'services') ?? lateralVerdict(src.role, t, 'adapters');
+      if (lv) return { verdict: lv, tier: 'smell' };
+      return null;
+    };
+    const found = walker.landings(absOf(e.from), e.spec, e.names);
+    if (found == null) continue;
+    for (const l of found) {
+      const to = idOf(l.path);
+      if (to == null || to === e.from) continue;
+      let tier = e.tier, verdict = e.verdict;
+      for (const h of l.hops) {
+        const hid = idOf(h.from);
+        const hop = hid != null ? edgeAt.get(`${hid}>${h.spec}`) : null;
+        if (hop && rank(hop.tier) > rank(tier)) { tier = hop.tier; verdict = hop.verdict; }
+      }
+      const j = verdict == null && l.via.length > 0 ? judge(to) : null;
+      push({
+        from: e.from, to, spec: e.spec, kind: e.kind, typeOnly: false,
+        names: l.names === '*' ? '*' : l.names,
+        verdict: verdict ?? (j ? j.verdict : null),
+        tier: tier ?? (j ? j.tier : null),
+        via: l.via.map(idOf).filter((x) => x != null),
+        laundered: j != null,
+      });
+    }
+  }
+  return [...acc.values()];
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +275,7 @@ const rescan = () => {
   debounce = setTimeout(() => {
     graph = buildGraph();
     for (const c of clients) c.write('data: reload\n\n');
-    console.log(`Rescanned: ${graph.files.length} files, ${graph.edges.length} edges.`);
+    console.log(`Rescanned: ${graph.files.length} files, ${graph.edges.length} edges, ${graph.flows.filter((f) => f.laundered).length} laundered findings.`);
   }, 200);
 };
 
@@ -249,7 +296,7 @@ try {
 server.listen(port, () => {
   const url = `http://localhost:${port}`;
   console.log(`ELDA diagram for ${appDir}`);
-  console.log(`${graph.files.length} files, ${graph.edges.length} edges -> ${url}`);
+  console.log(`${graph.files.length} files, ${graph.edges.length} edges, ${graph.flows.filter((f) => f.laundered).length} laundered findings -> ${url}`);
   if (open) {
     const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
       : process.platform === 'darwin' ? ['open', [url]]

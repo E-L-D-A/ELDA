@@ -3,10 +3,14 @@
 Deferred tooling work. Each entry carries the trigger that un-defers it, so the deferral stays a
 decision rather than a drift.
 
-## Graph pass (does not exist yet)
+## Graph pass
 
-A whole-project pass over the resolved module graph, complementing the per-file lint plugin
-([js](./js)), which is structurally limited to one file plus its import specifiers.
+A whole-project pass over the resolved module graph, complementing the per-file rules, which
+are limited to one file plus its import specifiers. The first graph check is live and enforced:
+the shared binding walk ([js/flow.js](./js/flow.js)) follows every import name by name through
+surfaces and re-export chains, `elda/no-diagonal-reach` judges each landing at lint time, and
+`elda-viz` projects the same landings as the drawn flow with laundered findings listed. The
+items below remain open:
 
 - **Gate-1 cycle audit (CHANNEL.5).** Verify that every cross-domain reference cycle encloses a
   settling element (a change-gated channel with a tight equality). Per-file linting cannot decide a

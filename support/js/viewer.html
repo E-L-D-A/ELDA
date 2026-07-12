@@ -172,7 +172,7 @@
 <nav id="bottombar"></nav>
 <div id="tooltip"></div>
 
-<script>
+<script type="module">
 const INLINE = /*__DATA__*/null;
 const ROWS = ['surface', 'services', 'adapters', 'use-cases', 'entities'];
 const ROW_LABEL = { surface: 'surfaces', services: 'services', adapters: 'adapters', 'use-cases': 'use-cases', entities: 'entities' };
@@ -186,6 +186,7 @@ let hiddenBlocks = new Set();
 
 const $ = (id) => document.getElementById(id);
 const wrap = $('wrap'), svg = $('edges'), tooltip = $('tooltip');
+const byPath = (a, b) => a.path.localeCompare(b.path);
 
 // Hidden top-level blocks persist per app across reloads; storage may be unavailable on a file:// snapshot, so degrade to session-only state.
 const storageKey = () => 'elda-viz-hidden:' + (data ? data.app : '');
@@ -196,20 +197,8 @@ function saveHidden() {
   try { localStorage.setItem(storageKey(), JSON.stringify([...hiddenBlocks])); } catch {}
 }
 
-// The corner button that hides a block without reaching for the bottom bar.
-function hideBtn(key) {
-  const btn = document.createElement('button');
-  btn.className = 'hide-btn';
-  btn.textContent = '✕';
-  btn.title = 'hide (restore from the bottom bar)';
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hiddenBlocks.add(key);
-    saveHidden();
-    render();
-  });
-  return btn;
-}
+// ---------------------------------------------------------------------------
+// Placement: where a file renders, derived from the role the scanner assigned.
 
 // The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
 function blockOf(f) {
@@ -251,61 +240,80 @@ function chipParts(f) {
   return { label, badges };
 }
 
-function makeChip(f) {
-  const el = document.createElement('span');
-  const p = place(f);
-  el.className = 'chip ' + (p.row && p.row !== 'surface' ? p.row : p.area === 'root' ? 'services' : '');
-  const { label, badges } = chipParts(f);
-  el.append(label);
-  for (const b of badges) {
-    const bd = document.createElement('span');
-    bd.className = 'badge';
-    bd.textContent = b;
-    el.append(bd);
+// ---------------------------------------------------------------------------
+// DOM building.
+
+// Element builder: `class` and `style` arrive as strings, any other key assigns an element property when one exists (checked, hidden, on* handlers) and an attribute otherwise.
+// Child arrays flatten one level and nullish children drop, so callers can pass map results directly.
+function h(tag, props = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k in el) el[k] = v;
+    else el.setAttribute(k, v);
   }
-  el.dataset.id = f.id;
-  el.addEventListener('mouseenter', (e) => { focus(f.id); showTip(e, f.path); });
-  el.addEventListener('mousemove', moveTip);
-  el.addEventListener('mouseleave', () => { if (pinnedPath === null) blur(); hideTip(); });
-  el.addEventListener('click', (e) => { e.stopPropagation(); pinnedPath = pinnedPath === f.path ? null : f.path; render(); });
+  el.append(...children.flat().filter((c) => c != null));
+  return el;
+}
+
+// The corner button that hides a block without reaching for the bottom bar.
+function hideBtn(key) {
+  return h('button', {
+    class: 'hide-btn',
+    title: 'hide (restore from the bottom bar)',
+    onclick: (e) => { e.stopPropagation(); hiddenBlocks.add(key); saveHidden(); render(); },
+  }, '✕');
+}
+
+// A chip carries its file id, which the delegated pointer handlers and the edge layer's rect lookups both key on.
+function makeChip(f) {
+  const p = place(f);
+  const { label, badges } = chipParts(f);
+  const el = h('span', { class: 'chip ' + (p.row && p.row !== 'surface' ? p.row : p.area === 'root' ? 'services' : ''), 'data-id': f.id },
+    label, badges.map((b) => h('span', { class: 'badge' }, b)));
   chips.set(f.id, el);
   return el;
 }
 
 function render() {
   chips = new Map();
-  const files = data.files;
-  const byId = (id) => files[id];
   const hideAsset = !$('t-assets').checked;
   const expunge = !$('t-surfaces').checked;
   const visible = (f) => !(hideAsset && f.kind !== 'code') && !(expunge && f.role.kind === 'surface') && !hiddenBlocks.has(blockOf(f));
-  const rowList = expunge ? ROWS.slice(1) : ROWS;
+  renderRootBar(visible);
+  renderCoreBox(visible);
+  renderDomains(visible, expunge ? ROWS.slice(1) : ROWS);
+  // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
+  drawn = expunge ? data.flows : data.edges;
+  renderBlockBar();
+  renderIssues();
+  requestAnimationFrame(() => { drawEdges(); applyPin(); });
+}
 
-  // The composition-root bar, the diagram's Application Runtime strip.
-  const rootBar = $('root-bar');
-  rootBar.replaceChildren();
-  rootBar.style.display = hiddenBlocks.has('@root') ? 'none' : '';
-  const rootInner = document.createElement('div');
-  rootInner.className = 'root-inner';
-  const rootTitle = document.createElement('span');
-  rootTitle.className = 'bar-title';
-  rootTitle.textContent = 'src/' + data.options.compositionRoot;
-  rootInner.append(rootTitle);
-  for (const f of files.filter((f) => place(f).area === 'root' && visible(f)).sort((a, b) => a.path.localeCompare(b.path))) rootInner.append(makeChip(f));
-  rootInner.append(hideBtn('@root'));
-  rootBar.append(rootInner);
+// The composition-root bar, the diagram's Application Runtime strip.
+function renderRootBar(visible) {
+  const bar = $('root-bar');
+  bar.style.display = hiddenBlocks.has('@root') ? 'none' : '';
+  bar.replaceChildren(h('div', { class: 'root-inner' },
+    h('span', { class: 'bar-title' }, 'src/' + data.options.compositionRoot),
+    data.files.filter((f) => place(f).area === 'root' && visible(f)).sort(byPath).map(makeChip),
+    hideBtn('@root')));
+}
 
-  // Non-domain roots render to the left of the domains, past the faint separator.
-  const coreBox = $('core-box');
-  const coreFiles = files.filter((f) => place(f).area === 'core' && visible(f));
-  coreBox.hidden = coreFiles.length === 0;
-  coreBox.replaceChildren('src/core ', hideBtn('@core'));
-  for (const f of coreFiles.sort((a, b) => a.path.localeCompare(b.path))) coreBox.append(makeChip(f));
-  $('nondomains').hidden = coreBox.hidden;
+// Non-domain roots render to the left of the domains, past the faint separator.
+function renderCoreBox(visible) {
+  const box = $('core-box');
+  const coreFiles = data.files.filter((f) => place(f).area === 'core' && visible(f)).sort(byPath);
+  box.hidden = coreFiles.length === 0;
+  box.replaceChildren('src/core ', hideBtn('@core'), ...coreFiles.map(makeChip));
+  $('nondomains').hidden = box.hidden;
+}
 
-  // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
+// Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
+function renderDomains(visible, rowList) {
   const domains = new Map();
-  for (const f of files) {
+  for (const f of data.files) {
     const p = place(f);
     if (p.area !== 'domain' || !visible(f)) continue;
     if (!domains.has(p.domain)) domains.set(p.domain, new Map());
@@ -324,14 +332,6 @@ function render() {
   domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto)`;
   const dotFirst = (a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b));
   for (const [name, subsOf] of [...domains.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const box = document.createElement('section');
-    box.className = 'domain';
-    const h = document.createElement('h2');
-    h.textContent = name;
-    h.append(hideBtn(name));
-    box.append(h);
-    const grid = document.createElement('div');
-    grid.className = 'grid';
     // Flatten the (subdomain, unit) tree into ordered sub-columns, remembering each group's span for its header.
     const subs = [...subsOf.keys()].sort(dotFirst);
     const columns = [];
@@ -339,134 +339,56 @@ function render() {
       const units = [...subsOf.get(sub).keys()].sort(dotFirst);
       columns.push(...units.map((unit) => ({ sub, unit, rows: subsOf.get(sub).get(unit) })));
     }
-    grid.style.gridTemplateColumns = `14px repeat(${columns.length}, minmax(86px, max-content))`;
+    const grid = h('div', { class: 'grid', style: `grid-template-columns: 14px repeat(${columns.length}, minmax(86px, max-content))` });
     let ci = 2;
     for (const sub of subs) {
-      const span = [...subsOf.get(sub).keys()].length;
-      const group = document.createElement('div');
-      group.className = 'grouphead';
-      group.textContent = sub === '' ? '·' : sub + ' /';
-      group.style.gridColumn = `${ci} / span ${span}`;
-      group.style.gridRow = '1';
-      grid.append(group);
+      const span = subsOf.get(sub).size;
+      grid.append(h('div', { class: 'grouphead', style: `grid-column: ${ci} / span ${span}; grid-row: 1` }, sub === '' ? '·' : sub + ' /'));
       ci += span;
     }
     columns.forEach((col, i) => {
-      const head = document.createElement('div');
-      head.className = 'colhead';
-      head.textContent = col.unit === '' ? '·' : col.unit;
-      head.style.gridColumn = String(i + 2);
-      head.style.gridRow = '2';
-      grid.append(head);
+      grid.append(h('div', { class: 'colhead', style: `grid-column: ${i + 2}; grid-row: 2` }, col.unit === '' ? '·' : col.unit));
     });
     rowList.forEach((row, ri) => {
       const rowHasFiles = columns.some((col) => col.rows.has(row));
-      const rail = document.createElement('div');
-      rail.className = 'rail';
-      rail.textContent = rowHasFiles ? ROW_LABEL[row] : '';
-      rail.style.gridColumn = '1';
-      rail.style.gridRow = String(ri + 3);
-      grid.append(rail);
+      grid.append(h('div', { class: 'rail', style: `grid-column: 1; grid-row: ${ri + 3}` }, rowHasFiles ? ROW_LABEL[row] : ''));
       columns.forEach((col, i) => {
-        const cell = document.createElement('div');
-        cell.className = 'cell ' + row;
-        cell.style.gridColumn = String(i + 2);
-        cell.style.gridRow = String(ri + 3);
-        for (const f of (col.rows.get(row) ?? []).sort((a, b) => a.path.localeCompare(b.path))) cell.append(makeChip(f));
-        grid.append(cell);
+        grid.append(h('div', { class: 'cell ' + row, style: `grid-column: ${i + 2}; grid-row: ${ri + 3}` },
+          (col.rows.get(row) ?? []).sort(byPath).map(makeChip)));
       });
     });
-    box.append(grid);
-    domainsEl.append(box);
+    domainsEl.append(h('section', { class: 'domain' }, h('h2', {}, name, hideBtn(name)), grid));
   }
-
-  drawn = flowEdges(expunge);
-  renderBlockBar(domains);
-  renderIssues();
-  requestAnimationFrame(() => { drawEdges(); applyPin(); });
-}
-
-// The drawn dependency flow. With surfaces expunged, an edge into a surface expands through every surface hop to the real carriers; each synthetic edge keeps the consumer's original specifier, records the hop chain, and inherits the worst verdict found along it, so indirection cannot hide a red edge.
-// The expansion is per consumed symbol-blind: a barrel import draws flow to everything the barrel republishes.
-// The issues drawer stays on the raw edges, so surface-level findings survive the expungement.
-function flowEdges(expunge) {
-  if (!expunge) return data.edges;
-  const isSurf = (id) => id != null && data.files[id].role.kind === 'surface';
-  const out = new Map();
-  for (const e of data.edges) {
-    if (!out.has(e.from)) out.set(e.from, []);
-    out.get(e.from).push(e);
-  }
-  const rank = (t) => (t === 'invariant' ? 2 : t === 'smell' ? 1 : 0);
-  const acc = new Map();
-  const push = (edge) => {
-    const key = `${edge.from}>${edge.to}>${edge.typeOnly}`;
-    const prev = acc.get(key);
-    if (!prev) acc.set(key, edge);
-    else if (rank(edge.tier) > rank(prev.tier)) { prev.tier = edge.tier; prev.verdict = edge.verdict; prev.via = edge.via; }
-  };
-  for (const e of data.edges) {
-    if (e.to == null || isSurf(e.from)) continue;
-    if (!isSurf(e.to)) { push({ ...e }); continue; }
-    const seen = new Set([e.from]);
-    const stack = [[e.to, e.typeOnly, e.tier, e.verdict]];
-    while (stack.length) {
-      const [sid, typeOnly, tier, verdict] = stack.pop();
-      if (seen.has(sid)) continue;
-      seen.add(sid);
-      for (const s of out.get(sid) ?? []) {
-        if (s.to == null) continue;
-        const t2 = typeOnly || s.typeOnly;
-        const worse = rank(s.tier) > rank(tier);
-        const tier2 = worse ? s.tier : tier, verdict2 = worse ? s.verdict : verdict;
-        if (isSurf(s.to)) stack.push([s.to, t2, tier2, verdict2]);
-        else push({ from: e.from, to: s.to, spec: e.spec, kind: e.kind, typeOnly: t2, verdict: verdict2, tier: tier2, via: [...seen].slice(1) });
-      }
-    }
-  }
-  return [...acc.values()];
 }
 
 // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
-function renderBlockBar(domains) {
-  const bar = $('bottombar');
-  bar.replaceChildren();
-  const label = document.createElement('span');
-  label.className = 'bar-label';
-  label.textContent = 'blocks:';
-  bar.append(label);
+function renderBlockBar() {
   const blocks = [['@root', 'src/' + data.options.compositionRoot]];
   if (data.files.some((f) => place(f).area === 'core')) blocks.push(['@core', 'src/core']);
-  const domainNames = [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith('@')))].sort();
-  for (const d of domainNames) blocks.push([d, d]);
+  for (const d of [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith('@')))].sort()) blocks.push([d, d]);
   const keys = blocks.map(([k]) => k);
   const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
-  const allLabel = document.createElement('label');
-  const allCb = document.createElement('input');
-  allCb.type = 'checkbox';
-  allCb.checked = shown === keys.length;
-  allCb.indeterminate = shown > 0 && shown < keys.length;
-  allCb.addEventListener('change', () => {
-    for (const k of keys) hiddenBlocks[allCb.checked ? 'delete' : 'add'](k);
-    saveHidden();
-    render();
-  });
-  allLabel.append(allCb, 'all');
-  bar.append(allLabel);
-  for (const [key, text] of blocks) {
-    const l = document.createElement('label');
-    l.classList.toggle('off', hiddenBlocks.has(key));
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = !hiddenBlocks.has(key);
-    cb.addEventListener('change', () => {
-      hiddenBlocks[cb.checked ? 'delete' : 'add'](key);
-      saveHidden();
-      render();
-    });
-    l.append(cb, text);
-    bar.append(l);
-  }
+  $('bottombar').replaceChildren(
+    h('span', { class: 'bar-label' }, 'blocks:'),
+    h('label', {}, h('input', {
+      type: 'checkbox',
+      checked: shown === keys.length,
+      indeterminate: shown > 0 && shown < keys.length,
+      onchange: (e) => {
+        for (const k of keys) hiddenBlocks[e.target.checked ? 'delete' : 'add'](k);
+        saveHidden();
+        render();
+      },
+    }), 'all'),
+    ...blocks.map(([key, text]) => h('label', { class: hiddenBlocks.has(key) ? 'off' : '' }, h('input', {
+      type: 'checkbox',
+      checked: !hiddenBlocks.has(key),
+      onchange: (e) => {
+        hiddenBlocks[e.target.checked ? 'delete' : 'add'](key);
+        saveHidden();
+        render();
+      },
+    }), text)));
 }
 
 // ---------------------------------------------------------------------------
@@ -535,9 +457,7 @@ function drawEdges() {
     const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     hit.setAttribute('d', d);
     hit.setAttribute('class', 'hit');
-    hit.addEventListener('mouseenter', (ev) => showTip(ev, edgeTip(e)));
-    hit.addEventListener('mousemove', moveTip);
-    hit.addEventListener('mouseleave', hideTip);
+    hit.dataset.i = i;
     svg.append(hit);
     // Only edges touching the viewport-sticky root chips move on scroll; remember them so scrolling rewrites their geometry in place.
     if (isRootFile(e.from) || isRootFile(e.to)) stickyPaths.push({ e, i, path, hit });
@@ -597,6 +517,7 @@ function updateStickyEdges() {
 function edgeTip(e) {
   const from = data.files[e.from].path;
   let head = `${from}\n  → ${e.spec}${e.typeOnly ? '  (type-only)' : ''}${e.kind === 'dynamic' ? '  (dynamic)' : ''}${e.kind === 'reexport' ? '  (re-export)' : ''}${e.kind === 'side-effect' ? '  (side-effect)' : ''}`;
+  if (Array.isArray(e.names) && e.names.length) head += `\n  { ${e.names.join(', ')} }`;
   if (e.via && e.via.length) head += '\n  via ' + e.via.map((id) => data.files[id].path).join('\n      ');
   if (e.to != null) head += `\n  = ${data.files[e.to].path}`;
   return e.verdict ? head + '\n\n' + e.verdict : head;
@@ -640,9 +561,39 @@ function applyPin() {
   chips.get(f.id).classList.add('pinned');
 }
 
+// ---------------------------------------------------------------------------
+// Interactions: delegated hover and pinning, grab panning, the tooltip.
+
+// Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
+// The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
+wrap.addEventListener('pointerover', (e) => {
+  if (e.target.classList.contains('hit')) { showTip(e, edgeTip(drawn[Number(e.target.dataset.i)])); return; }
+  const chip = e.target.closest('.chip');
+  if (!chip || chip.contains(e.relatedTarget)) return;
+  const f = data.files[Number(chip.dataset.id)];
+  focus(f.id);
+  showTip(e, f.path);
+});
+wrap.addEventListener('pointerout', (e) => {
+  if (e.target.classList.contains('hit')) { hideTip(); return; }
+  const chip = e.target.closest('.chip');
+  if (!chip || chip.contains(e.relatedTarget)) return;
+  if (pinnedPath === null) blur();
+  hideTip();
+});
+wrap.addEventListener('pointermove', (e) => {
+  if (tooltip.style.display === 'block') moveTip(e);
+});
+wrap.addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip');
+  if (!chip) return;
+  e.stopPropagation();
+  const f = data.files[Number(chip.dataset.id)];
+  pinnedPath = pinnedPath === f.path ? null : f.path;
+  render();
+});
 document.body.addEventListener('click', () => { if (!suppressClick && pinnedPath !== null) { pinnedPath = null; applyPin(); } });
 
-// ---------------------------------------------------------------------------
 // Grab panning: dragging the board scrolls the page on both axes, with momentum on release.
 // Interactive elements keep their own pointer behavior, and a drag suppresses the click that would otherwise clear the pin.
 
@@ -686,58 +637,6 @@ addEventListener('pointerup', () => {
 });
 addEventListener('wheel', () => cancelAnimationFrame(coast), { passive: true });
 
-// ---------------------------------------------------------------------------
-// Issues drawer: every verdict edge, unresolved specifiers, and files the classifier could not place.
-
-function renderIssues() {
-  const el = $('issues');
-  el.replaceChildren();
-  const section = (title, items, build) => {
-    if (!items.length) return;
-    const h = document.createElement('h3');
-    h.textContent = `${title} (${items.length})`;
-    el.append(h);
-    for (const it of items) el.append(build(it));
-  };
-  const verdictItem = (e) => {
-    const div = document.createElement('div');
-    div.className = 'item ' + (e.tier === 'invariant' ? 'violation' : 'smell');
-    div.innerHTML = `<div>${data.files[e.from].path} → <b>${e.spec}</b></div><div class="msg"></div>`;
-    div.querySelector('.msg').textContent = e.verdict;
-    div.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      pinnedPath = data.files[e.from].path;
-      applyPin();
-      chips.get(e.from)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
-    return div;
-  };
-  section('Violations', data.edges.filter((e) => e.tier === 'invariant'), verdictItem);
-  section('Inadvisable (graded smells)', data.edges.filter((e) => e.tier === 'smell'), verdictItem);
-  section('Unresolved specifiers', data.edges.filter((e) => e.to == null), (e) => {
-    const div = document.createElement('div');
-    div.className = 'item';
-    div.textContent = `${data.files[e.from].path} → ${e.spec}`;
-    return div;
-  });
-  section('Unclassified files', data.files.filter((f) => place(f).area === 'other'), (f) => {
-    const div = document.createElement('div');
-    div.className = 'item';
-    div.textContent = f.path;
-    return div;
-  });
-  const bad = data.edges.filter((e) => e.tier === 'invariant').length;
-  const smell = data.edges.filter((e) => e.tier === 'smell').length;
-  $('issue-count').textContent = `${bad + smell}`;
-  $('counts').innerHTML = `${data.files.length} files · ${data.edges.length} edges · <b class="${bad ? 'bad' : ''}">${bad} violations</b> · ${smell} inadvisable`;
-}
-
-$('issues-btn').addEventListener('click', (e) => { e.stopPropagation(); $('issues').classList.toggle('open'); });
-$('bottombar').addEventListener('click', (e) => e.stopPropagation());
-
-// ---------------------------------------------------------------------------
-// Tooltip.
-
 function showTip(ev, text) { tooltip.textContent = text; tooltip.style.display = 'block'; moveTip(ev); }
 function moveTip(ev) {
   const pad = 12;
@@ -747,10 +646,55 @@ function moveTip(ev) {
 function hideTip() { tooltip.style.display = 'none'; }
 
 // ---------------------------------------------------------------------------
+// Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
+
+function renderIssues() {
+  const el = $('issues');
+  el.replaceChildren();
+  const section = (title, items, build) => {
+    if (!items.length) return;
+    el.append(h('h3', {}, `${title} (${items.length})`), ...items.map(build));
+  };
+  const pinFrom = (e) => (ev) => {
+    ev.stopPropagation();
+    pinnedPath = data.files[e.from].path;
+    applyPin();
+    chips.get(e.from)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  const verdictItem = (e) => h('div', { class: 'item ' + (e.tier === 'invariant' ? 'violation' : 'smell'), onclick: pinFrom(e) },
+    h('div', {}, `${data.files[e.from].path} → `, h('b', {}, e.spec)),
+    h('div', { class: 'msg' }, e.verdict));
+  section('Violations', data.edges.filter((e) => e.tier === 'invariant'), verdictItem);
+  section('Inadvisable (graded smells)', data.edges.filter((e) => e.tier === 'smell'), verdictItem);
+  // Findings the per-file rules cannot see: every hop is clean, the landed flow is not.
+  section('Laundered through indirection (graph-only)', data.flows.filter((f) => f.laundered), (f) =>
+    h('div', { class: 'item ' + (f.tier === 'invariant' ? 'violation' : 'smell'), onclick: pinFrom(f) },
+      h('div', {}, `${data.files[f.from].path} ⇒ ${data.files[f.to].path}`),
+      h('div', { class: 'msg' }, `via ${f.via.map((id) => data.files[id].path).join('\n   via ')}\n${f.verdict}`)));
+  section('Unresolved specifiers', data.edges.filter((e) => e.to == null), (e) =>
+    h('div', { class: 'item' }, `${data.files[e.from].path} → ${e.spec}`));
+  section('Unclassified files', data.files.filter((f) => place(f).area === 'other'), (f) =>
+    h('div', { class: 'item' }, f.path));
+  const bad = data.edges.filter((e) => e.tier === 'invariant').length;
+  const smell = data.edges.filter((e) => e.tier === 'smell').length;
+  const laundered = data.flows.filter((f) => f.laundered).length;
+  $('issue-count').textContent = `${bad + smell + laundered}`;
+  $('counts').replaceChildren(`${data.files.length} files · ${data.edges.length} edges · `,
+    h('b', { class: bad ? 'bad' : '' }, `${bad} violations`),
+    ` · ${smell} inadvisable · `,
+    h('b', { class: laundered ? 'bad' : '' }, `${laundered} laundered`));
+}
+
+$('issues-btn').addEventListener('click', (e) => { e.stopPropagation(); $('issues').classList.toggle('open'); });
+$('bottombar').addEventListener('click', (e) => e.stopPropagation());
+
+// ---------------------------------------------------------------------------
 // Boot, toggles, live reload.
 
 for (const id of ['t-ok', 't-type', 't-assets', 't-surfaces']) $(id).addEventListener('change', render);
-addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz = setTimeout(() => { drawEdges(); applyPin(); }, 120); });
+
+let resizeTimer = 0;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { drawEdges(); applyPin(); }, 120); });
 
 // The composition-root chips are viewport-sticky, so horizontal scrolling moves them relative to the board; re-aim their arrows once per frame, in place.
 let scrollRaf = 0;
@@ -773,7 +717,7 @@ if (!INLINE) {
   es.onerror = () => $('live').classList.remove('on');
   es.onmessage = load;
 }
-load();
+await load();
 </script>
 </body>
 </html>

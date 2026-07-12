@@ -348,7 +348,7 @@ The binding ruleset, grouped by the seam each rule guards. IDs are stable; the l
 - **LAYER.4** Use-Cases and Entities traffic only in values: no async/await or promise chains, no try/catch, no throwing calls. Async and throwing shapes are wrapped at Adapters into channel-conforming values; the imperative shell is the only other legitimate host for them (ROOT.2).
 - **LAYER.5** The Adapters layer is triggered by shape mismatch with the concepts (imperative interfaces, throwing APIs, async or promise control flow, mutable global state, request/response). Externality alone never triggers it: an external API that already conforms is consumed directly and orchestrated by use-cases.
 - **LAYER.6** At a foreign boundary (a wire format, a platform SDK, a third-party API) the Adapter translates the foreign shape into the domain's own entity vocabulary; re-shaping that leaves the foreign model in charge of the domain's types is conformity, a violation. In-repo peer domains are exempt: referencing a peer's vocabulary through its surface is the designed path.
-- **LAYER.7** A layer is a classification, never a container: within a domain's tree, grouping nodes express concerns (subdomains and units), layer membership rides the file names, and a container named for or dedicated to a layer is a horizontal bucket, a violation.
+- **LAYER.7** A layer is a classification: within a domain's tree, grouping nodes express concerns (subdomains and units), layer membership rides the file names, and a container named for or dedicated to a layer is a horizontal bucket, a violation.
 
 ### CHANNEL - between domains
 

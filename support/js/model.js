@@ -279,3 +279,19 @@ export function diagonalVerdict(role, t) {
   const from = importerUnit ? `unit '${importerUnit}' (${role.layer})` : `the subdomain's bare ${role.layer} file`;
   return `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${t.layer} - a diagonal reach across both name and rank. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${t.layer} file if the subdomain shares it, or cross at equal rank through this unit's own ${t.layer} row.`;
 }
+
+// The landed-flow verdict - the diagonal generalized across boundaries, judged on where a value actually lands once conduits are followed.
+// The Layers diagram draws every cross-boundary arrow at equal rank: B-Logic to B-Logic, rules to rules, the outer rows' red laterals; a landed value flow below the consumer's own rank across any name - a sibling unit, a child subdomain, a peer, a foreign domain - is a diagonal no row of the diagram draws.
+// Within one subdomain the direct form is the per-file rule's territory (diagonalVerdict above); this generalization belongs to the graph pass, where the reference hides behind a surface or a re-export chain and only the landing reveals the shape.
+export function landedVerdict(role, t) {
+  if (role.kind !== 'domain') return null;
+  if (!t || !t.layer || t.surface || t.asset) return null;
+  if (LAYER_RANK[t.layer] >= LAYER_RANK[role.layer]) return null;
+  const r = rel(role.chain, t.chain);
+  if (r.kind === 'same') return diagonalVerdict(role, t);
+  if (r.kind === 'to-ancestor') return null; // The hard breach; the boundary verdicts report it on the authored edge.
+  const importerUnit = unitOf(role);
+  const from = importerUnit ? `unit '${importerUnit}' (${role.layer})` : `the bare ${role.layer} file of '${role.chain.join('/')}'`;
+  const where = r.kind === 'into-child' ? `its child '${t.chain.join('/')}'` : `'${t.chain.join('/')}'`;
+  return `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${t.layer}, below its own rank - a diagonal no row of the diagram draws. Cross at equal rank: reference it from this unit's own ${t.layer} row, and let its own column climb.`;
+}

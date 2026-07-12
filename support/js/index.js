@@ -15,6 +15,7 @@
 import {
   LAYERS,
   LAYER_SUFFIX_RE,
+  DATA_RE,
   norm,
   classify,
   fileRole,
@@ -22,7 +23,9 @@ import {
   importVerdict,
   lateralVerdict,
   diagonalVerdict,
+  landedVerdict,
 } from './model.js';
+import { createWalker } from './flow.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 
@@ -140,8 +143,29 @@ function lateralCoupling(layer) {
 const noServiceCoupling = lateralCoupling('services');
 const noAdapterCoupling = lateralCoupling('adapters');
 
-// elda/no-diagonal-reach - SURFACE.5's in-subdomain geometry: between named units a value reference crosses at its own rank, and a reach into a different unit's lower layer crosses a name and a rank at once (diagonalVerdict in model.js).
+// elda/no-diagonal-reach - SURFACE.5's geometry, enforced on landings: every value reference is followed name by name through surfaces and re-export chains (flow.js) to the files that own the bindings, and each landing is judged by landedVerdict in model.js - the in-subdomain diagonal, and its cross-boundary generalization (the diagrams draw every cross-boundary arrow at equal rank, so a landed value flow below the consumer's own rank is a diagonal no row draws).
+// The direct reference is the walk's zero-hop case, so this subsumes the direct-only check; a specifier that resolves to no file keeps the spec-classified direct judgment, so a broken path never hides a finding.
 // Error-tier alongside the structural invariants: a declared name binds the way a declared subdomain does, and every hit resolves by a rename, a promotion to the bare file, or an equal-rank crossing.
+const walkers = new Map();
+const walkerFor = (srcDir, domainAlias, appAlias) => {
+  const key = `${srcDir}|${domainAlias}|${appAlias}`;
+  if (!walkers.has(key)) walkers.set(key, createWalker({ srcDir, domainAlias, appAlias }));
+  return walkers.get(key);
+};
+
+// AST-level value names: named imports minus type-only ones, `default`, and a namespace or dynamic import as '*' - the whole module.
+function valueNames(node) {
+  if (node.importKind === 'type' || node.exportKind === 'type') return [];
+  const names = [];
+  for (const s of node.specifiers ?? []) {
+    if (s.type === 'ImportSpecifier') { if (s.importKind !== 'type') names.push(s.imported.name ?? s.imported.value); }
+    else if (s.type === 'ImportDefaultSpecifier') names.push('default');
+    else if (s.type === 'ImportNamespaceSpecifier') return '*';
+    else if (s.type === 'ExportSpecifier') { if (s.exportKind !== 'type') names.push(s.local.name ?? s.local.value); }
+  }
+  return names;
+}
+
 const noDiagonalReach = {
   meta: {
     schema: [{
@@ -159,17 +183,30 @@ const noDiagonalReach = {
     const filename = filenameOf(context);
     const role = fileRole(filename, compositionRoot);
     if (role.kind !== 'domain') return {};
-    const flag = (node, spec) => {
+    const srcRoot = filename.match(/^(.*)\/domains\//);
+    const walker = srcRoot ? walkerFor(srcRoot[1], domainAlias, appAlias) : null;
+    const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
+    const direct = (node, spec) => {
       const t = targetOf(filename, spec, domainAlias, appAlias);
       const verdict = diagonalVerdict(role, t);
       if (verdict) context.report({ node, message: verdict });
     };
-    // A type-only declaration is a vocabulary reference (OWNER.6: a type at any layer); the rule acts on value edges, re-exports included.
-    const isValue = (node) => node.importKind !== 'type' && node.exportKind !== 'type';
+    const flag = (node, spec, names) => {
+      if (names !== '*' && names.length === 0) return;
+      const found = walker && walker.landings(filename, spec, names);
+      if (found == null) { direct(node, spec); return; }
+      for (const l of found) {
+        const m = norm(l.path).match(/\/domains\/(.+)$/);
+        if (!m) continue;
+        const t = { ...classify(m[1].split('/').filter(Boolean)), asset: DATA_RE.test(l.path) };
+        const verdict = landedVerdict(role, t);
+        if (verdict) context.report({ node, message: l.via.length ? `${verdict} (landed via ${l.via.map(relOf).join(' -> ')})` : verdict });
+      }
+    };
     return {
-      ImportDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
-      ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
-      ExportNamedDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
+      ImportDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
+      ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value, '*'),
+      ExportNamedDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
     };
   },
 };
