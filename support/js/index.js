@@ -23,6 +23,7 @@ import {
   importVerdict,
   lateralVerdict,
   landedVerdict,
+  rootLandedVerdict,
   diagonalScope,
 } from './model.js';
 import { createWalker } from './flow.js';
@@ -66,11 +67,34 @@ const imports = {
       if (verdict) context.report({ node, message: verdict });
     };
 
+    // On the root's row ROOT.1 is a landing question: a barrel carries no layer of its own, so the per-specifier reading above passes a binding that in fact lands on a use-case.
+    // The walk follows each value name to the file that owns it and judges it there, the way the diagonal rule already reads domain files.
+    const isRoot = role.kind === 'composition-root';
+    const srcRoot = isRoot ? filename.match(new RegExp(`^(.*)/${compositionRoot}/`)) : null;
+    const walker = srcRoot ? walkerFor(srcRoot[1], domainAlias, appAlias) : null;
+    const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
+    const landed = (node, spec, names) => {
+      if (!walker || (names !== '*' && names.length === 0)) return;
+      const found = walker.landings(filename, spec, names);
+      if (found == null) return;
+      for (const l of found) {
+        const m = norm(l.path).match(/\/domains\/(.+)$/);
+        if (!m) continue;
+        const t = { ...classify(m[1].split('/').filter(Boolean)), asset: DATA_RE.test(l.path) };
+        const verdict = rootLandedVerdict(role, t);
+        if (verdict) context.report({ node, message: l.via && l.via.length ? `${verdict} (landed via ${l.via.map(relOf).join(' -> ')})` : verdict });
+      }
+    };
+    const judge = (node, spec, names) => {
+      check(node, spec);
+      if (isRoot) landed(node, spec, names);
+    };
+
     return {
-      ImportDeclaration: (node) => node.source && check(node, node.source.value),
-      ExportNamedDeclaration: (node) => node.source && check(node, node.source.value),
-      ExportAllDeclaration: (node) => node.source && check(node, node.source.value),
-      ImportExpression: (node) => node.source && node.source.type === 'Literal' && check(node, node.source.value),
+      ImportDeclaration: (node) => node.source && judge(node, node.source.value, valueNames(node)),
+      ExportNamedDeclaration: (node) => node.source && judge(node, node.source.value, valueNames(node)),
+      ExportAllDeclaration: (node) => node.source && judge(node, node.source.value, node.exportKind === 'type' ? [] : '*'),
+      ImportExpression: (node) => node.source && node.source.type === 'Literal' && judge(node, node.source.value, '*'),
     };
   },
 };

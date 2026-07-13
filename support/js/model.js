@@ -304,6 +304,17 @@ export function landedVerdict(role, t) {
   return `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${t.layer}, below its own rank - a diagonal no row of the diagram draws. Cross at equal rank: reference it from this unit's own ${t.layer} row, and let its own column climb.`;
 }
 
+// The composition root's reach, judged on landings: ROOT.1 read the way SURFACE.5 taught us to read the diagonals.
+// A root wires services - it instantiates them, injects their ports, and mounts them - and consuming behavior is a service's own work.
+// So a binding the root takes that lands off the services row marks a service smashed into the root: the twin, one rank out, of a service reaching a foreign use-case.
+// The per-specifier reading cannot see it, because a barrel carries no layer of its own; the reach launders through the barrel and only the landing tells the truth.
+export function rootLandedVerdict(role, t) {
+  if (role.kind !== 'composition-root') return null;
+  if (!t || !t.layer || t.surface || t.asset) return null;
+  if (t.layer === 'services') return null;
+  return `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${t.chain.join('/')}' at ${t.layer}. Consuming ${t.layer} is a service's own work, so the reach marks a service smashed into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
+}
+
 // The diagonal's distance class - how wide a boundary the landed flow crosses: within one subdomain, across subdomains of one domain, or across domains.
 // Severity grows with the width, and a lint level binds per rule, so each class reports through its own rule and the presets map the gradient onto the levels.
 export function diagonalScope(role, t) {

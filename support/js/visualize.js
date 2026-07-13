@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
-import { classify, diagonalVerdict, fileRole, importVerdict, landedVerdict, lateralVerdict, norm, posixResolve, targetOf } from './model.js';
+import { classify, diagonalVerdict, fileRole, importVerdict, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, targetOf } from './model.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -225,8 +225,13 @@ function expandFlows(files, edges, walker, appDir, byPath) {
     // Side-effect imports execute the target rather than take bindings, and type-only edges are vocabulary; both draw as authored and do not expand.
     if (e.kind === 'side-effect' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
     const judge = (toId) => {
-      if (src.role.kind !== 'domain') return null;
       const t = { ...files[toId].role, asset: files[toId].kind === 'asset' };
+      // The root's landings answer ROOT.1: a binding it takes that lands off the services row is a service smashed into the root.
+      if (src.role.kind === 'composition-root') {
+        const rv = rootLandedVerdict(src.role, t);
+        return rv ? { verdict: rv, tier: 'invariant' } : null;
+      }
+      if (src.role.kind !== 'domain') return null;
       const dv = landedVerdict(src.role, t);
       if (dv) return { verdict: dv, tier: 'invariant' };
       const lv = lateralVerdict(src.role, t, 'services') ?? lateralVerdict(src.role, t, 'adapters');

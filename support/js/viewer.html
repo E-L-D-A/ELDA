@@ -32,6 +32,7 @@
       --type: #515b6b;
       --bad: #e34f44;
       --smell: #c68118;
+      --laundered: #e07b39;
       --hi-out: #3f8de0;
       --hi-in: #1ba46c;
       --accent: #3f8de0;
@@ -152,6 +153,12 @@
     .counts .sev-smell b {
       color: var(--smell);
     }
+    .counts .sev-laundered .dot {
+      background: var(--laundered);
+    }
+    .counts .sev-laundered b {
+      color: var(--laundered);
+    }
     .bottom {
       position: fixed;
       bottom: 0;
@@ -195,6 +202,9 @@
     }
     .legend i.violation {
       border-top: 2px solid var(--bad);
+    }
+    .legend i.laundered {
+      border-top: 2px solid var(--laundered);
     }
     .legend i.type {
       border-top: 2px dotted var(--type);
@@ -423,6 +433,15 @@
       opacity: 1;
       filter: drop-shadow(
         0 0 3px color-mix(in srgb, var(--bad) 45%, transparent)
+      );
+    }
+    /* A laundered finding is real in the graph yet invisible to any single reference, so it reads as its own severity rather than as a violation. */
+    #edges path.laundered {
+      stroke: var(--laundered);
+      stroke-width: 1.8;
+      opacity: 1;
+      filter: drop-shadow(
+        0 0 3px color-mix(in srgb, var(--laundered) 40%, transparent)
       );
     }
     /* A diagonal reference, the shape no ELDA row draws, reads at full strength and a touch brighter so it stands out from the orthogonal legal runs. */
@@ -899,6 +918,9 @@
     #issues .item.smell {
       background: linear-gradient(110deg, var(--smell), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
     }
+    #issues .item.laundered {
+      background: linear-gradient(110deg, var(--laundered), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
 
     #tooltip {
       position: fixed;
@@ -1039,12 +1061,13 @@
     <div class="bottom">
       <div class="legend">
         <div class="col">
+          <span><i></i>dependency</span>
           <span><i class="violation"></i>violation</span>
+          <span><i class="laundered"></i>laundered</span>
           <span><i class="smell"></i>inadvisable</span>
-          <span><i class="type"></i>type-only</span>
         </div>
         <div class="col">
-          <span><i></i>dependency</span>
+          <span><i class="type"></i>type-only</span>
           <span><i class="in"></i>dependency of</span>
           <span><i class="out"></i>depends on</span>
         </div>
@@ -1183,13 +1206,13 @@
         for (const o of outBy.get(e.to) ?? []) {
           if (o.to == null || o.to === e.from || !overlap(e.names, o.names)) continue;
           const worse = rank(o.tier) >= rank(e.tier) ? o : e;
+          // The threaded edge keeps the source flow's laundered standing: rerouting through a composer is a redraw, not a finding of its own, and a tier inherited from a real authored hop stays that hop's severity.
           const threaded = {
             ...e,
             to: o.to,
             via: [...(e.via ?? []), e.to, ...(o.via ?? [])],
             tier: worse.tier,
             verdict: worse.verdict,
-            laundered: true,
           };
           if (composers.has(o.to)) {
             if (!seen.has(o.to)) expand(threaded, new Set([...seen, o.to]));
@@ -1689,7 +1712,9 @@
     // ---------------------------------------------------------------------------
     // Edges.
 
+    // A laundered finding carries a tier, yet it is a graph-only landing rather than an authored breach, so it paints as its own severity ahead of the tier colors.
     function edgeClass(e) {
+      if (e.laundered) return "laundered";
       if (e.tier === "invariant") return "violation";
       if (e.tier === "smell") return "smell";
       if (e.typeOnly) return "type";
@@ -1796,13 +1821,14 @@
       svg.setAttribute("height", wrap.scrollHeight);
       svg.replaceChildren();
       const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-      defs.innerHTML = ["ok", "type", "smell", "violation", "hi-in", "hi-out"]
+      defs.innerHTML = ["ok", "type", "smell", "violation", "laundered", "hi-in", "hi-out"]
         .map((c) => {
           const color = {
             ok: "var(--ok)",
             type: "var(--type)",
             smell: "var(--smell)",
             violation: "var(--bad)",
+            laundered: "var(--laundered)",
             "hi-in": "var(--hi-in)",
             "hi-out": "var(--hi-out)",
           }[c];
@@ -2269,7 +2295,7 @@
           h(
             "div",
             {
-              class: "item " + (f.tier === "invariant" ? "violation" : "smell"),
+              class: "item laundered",
               onclick: pinFrom(f),
             },
             h("div", {}, `${data.files[f.from].path} ⇒ ${data.files[f.to].path}`),
@@ -2302,8 +2328,8 @@
         stat(data.files.length, "files"),
         stat(data.edges.length, "edges"),
         stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
+        stat(laundered, "laundered", laundered ? "sev-laundered" : "sev-zero"),
         stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
-        stat(laundered, "laundered", laundered ? "sev-bad" : "sev-zero"),
       );
     }
 
