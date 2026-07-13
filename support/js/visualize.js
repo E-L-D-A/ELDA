@@ -64,6 +64,18 @@ function readOptions() {
 
 const { domainAlias, appAlias, compositionRoot } = readOptions();
 
+// The app's composition roots, each a top-level runtime the diagram draws as its own bar: the configured client root under src/, the production server, and the build config.
+// Roots communicate only by serialization (ROOT.5), so each scans as its own block feeding the shared domains.
+// The list is existence-filtered, so an app without a server or a Vite config simply omits that bar.
+function compositionRoots() {
+  const first = (...paths) => paths.find(existsSync) ?? null;
+  return [
+    { key: compositionRoot, label: 'src/' + compositionRoot, dir: join(srcDir, compositionRoot) },
+    { key: 'server', label: 'server', dir: join(appDir, 'server') },
+    { key: 'vite', label: 'vite.config', file: first(join(appDir, 'vite.config.ts'), join(appDir, 'vite.config.js'), join(appDir, 'vite.config.mjs')) },
+  ].filter((r) => (r.dir && existsSync(r.dir)) || (r.file && existsSync(r.file)));
+}
+
 // ---------------------------------------------------------------------------
 // Scan: walk the ELDA-relevant roots and classify every file.
 
@@ -80,16 +92,24 @@ function* walk(dir) {
 }
 
 function buildGraph() {
-  const roots = [join(srcDir, 'domains'), join(srcDir, compositionRoot), join(srcDir, 'core')].filter(existsSync);
+  const roots = compositionRoots();
+  // Domains and core scan by directory; each composition root scans its directory or its single config file and stamps every file with its root key, so the diagram draws one bar per root.
+  const areas = [
+    { dir: join(srcDir, 'domains') },
+    ...roots.map((r) => ({ root: r.key, dir: r.dir, file: r.file })),
+    { dir: join(srcDir, 'core') },
+  ];
   const files = [];
   const byPath = new Map();
 
-  for (const root of roots) {
-    for (const abs of walk(root)) {
+  for (const area of areas) {
+    const target = area.dir ?? area.file;
+    if (!target || !existsSync(target)) continue;
+    for (const abs of area.file ? [area.file] : walk(area.dir)) {
       const path = norm(abs.slice(appDir.length + 1));
       const kind = CODE_RE.test(path) ? 'code' : STYLE_RE.test(path) ? 'style' : ASSET_RE.test(path) ? 'asset' : null;
       if (!kind) continue;
-      let role = fileRole('/' + path, compositionRoot);
+      let role = area.root ? { kind: 'composition-root', root: area.root } : fileRole('/' + path, compositionRoot);
       // A pure-data asset carries no behaviour and classifies as vocabulary (SURFACE.6): entities of the subdomain its directory names.
       if (kind === 'asset') {
         const m = ('/' + path).match(/\/domains\/(.+)$/);
@@ -131,7 +151,9 @@ function buildGraph() {
     }
     const refs = info.refs;
     const relPath = '/' + file.path;
-    const relDir = file.path.slice(0, file.path.lastIndexOf('/'));
+    // A root config file sits at the app root with no directory segment, so an absent slash resolves relatives against the app root itself.
+    const slash = file.path.lastIndexOf('/');
+    const relDir = slash < 0 ? '' : file.path.slice(0, slash);
     const importerDir = (relPath.match(/\/domains\/(.+)$/)?.[1] ?? '').split('/').slice(0, -1).join('/');
     for (const ref of refs) {
       const { external, node } = resolveNode(relDir, ref.spec);
@@ -162,7 +184,7 @@ function buildGraph() {
   const walker = createWalker({ srcDir, domainAlias, appAlias });
   return {
     app: norm(appDir).split('/').pop(),
-    options: { domainAlias, appAlias, compositionRoot },
+    options: { domainAlias, appAlias, compositionRoot, roots: roots.map((r) => ({ key: r.key, label: r.label })) },
     files,
     edges,
     flows: expandFlows(files, edges, walker, appDir, byPath),

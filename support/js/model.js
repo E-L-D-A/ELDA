@@ -250,7 +250,15 @@ export function lateralVerdict(role, t, layer, { remedy, crossSurface } = LATERA
   if (!t || t.layer !== layer || t.asset) return null;
   const importerUnit = unitOf(role);
   const r = rel(role.chain, t.chain);
-  if (r.kind === 'into-child') return null; // Self-composition of an owned subdomain (ROOT.7).
+  if (r.kind === 'into-child') {
+    // ROOT.7 self-composition is the composer's license, not every parent-level unit's.
+    // A named unit reaching into an owned child mounts its surface the way a peer mount does, and wants a port from the composer.
+    if (isComposer(role)) return null;
+    if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {
+      return `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || role.chain.join('/')}' mounts its child '${t.chain.join('/')}' at its runtime-composition surface; prefer a named slot port its composer fills, and justify the mounting where the port becomes ceremony.`;
+    }
+    return null;
+  }
   if (r.kind === 'to-ancestor') return null; // The hard breach; the imports verdict reports it.
   if (r.kind === 'peer') {
     if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {

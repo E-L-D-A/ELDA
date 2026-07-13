@@ -425,6 +425,11 @@
         0 0 3px color-mix(in srgb, var(--bad) 45%, transparent)
       );
     }
+    /* A diagonal reference, the shape no ELDA row draws, reads at full strength and a touch brighter so it stands out from the orthogonal legal runs. */
+    #edges path.edge.diagonal {
+      opacity: 1;
+      filter: brightness(1.5);
+    }
     #edges.focused path.edge {
       opacity: 0.05;
       filter: none;
@@ -449,15 +454,22 @@
     }
 
     #root-bar {
-      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 12px;
       margin-bottom: 28px;
+    }
+    .root-block {
+      position: relative;
+      align-self: stretch;
       padding: 6px 12px;
       border: 1px solid color-mix(in srgb, var(--root-bd) 45%, var(--line));
       background: color-mix(in srgb, var(--root-bg) 45%, var(--box));
       border-radius: 12px;
       box-shadow: var(--shadow);
     }
-    #root-bar .bar-title {
+    .root-block .bar-title {
       margin-right: 10px;
       font: 600 11.5px var(--mono);
       color: color-mix(in srgb, var(--root-bd) 55%, var(--fg));
@@ -488,6 +500,10 @@
       padding-right: 24px;
       margin-right: 24px;
       border-right: 1px dashed var(--line);
+    }
+    /* The column's own `display` outranks the `hidden` attribute, so restore the hide when core and the roots leave nothing to show, dropping the empty gutter. */
+    #nondomains[hidden] {
+      display: none;
     }
     #core-box {
       position: relative;
@@ -543,7 +559,7 @@
       grid-row: 2 / -2;
     }
     .domain > .footer {
-      grid-row: -2;
+      grid-row: -1;
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -617,6 +633,41 @@
       margin: -5px -6px -7px;
       border-radius: 10px;
       background: rgb(255 255 255 / 0.02);
+    }
+    /* The bare composer and the bare entities file lift out of the cake: the composer caps the (sub)domain as its sub-composition-root, the entities file underlies it as the shared base. */
+    .subroot, .subbase {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 3px 5px;
+      border-radius: 8px;
+      z-index: 1;
+    }
+    .subroot {
+      margin: -2px -4px 3px;
+      border: 1px solid color-mix(in srgb, var(--services-bd) 35%, var(--line));
+      background: color-mix(in srgb, var(--services-bg) 22%, transparent);
+    }
+    .subbase {
+      margin: 3px -4px -2px;
+      border: 1px solid color-mix(in srgb, var(--entities-bd) 35%, var(--line));
+      background: color-mix(in srgb, var(--entities-bg) 22%, transparent);
+    }
+    /* A lone composer or base fills the band's full width; several share it evenly. */
+    .subroot .chip, .subbase .chip {
+      flex: 1;
+      justify-content: center;
+    }
+    /* The domain-root composer and base span the whole box, one nesting level out from the subdomain bands, so they read a touch stronger. */
+    .subroot.domainwide {
+      border-color: color-mix(in srgb, var(--services-bd) 55%, var(--line));
+      background: color-mix(in srgb, var(--services-bg) 32%, transparent);
+    }
+    .subbase.domainwide {
+      border-color: color-mix(in srgb, var(--entities-bd) 55%, var(--line));
+      background: color-mix(in srgb, var(--entities-bg) 32%, transparent);
     }
     .rail {
       grid-column: 1;
@@ -738,7 +789,7 @@
       outline: 2px solid var(--hi-in);
       outline-offset: 1px;
     }
-    #root-bar .chip, #core-box .chip {
+    .root-block .chip, #core-box .chip {
       margin: 2px 3px;
     }
 
@@ -910,14 +961,19 @@
 
     #bottombar {
       display: flex;
-      align-items: center;
+      flex-direction: column;
       gap: 6px;
-      flex-wrap: wrap;
       padding: 7px 14px;
       background: color-mix(in srgb, var(--box) 82%, transparent);
       backdrop-filter: blur(10px);
       border-top: 1px solid var(--line);
       font-size: 11.5px;
+    }
+    #bottombar .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
     }
     #bottombar .bar-label {
       color: var(--faint);
@@ -926,6 +982,7 @@
       letter-spacing: 0.1em;
       text-transform: uppercase;
       margin-right: 4px;
+      min-width: 52px;
     }
     #bottombar .bar-btn {
       appearance: none;
@@ -964,6 +1021,7 @@
         <label><input type="checkbox" id="t-assets" checked>
           styles+assets</label>
         <label><input type="checkbox" id="t-surfaces"> surfaces</label>
+        <label><input type="checkbox" id="t-services" checked> domain services</label>
       </span>
       <button id="issues-btn">issues <span id="issue-count"></span></button>
     </header>
@@ -1011,8 +1069,10 @@
     let stickyPaths = [];
     let chips = new Map();
     let pinnedPath = null;
-    const initialHidden = new Set(["@root", "@core"]);
-    let hiddenBlocks = new Set(initialHidden);
+    // On a fresh session every composition root and the pure-core box start hidden; the domains carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
+    const defaultHidden = () =>
+      new Set(["@core", ...(data ? data.options.roots.map((r) => "@root:" + r.key) : [])]);
+    let hiddenBlocks = new Set();
     // Files banished to their domain's hidden shelf by middle-click; session-only on purpose, keyed by path so live rescans keep them hidden.
     const hiddenFiles = new Set();
 
@@ -1021,21 +1081,34 @@
       svg = $("edges"),
       tooltip = $("tooltip");
     const byPath = (a, b) => a.path.localeCompare(b.path);
+    // A file's dependency count is its distinct outgoing references; stacks float the highest-dependency file to the top and columns bubble it left, so arrows run down and to the right.
+    let outDeg = new Map();
+    const deg = (f) => outDeg.get(f.id) ?? 0;
+    const byDeg = (a, b) => deg(b) - deg(a) || byPath(a, b);
 
-    // Hidden top-level blocks persist per app across reloads; storage may be unavailable on a file:// snapshot, so degrade to session-only state.
-    const storageKey = () => "elda-viz-hidden:" + (data ? data.app : "");
-    function loadHidden() {
+    // The view-mode toggles in the header, persisted alongside block visibility.
+    const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services"];
+
+    // Block visibility and the view-mode toggles persist per app for the browser session.
+    // Storage may be unavailable on a file:// snapshot, so every read falls back to the built-in defaults.
+    const storageKey = () => "elda-viz:" + (data ? data.app : "");
+    function loadPrefs() {
+      hiddenBlocks = defaultHidden();
       try {
-        const stored = localStorage.getItem(storageKey());
-
-        hiddenBlocks = stored ? new Set(JSON.parse(stored)) : new Set(initialHidden);
-      } catch {
-        hiddenBlocks = new Set(initialHidden);
-      }
+        const stored = JSON.parse(sessionStorage.getItem(storageKey()) || "null");
+        if (!stored) return;
+        if (Array.isArray(stored.hidden)) hiddenBlocks = new Set(stored.hidden);
+        for (const id of TOGGLES)
+          if (typeof stored.toggles?.[id] === "boolean") $(id).checked = stored.toggles[id];
+      } catch {}
     }
-    function saveHidden() {
+    function savePrefs() {
       try {
-        localStorage.setItem(storageKey(), JSON.stringify([...hiddenBlocks]));
+        const toggles = Object.fromEntries(TOGGLES.map((id) => [id, $(id).checked]));
+        sessionStorage.setItem(
+          storageKey(),
+          JSON.stringify({ hidden: [...hiddenBlocks], toggles }),
+        );
       } catch {}
     }
 
@@ -1045,7 +1118,7 @@
     // The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
     function blockOf(f) {
       const p = place(f);
-      if (p.area === "root") return "@root";
+      if (p.area === "root") return "@root:" + p.root;
       if (p.area === "core") return "@core";
       if (p.area === "domain") return p.domain;
       return null;
@@ -1064,7 +1137,7 @@
     // Which cell a file renders into: the composition-root bar, the core box, or a domain's (subdomain group x unit sub-column x row) cell.
     function place(f) {
       const r = f.role;
-      if (r.kind === "composition-root") return { area: "root" };
+      if (r.kind === "composition-root") return { area: "root", root: r.root };
       if (r.kind === "core") return { area: "core" };
       if (r.kind === "surface")
         return {
@@ -1083,6 +1156,52 @@
           row: r.layer,
         };
       return { area: "other" };
+    }
+
+    // A domain-wide band: the bare composer (the sub-root cap) or the bare entities file (the shared base), lifted out of the cake and spanning its (sub)domain. Edges anchor these vertically only.
+    function isBarFile(f) {
+      const p = place(f);
+      return p.area === "domain" && p.unit === "" && (p.row === "services" || p.row === "entities");
+    }
+
+    // A services composer (a sub-root band) threads away like a surface: an edge into it re-emerges as edges to the modules it re-exports, so arrows land on the real carriers behind the composition layer. `data.flows` already carries the composer's onward hop.
+    function isComposerFile(f) {
+      return isBarFile(f) && f.role.layer === "services";
+    }
+    function threadComposers(list) {
+      const composers = new Set(data.files.filter(isComposerFile).map((f) => f.id));
+      if (!composers.size) return list;
+      const outBy = new Map();
+      for (const e of list)
+        if (e.to != null && composers.has(e.from))
+          (outBy.get(e.from) ?? outBy.set(e.from, []).get(e.from)).push(e);
+      const rank = (t) => (t === "invariant" ? 2 : t === "smell" ? 1 : 0);
+      const overlap = (a, b) =>
+        a === "*" || b === "*" || !Array.isArray(a) || !Array.isArray(b) || a.some((n) => b.includes(n));
+      const out = [];
+      const expand = (e, seen) => {
+        for (const o of outBy.get(e.to) ?? []) {
+          if (o.to == null || o.to === e.from || !overlap(e.names, o.names)) continue;
+          const worse = rank(o.tier) >= rank(e.tier) ? o : e;
+          const threaded = {
+            ...e,
+            to: o.to,
+            via: [...(e.via ?? []), e.to, ...(o.via ?? [])],
+            tier: worse.tier,
+            verdict: worse.verdict,
+            laundered: true,
+          };
+          if (composers.has(o.to)) {
+            if (!seen.has(o.to)) expand(threaded, new Set([...seen, o.to]));
+          } else out.push(threaded);
+        }
+      };
+      for (const e of list) {
+        if (e.to != null && composers.has(e.from)) continue;
+        if (e.to != null && composers.has(e.to)) expand(e, new Set([e.to]));
+        else out.push(e);
+      }
+      return out;
     }
 
     // A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
@@ -1131,7 +1250,7 @@
           onclick: (e) => {
             e.stopPropagation();
             hiddenBlocks.add(key);
-            saveHidden();
+            savePrefs();
             render();
           },
         },
@@ -1167,11 +1286,23 @@
 
     function render() {
       chips = new Map();
+      // Recompute dependency counts from the authored edges, distinct per target, so stacking and ordering stay stable under the view toggles.
+      outDeg = new Map();
+      const counted = new Set();
+      for (const e of data.edges) {
+        if (e.to == null) continue;
+        const k = e.from + ">" + e.to;
+        if (counted.has(k)) continue;
+        counted.add(k);
+        outDeg.set(e.from, (outDeg.get(e.from) ?? 0) + 1);
+      }
       const hideAsset = !$("t-assets").checked;
       const expunge = !$("t-surfaces").checked;
+      const threadC = !$("t-services").checked;
       const passes = (f) =>
         !(hideAsset && f.kind !== "code") &&
         !(expunge && f.role.kind === "surface") &&
+        !(threadC && isComposerFile(f)) &&
         !hiddenBlocks.has(blockOf(f));
       const visible = (f) => passes(f) && !hiddenFiles.has(f.path);
       // A ghost renders on its domain's hidden shelf: banished by middle-click yet passing every other filter.
@@ -1181,6 +1312,7 @@
       renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS);
       // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
       drawn = expunge ? data.flows : data.edges;
+      if (threadC) drawn = threadComposers(drawn);
       renderBlockBar();
       renderIssues();
       requestAnimationFrame(() => {
@@ -1189,22 +1321,34 @@
       });
     }
 
-    // The composition-root bar, the diagram's Application Runtime strip.
+    // One Application Runtime strip per composition root: the client route root, the server, and the builder each draw their own bar feeding the shared domains.
     function renderRootBar(visible) {
-      const bar = $("root-bar");
-      bar.style.display = hiddenBlocks.has("@root") ? "none" : "";
-      bar.replaceChildren(
-        h(
-          "div",
-          { class: "root-inner" },
-          h("span", { class: "bar-title" }, "src/" + data.options.compositionRoot),
-          data.files
-            .filter((f) => place(f).area === "root" && visible(f))
-            .sort(byPath)
-            .map((f) => makeChip(f)),
-          hideBtn("@root"),
-        ),
-      );
+      const container = $("root-bar");
+      const blocks = data.options.roots
+        .map((r) => {
+          const key = "@root:" + r.key;
+          const files = data.files
+            .filter((f) => {
+              const p = place(f);
+              return p.area === "root" && p.root === r.key && visible(f);
+            })
+            .sort(byDeg);
+          if (hiddenBlocks.has(key) || !files.length) return null;
+          return h(
+            "div",
+            { class: "root-block" },
+            h(
+              "div",
+              { class: "root-inner" },
+              h("span", { class: "bar-title" }, r.label),
+              files.map((f) => makeChip(f)),
+              hideBtn(key),
+            ),
+          );
+        })
+        .filter(Boolean);
+      container.style.display = blocks.length ? "" : "none";
+      container.replaceChildren(...blocks);
     }
 
     // Non-domain roots render to the left of the domains, past the faint separator.
@@ -1212,7 +1356,7 @@
       const box = $("core-box");
       const coreFiles = data.files
         .filter((f) => place(f).area === "core" && visible(f))
-        .sort(byPath);
+        .sort(byDeg);
       box.hidden = coreFiles.length === 0;
       box.replaceChildren(
         "src/core ",
@@ -1226,6 +1370,16 @@
     function renderDomains(visible, ghost, rowList) {
       const domains = new Map();
       const shelves = new Map();
+      // The bare composer (services) and the bare entities file are the (sub)domain's own composition root and shared base.
+      // They lift out of the layer cake into a sub-root cap above the columns and a shared-base bar below them, keyed by domain then subdomain.
+      const subRoots = new Map();
+      const subBases = new Map();
+      const bucketBar = (map, domain, sub, f) => {
+        if (!map.has(domain)) map.set(domain, new Map());
+        const bySub = map.get(domain);
+        if (!bySub.has(sub)) bySub.set(sub, []);
+        bySub.get(sub).push(f);
+      };
       for (const f of data.files) {
         const p = place(f);
         if (p.area !== "domain") continue;
@@ -1238,12 +1392,24 @@
         if (!domains.has(p.domain)) domains.set(p.domain, new Map());
         const subsOf = domains.get(p.domain);
         if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
+        // A bare reserved-name file at the services or entities layer is the subdomain's composer or shared base; lift it to the sub-root or sub-base bar.
+        if (p.unit === "" && p.row === "services") { bucketBar(subRoots, p.domain, p.sub, f); continue; }
+        if (p.unit === "" && p.row === "entities") { bucketBar(subBases, p.domain, p.sub, f); continue; }
         const units = subsOf.get(p.sub);
         if (!units.has(p.unit)) units.set(p.unit, new Map());
         const rows = units.get(p.unit);
         if (!rows.has(p.row)) rows.set(p.row, []);
         rows.get(p.row).push(f);
       }
+      // A subdomain whose only files are its composer and base still needs one column track for those bars to span.
+      const ensureSub = (domain, sub) => {
+        if (!domains.has(domain)) domains.set(domain, new Map());
+        const subsOf = domains.get(domain);
+        if (!subsOf.has(sub)) subsOf.set(sub, new Map());
+        if (subsOf.get(sub).size === 0) subsOf.get(sub).set("", new Map());
+      };
+      for (const [d, bySub] of subRoots) for (const sub of bySub.keys()) if (sub !== "") ensureSub(d, sub);
+      for (const [d, bySub] of subBases) for (const sub of bySub.keys()) if (sub !== "") ensureSub(d, sub);
       // A domain whose every file sits on the shelf still renders, so its files stay restorable.
       for (const d of shelves.keys())
         if (!domains.has(d)) domains.set(d, new Map());
@@ -1251,23 +1417,44 @@
       const domainsEl = $("domains");
       domainsEl.replaceChildren();
       // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows, then the hidden shelf).
-      domainsEl.style.gridTemplateRows = `auto auto auto repeat(${rowList.length}, auto) auto`;
+      domainsEl.style.gridTemplateRows = `auto auto auto auto auto repeat(${rowList.length}, auto) auto auto auto`;
       const dotFirst = (a, b) =>
         a === "" ? -1 : b === "" ? 1 : a.localeCompare(b);
 
-      const sortedDomains = [...domains.entries()].sort((a, b) => {
-        return (b[1].size - a[1].size) || a[0].localeCompare(b[0]);
-      });
+      // Dependency totals per domain, subdomain, and unit column, summed over every file so the toggles never reshuffle the order; the heaviest bubble left.
+      const domDeg = new Map(),
+        subDeg = new Map(),
+        colDeg = new Map();
+      const bump = (m, k, v) => m.set(k, (m.get(k) ?? 0) + v);
+      for (const f of data.files) {
+        const p = place(f);
+        if (p.area !== "domain") continue;
+        const d = deg(f);
+        bump(domDeg, p.domain, d);
+        bump(subDeg, p.domain + "\0" + p.sub, d);
+        bump(colDeg, p.domain + "\0" + p.sub + "\0" + p.unit, d);
+      }
+      const at = (m, ...k) => m.get(k.join("\0")) ?? 0;
+
+      const sortedDomains = [...domains.entries()].sort(
+        (a, b) => at(domDeg, b[0]) - at(domDeg, a[0]) || a[0].localeCompare(b[0]),
+      );
 
       for (const [name, subsOf] of sortedDomains) {
         // Flatten the (subdomain, unit) tree into ordered sub-columns, laying explicit tracks so a thin spacer separates the subdomain groups while unit columns inside a group share the tighter base gap.
-        const subs = [...subsOf.keys()].sort(dotFirst);
+        const subs = [...subsOf.keys()].sort(
+          (a, b) => at(subDeg, name, b) - at(subDeg, name, a) || dotFirst(a, b),
+        );
         const columns = [];
         const groups = [];
         const tracks = [];
         let track = 2;
         for (const sub of subs) {
-          const units = [...subsOf.get(sub).keys()].sort(dotFirst);
+          const units = [...subsOf.get(sub).keys()].sort(
+            (a, b) =>
+              at(colDeg, name, sub, b) - at(colDeg, name, sub, a) ||
+              dotFirst(a, b),
+          );
           if (tracks.length) {
             tracks.push("2px");
             track++;
@@ -1283,12 +1470,12 @@
           style: `grid-template-columns: 14px${tracks.length ? " " + tracks.join(" ") : ""}`,
         });
         for (const g of groups) {
-          // Named subdomains render as cards: a panel behind the group's columns, appended first so the cells paint above it.
+          // Named subdomains render as cards: a panel behind the group's own band (grouphead through its base), appended first so the cells paint above it.
           if (g.sub !== "")
             grid.append(
               h("div", {
                 class: "subpanel",
-                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 1 / -1`,
+                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 2 / -2`,
               }),
             );
           grid.append(
@@ -1296,7 +1483,7 @@
               "div",
               {
                 class: "grouphead",
-                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 1`,
+                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 2`,
                 "data-domain": name,
                 "data-sub": g.sub,
                 title: "middle-click hides the subdomain",
@@ -1304,14 +1491,60 @@
               g.sub === "" ? "·" : g.sub + " /",
             ),
           );
+          // A subdomain's own composer caps its columns as a nested sub-root; its base sits under its cake. The domain-root composer and base span the whole box, rendered once below.
+          if (g.sub !== "") {
+            const rootFiles = (subRoots.get(name)?.get(g.sub) ?? []).sort(byDeg);
+            if (rootFiles.length)
+              grid.append(
+                h(
+                  "div",
+                  {
+                    class: "subroot",
+                    style: `grid-column: ${g.start} / span ${g.span}; grid-row: 3`,
+                  },
+                  rootFiles.map((f) => makeChip(f)),
+                ),
+              );
+            const baseFiles = (subBases.get(name)?.get(g.sub) ?? []).sort(byDeg);
+            if (baseFiles.length)
+              grid.append(
+                h(
+                  "div",
+                  {
+                    class: "subbase",
+                    style: `grid-column: ${g.start} / span ${g.span}; grid-row: ${rowList.length + 5}`,
+                  },
+                  baseFiles.map((f) => makeChip(f)),
+                ),
+              );
+          }
         }
+        // The domain's own composer caps the whole box as its composition root; its shared base underlies everything. Both span every column.
+        const domRoots = (subRoots.get(name)?.get("") ?? []).sort(byDeg);
+        if (domRoots.length)
+          grid.append(
+            h(
+              "div",
+              { class: "subroot domainwide", style: `grid-column: 2 / -1; grid-row: 1` },
+              domRoots.map((f) => makeChip(f)),
+            ),
+          );
+        const domBases = (subBases.get(name)?.get("") ?? []).sort(byDeg);
+        if (domBases.length)
+          grid.append(
+            h(
+              "div",
+              { class: "subbase domainwide", style: `grid-column: 2 / -1; grid-row: ${rowList.length + 6}` },
+              domBases.map((f) => makeChip(f)),
+            ),
+          );
         for (const col of columns) {
           grid.append(
             h(
               "div",
               {
                 class: "colhead",
-                style: `grid-column: ${col.track}; grid-row: 2`,
+                style: `grid-column: ${col.track}; grid-row: 4`,
                 "data-domain": name,
                 "data-sub": col.sub,
                 "data-unit": col.unit,
@@ -1326,7 +1559,7 @@
           grid.append(
             h(
               "div",
-              { class: "rail", style: `grid-column: 1; grid-row: ${ri + 3}` },
+              { class: "rail", style: `grid-column: 1; grid-row: ${ri + 5}` },
               rowHasFiles ? ROW_LABEL[row] : "",
             ),
           );
@@ -1336,9 +1569,9 @@
                 "div",
                 {
                   class: "cell " + row,
-                  style: `grid-column: ${col.track}; grid-row: ${ri + 3}`,
+                  style: `grid-column: ${col.track}; grid-row: ${ri + 5}`,
                 },
-                (col.rows.get(row) ?? []).sort(byPath).map((f) => makeChip(f)),
+                (col.rows.get(row) ?? []).sort(byDeg).map((f) => makeChip(f)),
               ),
             );
           });
@@ -1377,65 +1610,79 @@
     }
 
     // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
+    // The composition roots and the pure-core box share the first row as the non-domain modules; the domains take the second.
     function renderBlockBar() {
-      const blocks = [["@root", "src/" + data.options.compositionRoot]];
+      const rootBlocks = data.options.roots.map((r) => ["@root:" + r.key, r.label]);
       if (data.files.some((f) => place(f).area === "core"))
-        blocks.push(["@core", "src/core"]);
-      for (const d of [
+        rootBlocks.push(["@core", "src/core"]);
+      const domainBlocks = [
         ...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith("@"))),
-      ].sort())
-        blocks.push([d, d]);
-      const keys = blocks.map(([k]) => k);
-      const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
-      $("bottombar").replaceChildren(
-        h("span", { class: "bar-label" }, "blocks:"),
+      ]
+        .sort()
+        .map((d) => [d, d]);
+
+      const toggle = ([key, text]) =>
         h(
           "label",
-          {},
+          { class: hiddenBlocks.has(key) ? "off" : "" },
           h("input", {
             type: "checkbox",
-            checked: shown === keys.length,
-            indeterminate: shown > 0 && shown < keys.length,
+            checked: !hiddenBlocks.has(key),
             onchange: (e) => {
-              for (const k of keys)
-                hiddenBlocks[e.target.checked ? "delete" : "add"](k);
-              saveHidden();
+              hiddenBlocks[e.target.checked ? "delete" : "add"](key);
+              savePrefs();
               render();
             },
           }),
-          "all",
-        ),
-        ...blocks.map(([key, text]) =>
+          text,
+        );
+
+      // One labelled row: the group name, an all-toggle scoped to the row, then each block.
+      const row = (label, blocks, ...extra) => {
+        const keys = blocks.map(([k]) => k);
+        const shown = keys.filter((k) => !hiddenBlocks.has(k)).length;
+        return h(
+          "div",
+          { class: "bar-row" },
+          h("span", { class: "bar-label" }, label),
           h(
             "label",
-            { class: hiddenBlocks.has(key) ? "off" : "" },
+            {},
             h("input", {
               type: "checkbox",
-              checked: !hiddenBlocks.has(key),
+              checked: shown === keys.length && keys.length > 0,
+              indeterminate: shown > 0 && shown < keys.length,
               onchange: (e) => {
-                hiddenBlocks[e.target.checked ? "delete" : "add"](key);
-                saveHidden();
+                for (const k of keys)
+                  hiddenBlocks[e.target.checked ? "delete" : "add"](k);
+                savePrefs();
                 render();
               },
             }),
-            text,
+            "all",
           ),
-        ),
-        ...(hiddenFiles.size
-          ? [
-              h(
-                "button",
-                {
-                  class: "bar-btn",
-                  onclick: () => {
-                    hiddenFiles.clear();
-                    render();
-                  },
-                },
-                `unhide ${hiddenFiles.size} file${hiddenFiles.size > 1 ? "s" : ""}`,
-              ),
-            ]
-          : []),
+          ...blocks.map(toggle),
+          ...extra,
+        );
+      };
+
+      const unhideFiles = hiddenFiles.size
+        ? h(
+            "button",
+            {
+              class: "bar-btn",
+              onclick: () => {
+                hiddenFiles.clear();
+                render();
+              },
+            },
+            `unhide ${hiddenFiles.size} file${hiddenFiles.size > 1 ? "s" : ""}`,
+          )
+        : null;
+
+      $("bottombar").replaceChildren(
+        row("roots", rootBlocks),
+        row("domains", domainBlocks, unhideFiles),
       );
     }
 
@@ -1458,54 +1705,53 @@
       return true;
     }
 
-    // How an edge anchors per ELDA: a reference inside one subdomain column, or one touching the composition root, flows vertically; a reference crossing (sub)domains or touching a non-domain block travels laterally through the sides; same-cell references arc beside their cell, and anything unclassified keeps the geometric default.
+    // The logical orientation of an edge from its grid placement, not its pixels: a reference within one unit column is vertical, an equal-rank reference across columns is horizontal, a reference crossing both a column and a rank is a diagonal (the shape no ELDA row draws), and two files sharing one cell arc beside it.
+    // The composition root drops vertically into the column it wires; core sits to the side, reached laterally; a domain-wide band spans its own subdomain's stack, so within that subdomain its edges are vertical, and two bands of the same kind on one shelf read horizontally across subdomains.
     function edgeMode(e) {
       const pf = place(data.files[e.from]),
         pt = place(data.files[e.to]);
       if (pf.area === "root" || pt.area === "root") return "v";
-      if (
-        pf.area === "domain" &&
-        pt.area === "domain" &&
-        pf.domain === pt.domain &&
-        pf.sub === pt.sub &&
-        pf.unit === pt.unit
-      ) {
-        return pf.row === pt.row ? "loop" : "v";
+      if (pf.area === "core" || pt.area === "core") return "h";
+      const fromBar = isBarFile(data.files[e.from]),
+        toBar = isBarFile(data.files[e.to]);
+      if (fromBar || toBar) {
+        const bar = fromBar ? pf : pt,
+          other = fromBar ? pt : pf;
+        // A band spans its own subdomain's columns, and a domain-wide band (empty subdomain) spans the whole domain; an edge into that span drops vertically.
+        if (
+          other.area === "domain" &&
+          bar.domain === other.domain &&
+          (bar.sub === "" || bar.sub === other.sub)
+        )
+          return "v";
+        // Outside its span, an equal-rank reference reads horizontally and anything else is a true diagonal.
+        if (other.area === "domain" && pf.row === pt.row) return "h";
+        return "diag";
       }
-      if (
-        (pf.area === "domain" || pf.area === "core") &&
-        (pt.area === "domain" || pt.area === "core")
-      )
-        return "h";
-      return "auto";
+      const sameCol =
+        pf.domain === pt.domain && pf.sub === pt.sub && pf.unit === pt.unit;
+      const sameRow = pf.row === pt.row;
+      if (sameCol && sameRow) return "arc";
+      if (sameCol) return "v";
+      if (sameRow) return "h";
+      return "diag";
     }
 
-    // The concrete sides an edge occupies: vertical runs leave and land on the facing horizontal sides, lateral runs on the facing vertical sides, and same-cell arcs pair the two right sides.
+    // The concrete sides an edge occupies, drawn straight between them: a vertical run leaves a horizontal side and lands on the facing one, a horizontal run uses the facing vertical sides, a diagonal leaves and enters on the vertical sides so its slant is unmistakable, and a same-cell arc pairs the two right sides.
     function edgeSides(e, rectOf) {
       const S = rectOf(e.from),
         T = rectOf(e.to);
       const dx = T.x + T.w / 2 - (S.x + S.w / 2),
         dy = T.y + T.h / 2 - (S.y + S.h / 2);
       const mode = edgeMode(e);
-      const vert = () => ({
-        kind: "v",
+      if (mode === "arc") return { kind: "arc", from: "r", to: "r" };
+      if (mode === "h")
+        return { kind: "h", from: dx > 0 ? "r" : "l", to: dx > 0 ? "l" : "r" };
+      return {
+        kind: mode,
         from: dy > 0 ? "b" : "t",
         to: dy > 0 ? "t" : "b",
-      });
-      const horiz = () => ({
-        kind: "h",
-        from: dx > 0 ? "r" : "l",
-        to: dx > 0 ? "l" : "r",
-      });
-      if (
-        mode === "loop" ||
-        (mode === "auto" && Math.abs(dx) < 40 && Math.abs(dy) < 30)
-      )
-        return { kind: "arc", from: "r", to: "r" };
-      if (mode === "v") return vert();
-      if (mode === "h")
-        return Math.abs(dx) < 40 ? { kind: "arc", from: "r", to: "r" } : horiz();
-      return Math.abs(dx) > Math.abs(dy) ? horiz() : vert();
+      };
     }
 
     // Every endpoint sharing a chip side gets its own evenly spaced port, ordered by where the opposite endpoint sits, so a fan of edges spreads cleanly along the side.
@@ -1578,7 +1824,7 @@
         const cls = edgeClass(en.e);
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", d);
-        path.setAttribute("class", "edge " + cls);
+        path.setAttribute("class", "edge " + cls + (en.sides.kind === "diag" ? " diagonal" : ""));
         path.setAttribute("marker-end", `url(#m-${cls})`);
         path.dataset.from = en.e.from;
         path.dataset.to = en.e.to;
@@ -1605,7 +1851,7 @@
       };
     };
 
-    // One edge's cubic through its assigned ports: curvature scales with the distance covered plus a share of the cross-axis distance so long fans stay rounded, and same-cell arcs nest by port index; shared by the full rebuild and the on-scroll geometry updates.
+    // One edge's cubic through its assigned ports: a same-cell arc nests beside the cell by port index, a horizontal run curves through the facing vertical sides, and a vertical or diagonal run curves through the horizontal sides, its curvature scaled by the distance covered plus a share of the cross-axis distance so long fans stay rounded; shared by the full rebuild and the on-scroll geometry updates.
     function edgePath(en, rectOf) {
       const { sides } = en;
       const S = rectOf(en.e.from),
@@ -1616,22 +1862,22 @@
         const off = 26 + 8 * en.fromIdx;
         return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
       }
-      if (sides.kind === "v") {
+      if (sides.kind === "h") {
         const off =
-          Math.min(Math.abs(y2 - y1) * 0.5, 130) +
-          Math.min(Math.abs(x2 - x1) * 0.12, 60) +
+          Math.min(Math.abs(x2 - x1) * 0.5, 130) +
+          Math.min(Math.abs(y2 - y1) * 0.12, 60) +
           14;
-        const c1 = y1 + (sides.from === "b" ? off : -off);
-        const c2 = y2 + (sides.to === "t" ? -off : off);
-        return `M${x1} ${y1} C${x1} ${c1}, ${x2} ${c2}, ${x2} ${y2}`;
+        const c1 = x1 + (sides.from === "r" ? off : -off);
+        const c2 = x2 + (sides.to === "l" ? -off : off);
+        return `M${x1} ${y1} C${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
       }
       const off =
-        Math.min(Math.abs(x2 - x1) * 0.5, 130) +
-        Math.min(Math.abs(y2 - y1) * 0.12, 60) +
+        Math.min(Math.abs(y2 - y1) * 0.5, 130) +
+        Math.min(Math.abs(x2 - x1) * 0.12, 60) +
         14;
-      const c1 = x1 + (sides.from === "r" ? off : -off);
-      const c2 = x2 + (sides.to === "l" ? -off : off);
-      return `M${x1} ${y1} C${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
+      const c1 = y1 + (sides.from === "b" ? off : -off);
+      const c2 = y2 + (sides.to === "t" ? -off : off);
+      return `M${x1} ${y1} C${x1} ${c1}, ${x2} ${c2}, ${x2} ${y2}`;
     }
 
     // The scroll-time pass: rewrite the sticky-connected paths' geometry in place through their frozen ports, touching no other DOM.
@@ -2070,8 +2316,11 @@
     // ---------------------------------------------------------------------------
     // Boot, toggles, live reload.
 
-    for (const id of ["t-ok", "t-type", "t-assets", "t-surfaces"])
-      $(id).addEventListener("change", render);
+    for (const id of TOGGLES)
+      $(id).addEventListener("change", () => {
+        savePrefs();
+        render();
+      });
 
     let resizeTimer = 0;
     addEventListener("resize", () => {
@@ -2101,7 +2350,7 @@
         data = INLINE ?? (await (await fetch("/data.json")).json());
         $("app-name").textContent = data.app;
         document.title = `ELDA · ${data.app}`;
-        loadHidden();
+        loadPrefs();
         render();
       } catch (error) {
         if (INLINE) return;
