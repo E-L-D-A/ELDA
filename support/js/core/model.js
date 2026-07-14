@@ -1,6 +1,9 @@
 // The ELDA path model: how a file path classifies into domain, subdomain chain, and layer, and what verdict a reference between two classified points earns.
 // The lint rules (index.js) and the dependency visualizer (visualize.js) both read this module, so the linter and the diagram judge every edge identically.
 // Everything here is pure: strings in, plain objects out, no lint-host or filesystem coupling.
+// A verdict decides here and is phrased in messages.js, so this file carries the judgment and that one carries the words.
+
+import * as msg from './messages.js';
 
 // The layer vocabulary, in rank order; the rank map and the name reading (layerOf, below) both derive from it.
 export const LAYERS = ['entities', 'use-cases', 'adapters', 'services'];
@@ -30,7 +33,7 @@ export function unjudgedVerdict(role, spec, why) {
   const cites = role.kind === 'composition-root' ? 'ROOT.1'
     : role.kind === 'core' ? 'ROOT.6'
     : 'LAYER.1 / SURFACE.3';
-  return `ELDA ${cites} (unjudged): '${spec}' ${why}, so the file it names, and with it the layer and owner this reference carries, cannot be read - and no invariant can be checked on it. A reach that cannot be judged cannot be permitted: give it a specifier that resolves.`;
+  return msg.unjudged(cites, spec, why);
 }
 
 // A file name reads RIGHT TO LEFT - `<name>.<layer>.<marker>...` - and the layer is the rightmost dot-segment that names a layer.
@@ -226,11 +229,11 @@ export const isServicesSurface = (t) => t.layer === 'services'
 //   SURFACE.7  a nested subdomain is internal to its parent: outside it, only the parent's published surfaces exist.
 // Returns a violation message for this reading of the target, or null when legal.
 export function judgeImport(role, t, domainAlias) {
-  if (role.kind === 'core') return 'ELDA ROOT.6: pure core depends on nothing in any domain.';
+  if (role.kind === 'core') return msg.coreDependsOnDomain();
 
   if (role.kind === 'composition-root') {
-    if (t.chain.length > 1) return `ELDA ROOT.1 / SURFACE.7: composition roots compose top-level domains; '${t.chain.join('/')}' is internal to '${t.chain[0]}', composed by its parent.`;
-    if (t.layer && t.layer !== 'services') return `ELDA ROOT.1: composition roots consume a domain's published surfaces (its barrel, a named surface, or services), never its ${t.layer} layer.`;
+    if (t.chain.length > 1) return msg.rootComposesTopLevel(t.chain.join('/'), t.chain[0]);
+    if (t.layer && t.layer !== 'services') return msg.rootConsumesSurfaces(t.layer);
     return null;
   }
 
@@ -240,13 +243,13 @@ export function judgeImport(role, t, domainAlias) {
     // A surface curates its own subdomain and its owned children (SURFACE.7); republishing a peer or foreign domain re-bundles that domain's surface (SURFACE.3).
     // A consumable surface carries use-cases and vocabulary only; services and adapters belong to the runtime-composition surface, which the `services` file realizes and may reference freely.
     if (r.kind === 'peer' || r.kind === 'to-ancestor') {
-      return `ELDA SURFACE.3: a domain's surface must not re-bundle a peer or foreign domain's surface (${domainAlias}/${t.chain.join('/')}); reference foreign vocabulary at the point of use, not by republishing it.`;
+      return msg.surfaceRebundles(domainAlias, t.chain.join('/'));
     }
     if (r.kind === 'into-child' && t.chain.length > role.chain.length + 1) {
-      return `ELDA SURFACE.7 / ROOT.7: curate the direct child '${t.chain[role.chain.length]}'; '${t.chain.join('/')}' is internal to it.`;
+      return msg.surfaceCurateDirectChild(t.chain[role.chain.length], t.chain.join('/'));
     }
     if (role.surface !== 'services' && (t.layer === 'services' || t.layer === 'adapters')) {
-      return `ELDA SURFACE.2: the consumable surface carries use-cases + vocabulary; '${t.layer}' belongs to the runtime-composition surface (${domainAlias}/${role.chain.join('/')}/services), reached only by its composer.`;
+      return msg.surfaceCarriesUseCases(t.layer, domainAlias, role.chain.join('/'));
     }
     return null;
   }
@@ -254,7 +257,7 @@ export function judgeImport(role, t, domainAlias) {
   // role.kind === 'domain'
   if (r.kind === 'same') {
     if (t.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
-      return `ELDA LAYER.1: ${role.layer} (inner) must not import the outer layer ${t.layer}.`;
+      return msg.innerImportsOuter(role.layer, t.layer);
     }
     return null;
   }
@@ -263,32 +266,32 @@ export function judgeImport(role, t, domainAlias) {
     if (t.asset) return null;
     const child = t.chain.slice(0, role.chain.length + 1).join('/');
     if (t.chain.length > role.chain.length + 1) {
-      return `ELDA ROOT.7: '${role.chain.join('/')}' composes its direct children only; '${t.chain.join('/')}' is composed by its own parent.`;
+      return msg.composesDirectChildren(role.chain.join('/'), t.chain.join('/'));
     }
     if (t.surface) return null;
     if (t.layer === 'services') {
-      if (!isServicesSurface(t)) return `ELDA SURFACE.3: '${child}' is composed at its runtime-composition surface, never past it.`;
-      if (role.layer !== 'services') return `ELDA ROOT.7: composing the subdomain '${child}' is services work; ${role.layer} consumes it through its surface.`;
+      if (!isServicesSurface(t)) return msg.subPastServicesSurface(child);
+      if (role.layer !== 'services') return msg.composingChildIsServices(child, role.layer);
       return null;
     }
-    return `ELDA SURFACE.3: consume the subdomain '${child}' through its surface, never its ${t.layer} files.`;
+    return msg.consumeSubThroughSurface(child, t.layer);
   }
 
   if (r.kind === 'to-ancestor') {
-    return `ELDA ROOT.7: a subdomain never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); either unwrap the subdomain or extract its shared content into a sibling subdomain.`;
+    return msg.subReferencesParent(t.chain.join('/') || t.chain[0] || '');
   }
 
   // r.kind === 'peer'
   const sib = t.chain.slice(0, r.p + 1).join('/');
   if (t.chain.length > r.p + 1) {
-    return `ELDA SURFACE.7: reference '${sib}' through its surface; '${t.chain.join('/')}' is internal to it.`;
+    return msg.referencePeerThroughSurface(sib, t.chain.join('/'));
   }
   if (t.surface || (!t.layer && !t.surface)) return null;
   if (t.layer === 'services' && isServicesSurface(t) && role.layer === 'services') {
     // The graded OWNER.5 mounting, reported by no-service-coupling at warn instead of here.
     return null;
   }
-  return `ELDA SURFACE.3: reference '${sib}' through a public surface (${domainAlias}/${sib}, or a named surface entry), never its ${t.layer} layer.`;
+  return msg.referenceSibPublicSurface(sib, domainAlias, t.layer);
 }
 
 // The full verdict for one reference.
@@ -317,7 +320,7 @@ export function selfSurfaceVerdict(role, t) {
   if (rel(role.chain, t.chain).kind !== 'same') return null;
   const own = role.chain.join('/');
   const face = t.surface === 'index' ? 'its own barrel' : `its own named surface '${t.surface}'`;
-  return `ELDA LAYER.1 / SURFACE.3: a surface is a domain's face to its consumers, and '${own}' is not a consumer of itself; this reference takes ${face} from inside. A surface holds no rank, so the binding arrives carrying no layer and LAYER.1 cannot be read on this reference at all: an inner layer reaches an outer one straight through the surface and no per-file rule sees it. Import the file that owns the binding.`;
+  return msg.selfSurface(own, face);
 }
 
 // OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
@@ -353,21 +356,21 @@ export function lateralVerdict(role, t, layer, { remedy, crossSurface } = LATERA
     // A named unit reaching into an owned child mounts its surface the way a peer mount does, and wants a port from the composer.
     if (isComposer(role)) return null;
     if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {
-      return `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || role.chain.join('/')}' mounts its child '${t.chain.join('/')}' at its runtime-composition surface; prefer a named slot port its composer fills, and justify the mounting where the port becomes ceremony.`;
+      return msg.lateralMountsChild(layer, importerUnit || role.chain.join('/'), t.chain.join('/'));
     }
     return null;
   }
   if (r.kind === 'to-ancestor') return null; // The hard breach; the imports verdict reports it.
   if (r.kind === 'peer') {
     if (crossSurface && t.chain.length === r.p + 1 && isServicesSurface(t)) {
-      return `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || role.chain.join('/')}' mounts peer '${t.chain.join('/')}' at its runtime-composition surface; prefer a named slot port its composer fills, and justify the mounting where the port becomes ceremony.`;
+      return msg.lateralMountsPeer(layer, importerUnit || role.chain.join('/'), t.chain.join('/'));
     }
     return null;
   }
   if (isComposer(role)) return null; // Composition by the subdomain's own composer.
   const targetUnit = unitOf(t);
   if (targetUnit === importerUnit) return null; // Same unit composing itself.
-  return `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit || '(subdomain root)'}' reaches a different ${layer} unit '${targetUnit || '(subdomain root)'}' in '${role.chain.join('/')}'; ${remedy}`;
+  return msg.lateralReachesUnit(layer, importerUnit || '(subdomain root)', targetUnit || '(subdomain root)', role.chain.join('/'), remedy);
 }
 
 // The diagonal verdict - SURFACE.5's geometry inside one subdomain: a value reference between two named units crosses at its own rank only, and the bare layer files are the subdomain's shared base outside any name.
@@ -383,7 +386,7 @@ export function diagonalVerdict(role, t) {
   const targetUnit = unitOf(t);
   if (targetUnit === '' || targetUnit === importerUnit) return null;
   const from = importerUnit ? `unit '${importerUnit}' (${role.layer})` : `the subdomain's bare ${role.layer} file`;
-  return `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${t.layer} - a diagonal reach across both name and rank. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${t.layer} file if the subdomain shares it, or cross at equal rank through this unit's own ${t.layer} row.`;
+  return msg.diagonal(from, targetUnit, t.layer);
 }
 
 // The landed-flow verdict - the diagonal generalized across boundaries, judged on where a value actually lands once conduits are followed.
@@ -399,7 +402,7 @@ export function landedVerdict(role, t) {
   const importerUnit = unitOf(role);
   const from = importerUnit ? `unit '${importerUnit}' (${role.layer})` : `the bare ${role.layer} file of '${role.chain.join('/')}'`;
   const where = r.kind === 'into-child' ? `its child '${t.chain.join('/')}'` : `'${t.chain.join('/')}'`;
-  return `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${t.layer}, below its own rank - a diagonal no row of the diagram draws. Cross at equal rank: reference it from this unit's own ${t.layer} row, and let its own column climb.`;
+  return msg.landedDiagonal(from, where, t.layer);
 }
 
 // The composition root's reach, judged on landings: ROOT.1 read the way SURFACE.5 taught us to read the diagonals.
@@ -410,7 +413,7 @@ export function rootLandedVerdict(role, t) {
   if (role.kind !== 'composition-root') return null;
   if (!t || !t.layer || t.surface || t.asset) return null;
   if (t.layer === 'services') return null;
-  return `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${t.chain.join('/')}' at ${t.layer}. Consuming ${t.layer} is a service's own work, so the reach marks a service smashed into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
+  return msg.rootLanded(t.chain.join('/'), t.layer);
 }
 
 // SURFACE.2 read on the runtime-composition surface: the mirror of the clause it already states for the consumable one.
@@ -424,7 +427,7 @@ export function publishVerdict(role, t) {
   const what = t.layer
     ? `the ${t.layer} layer of '${t.chain.join('/')}'`
     : `the consumable surface '${[...t.chain, t.surface].filter(Boolean).join('/')}'`;
-  return `ELDA SURFACE.2 (published): the runtime-composition surface publishes the domain's services to its composition root, and this re-export forwards ${what} onto it instead. A use-case does not become a service by transiting a services file: consume it here and declare the service that owns it, or publish it on the consumable surface where it belongs.`;
+  return msg.published(what);
 }
 
 // The diagonal's boundary class - whose contract the landed flow crossed: no surface at all (two units of one subdomain), a surface the domain itself declared, or a foreign domain's surface.

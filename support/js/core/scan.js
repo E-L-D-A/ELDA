@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
 import { cycles } from './graph.js';
+import { deepSideEffect } from './messages.js';
 import { classify, diagonalVerdict, fileRole, importVerdict, inTreeSpec, isDataPath, isRelative, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, selfSurfaceVerdict, targetOf, unjudgedVerdict } from './model.js';
 
 // ---------------------------------------------------------------------------
@@ -188,7 +189,7 @@ export function buildGraph(appDir) {
           }
         }
         if (!verdict && ref.kind === 'side-effect' && t.segs && t.segs.slice(0, -1).join('/') !== importerDir) {
-          verdict = `ELDA SURFACE.5: side-effect import '${ref.spec}' runs another module for effect with nothing named crossing the edge; co-locate it in the unit, compose it at the root, or import a named value.`;
+          verdict = deepSideEffect(ref.spec);
           tier = 'smell';
         }
       }

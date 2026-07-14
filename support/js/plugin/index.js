@@ -31,8 +31,9 @@ import {
   selfSurfaceVerdict,
   diagonalScope,
   belongsToUnitDir,
-} from './model.js';
-import { createWalker, dirEntries, srcDirOf } from './flow.js';
+} from '../core/model.js';
+import { createWalker, dirEntries, srcDirOf } from '../core/flow.js';
+import * as msg from '../core/messages.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 
@@ -138,7 +139,7 @@ const imports = {
           // A landing outside every domain carries no layer and no owner, so ROOT.1 cannot be read on it at all, and an un-owned module is where a domain's logic goes to hide.
           // Two landings sit outside a domain by right. Pure core depends on nothing in any domain (ROOT.6), so consuming it re-owns nothing. A declared root's own modules ARE the root, and a root composes its glue at itself (ROOT.2), so a root reaching a sibling module of its own area has crossed no boundary.
           if (!inArea(norm(l.path), core) && !inArea(norm(l.path), compositionRoot)) {
-            context.report({ node, message: `ELDA ROOT.1 (unjudged): this binding lands on '${relOf(l.path)}', a module outside every domain and outside every declared root, so the layer and owner it carries cannot be judged. Route the reach through a domain's surface, or move the module into the domain that owns it.` });
+            context.report({ node, message: msg.rootLandsOutside(relOf(l.path)) });
           }
           continue;
         }
@@ -173,7 +174,7 @@ const imports = {
         const spec = staticSpec(node);
         if (spec != null) return judge(node, spec, '*');
         if (node.source) {
-          context.report({ node, message: `ELDA ROOT.1 (unjudged): a dynamic import with a computed specifier resolves nowhere the analyzers can follow, so the layer and owner it lands on cannot be judged. Give the import a statically-known specifier.` });
+          context.report({ node, message: msg.rootDynamicComputed() });
         }
       },
     };
@@ -201,7 +202,7 @@ const noSurfaceDeclarations = {
         }
         const report = (node, what) => context.report({
           node,
-          message: `ELDA SURFACE.2 / OWNER.2: a surface curates what the layers own and holds no rank of its own, so ${what} has no layer and no owner here, and no rule can judge where it sits. Declare it in the layer file that owns it, and re-export it from this surface.`,
+          message: msg.surfaceDeclaration(what),
         });
         for (const n of body) {
           if (n.type === 'ExportDefaultDeclaration') { report(n, 'a default export'); continue; }
@@ -280,7 +281,7 @@ const noLayerBranches = {
     const bucket = dirs.find((s) => LAYERS.includes(s));
     if (bucket) {
       return {
-        Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<name>.${bucket}.ts\`) and directories express concerns.` }),
+        Program: (node) => context.report({ node, message: msg.layerNamedDir(bucket) }),
       };
     }
     // Walk the file's ancestors: a directory holding a file named for itself is a unit directory, and this file is intruding on it unless it sits directly inside and belongs to that same unit.
@@ -295,14 +296,14 @@ const noLayerBranches = {
       return {
         Program: (node) => context.report({
           node,
-          message: `ELDA LAYER.7: '${dir}/' is a unit directory - it groups the files of the unit '${dir}', carries no boundary, and its files are units of the enclosing subdomain. '${leaf}' is not part of that unit, so the directory declares a concern as well, and a directory that declares a concern is a subdomain. Take one reading: move '${leaf}' out to keep the grouping transparent, or drop the \`${dir}.\` prefix from the unit's files to declare the subdomain (and give it a surface).`,
+          message: msg.unitDirTwoReadings(dir, leaf),
         }),
       };
     }
     const unitDir = dirs.find((s) => layerOf(s)?.name);
     if (unitDir) {
       return {
-        Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${unitDir}/' is a layer-suffixed directory - a branch wearing a file's name. One part's files share a name (\`back-nav.adapters.tsx\` + \`back-nav.adapters.css\`); a grouping directory is a subdomain (a plain name, layer-suffixed files inside).` }),
+        Program: (node) => context.report({ node, message: msg.layerSuffixedDir(unitDir) }),
       };
     }
     return {};
@@ -443,11 +444,11 @@ const noPenetration = {
     return {
       ImportNamespaceSpecifier: (node) => context.report({
         node,
-        message: 'ELDA SURFACE.4: `import * as` consumes a surface opaquely - every export looks used, blinding the unconsumed-export signal. Import the named symbols you use.',
+        message: msg.importStarOpaque(),
       }),
       ExportAllDeclaration: (node) => context.report({
         node,
-        message: 'ELDA SURFACE.1: `export *` republishes whatever the module exports, so the surface is not a deliberate named contract. Re-export named symbols.',
+        message: msg.exportStar(),
       }),
     };
   },
@@ -482,7 +483,7 @@ const noDeepSideEffects = {
       const t = targetOf(filename, spec, domainAlias, appAlias);
       if (!t) return; // An external or bare package is not a reach into the domain tree.
       if (t.segs && t.segs.slice(0, -1).join('/') === importerDir) return; // Same unit: co-located.
-      context.report({ node, message: `ELDA SURFACE.5: side-effect import '${spec}' runs another module for effect with nothing named crossing the edge; co-locate it in the unit, compose it at the root, or import a named value.` });
+      context.report({ node, message: msg.deepSideEffect(spec) });
     };
     return {
       ImportDeclaration: (node) => {
@@ -499,11 +500,11 @@ const noAsyncInner = {
     if (!m) return {};
     const c = classify(m[1].split('/').filter(Boolean));
     if (c.layer !== 'entities' && c.layer !== 'use-cases') return {};
-    const reportAsync = (node) => node.async && context.report({ node, message: 'ELDA LAYER.4: async functions are not permitted in entities/use-cases.' });
+    const reportAsync = (node) => node.async && context.report({ node, message: msg.asyncFn() });
     return {
-      AwaitExpression: (node) => context.report({ node, message: 'ELDA LAYER.4: await is not permitted in entities/use-cases; wrap async at the adapters layer.' }),
-      ForOfStatement: (node) => node.await && context.report({ node, message: 'ELDA LAYER.4: for-await is not permitted in entities/use-cases.' }),
-      TryStatement: (node) => context.report({ node, message: 'ELDA LAYER.4 (Outcome model): try/catch is not permitted in entities/use-cases; outcomes flow as typed branch values.' }),
+      AwaitExpression: (node) => context.report({ node, message: msg.awaitExpr() }),
+      ForOfStatement: (node) => node.await && context.report({ node, message: msg.forAwait() }),
+      TryStatement: (node) => context.report({ node, message: msg.tryCatch() }),
       FunctionDeclaration: reportAsync,
       FunctionExpression: reportAsync,
       ArrowFunctionExpression: reportAsync,
@@ -539,12 +540,12 @@ const noMutableSurface = {
         for (const node of program.body) {
           if (node.type !== 'ExportNamedDeclaration') continue;
           if (node.declaration && node.declaration.type === 'VariableDeclaration' && node.declaration.kind !== 'const') {
-            context.report({ node, message: `ELDA CHANNEL.4: \`export ${node.declaration.kind}\` shares a live mutable binding by reference; publish a constant, an accessor, or a channel instead.` });
+            context.report({ node, message: msg.mutableExportDecl(node.declaration.kind) });
           }
           if (!node.source) {
             for (const s of node.specifiers ?? []) {
               if (s.local && s.local.type === 'Identifier' && mutable.has(s.local.name)) {
-                context.report({ node: s, message: `ELDA CHANNEL.4: exporting the mutable binding '${s.local.name}' shares it live by reference; publish a constant, an accessor, or a channel instead.` });
+                context.report({ node: s, message: msg.mutableExportNamed(s.local.name) });
               }
             }
           }
@@ -573,14 +574,14 @@ const vocabGate = {
         if (c && c.type === 'MemberExpression' && c.property && c.property.type === 'Identifier') {
           const m = c.property.name;
           if ((m === 'setAttribute' || m === 'setItem' || m === 'setProperty') && isStr(node.arguments && node.arguments[0])) {
-            context.report({ node, message: `ELDA OWNER.2 / ROOT.2: shared-namespace write ${m}('${node.arguments[0].value}', ...) at the integration surface; route it through the owner's binding surface.` });
+            context.report({ node, message: msg.vocabWrite(m, node.arguments[0].value) });
           }
         }
       },
       AssignmentExpression(node) {
         const l = node.left;
         if (l && l.type === 'MemberExpression' && l.object && l.object.type === 'MemberExpression' && l.object.property && l.object.property.name === 'dataset') {
-          context.report({ node, message: 'ELDA OWNER.2 / ROOT.2: dataset write at the integration surface; identity vocabulary belongs to its owner.' });
+          context.report({ node, message: msg.vocabDataset() });
         }
       },
     };
@@ -594,7 +595,7 @@ const ambientOwnership = {
     const f = filenameOf(context);
     if (!(f.endsWith('.d.ts') && !f.includes('/domains/'))) return {};
     return {
-      Program: (node) => context.report({ node, message: 'ELDA OWNER.2: ambient declarations belong co-located in the owning domain (src/domains/<x>/), not a root or shared .d.ts catch-all.' }),
+      Program: (node) => context.report({ node, message: msg.ambientDecl() }),
     };
   },
 };

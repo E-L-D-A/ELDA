@@ -14,8 +14,8 @@ import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CODE_RE } from './flow.js';
-import { STYLE_RE, buildGraph, isAsset, walk } from './scan.js';
+import { CODE_RE } from '../core/flow.js';
+import { STYLE_RE, buildGraph, isAsset, walk } from '../core/scan.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.

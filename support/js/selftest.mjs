@@ -19,9 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 import { parseSync } from 'oxc-parser';
 
-import plugin from './index.js';
-import { norm } from './model.js';
-import { buildGraph } from './scan.js';
+import plugin from './plugin/index.js';
+import { norm } from './core/model.js';
+import { buildGraph } from './core/scan.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = norm(join(HERE, 'fixture'));

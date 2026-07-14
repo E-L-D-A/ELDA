@@ -4,6 +4,8 @@
 // So this pass finds every cycle and grades it by the widest boundary it crosses; the settling element is the reviewer's to name, and an ungraded cycle is a causality loop waiting for its first stack overflow.
 // Pure: classified nodes and edges in, cycles out. The scan supplies the graph and the roles, and nothing here reads a filesystem or a lint host.
 
+import { cycle as cycleMessage } from './messages.js';
+
 // The distance classes, widest first, mirroring the diagonal's gradient (model.js): severity grows with the width of the boundary the cycle crosses, and Gate 1 names the widest class.
 export const CYCLE_SCOPES = ['across-domains', 'across-subdomains', 'within-subdomain'];
 
@@ -83,21 +85,12 @@ export function cycles(nodes, edges) {
     const chains = new Set(files.map(chainOf));
     const scope = domains.size > 1 ? 'across-domains' : chains.size > 1 ? 'across-subdomains' : 'within-subdomain';
 
-    const where = domains.size > 1
-      ? `across the domains ${[...domains].map((d) => `'${d}'`).join(' and ')}`
-      : chains.size > 1
-        ? `across the subdomains ${[...chains].map((c) => `'${c}'`).join(' and ')}`
-        : `inside '${[...chains][0]}'`;
-    const what = component.length === 1
-      ? `the file '${files[0].path}' references itself`
-      : `${component.length} files close a reference cycle ${where}`;
-
     found.push({
       scope,
       gate: scope === 'across-domains',
       files: component,
       edges: closing.map((e) => ({ from: e.from, to: e.to })),
-      verdict: `ELDA CHANNEL.5 (Gate 1): ${what}, and every reference in it carries a value synchronously. Enclose a settling element - a change-gated channel with a tight equality, which breaks the synchronous re-entry - or break the cycle by lifting the shared content into a subdomain both sides consume.`,
+      verdict: cycleMessage({ domains: [...domains], chains: [...chains], componentLength: component.length, firstPath: files[0].path }),
     });
   }
 

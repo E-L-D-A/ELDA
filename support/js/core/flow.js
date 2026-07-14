@@ -1,4 +1,4 @@
-// Filesystem-backed binding-flow analysis, shared by the lint rules (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one and the same graph.
+// Filesystem-backed binding-flow analysis, shared by the lint rules (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one graph.
 // A module's binding table says which export names it owns, which pass through to another module, and which modules `export *` forwards to; a walk follows an import name by name to where it lands, so a barrel import fans out only to the bindings the consumer really takes.
 // Only surfaces are transparent to the walk: they hold no rank and curate for outsiders, so what a consumer takes through them is judged where it lands.
 // A rank-bearing file is a terminus - a named re-export there re-owns the binding at that file's rank (the seam is the declaration, and a body arrives when logic forms), and the re-owning file's own edges are judged per-file at its own rank.
