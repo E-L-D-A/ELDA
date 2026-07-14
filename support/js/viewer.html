@@ -499,6 +499,15 @@
         0 0 4px color-mix(in srgb, var(--hi-in) 50%, transparent)
       );
     }
+    /* A reach walk raises a whole closure, so distance reads as fade: the first hop carries full strength, each further hop steps back, and the floor keeps the far side of a deep closure legible. */
+    #wrap.reach #edges path.edge.hi-out,
+    #wrap.reach #edges path.edge.hi-in {
+      opacity: clamp(0.3, calc(1.08 - var(--hop, 1) * 0.16), 1);
+    }
+    #wrap.reach .chip.rel-out,
+    #wrap.reach .chip.rel-in {
+      opacity: clamp(0.45, calc(1.1 - var(--hop, 1) * 0.13), 1);
+    }
     /* A raised cycle has no direction to read: every file in it reaches every other, so its closing edges all light the same way. */
     #edges.focused path.edge.hi-cycle {
       stroke: var(--cycle);
@@ -1131,6 +1140,7 @@
           styles+assets</label>
         <label><input type="checkbox" id="t-surfaces"> surfaces</label>
         <label><input type="checkbox" id="t-services" checked> domain services</label>
+        <label title="Raise everything a focused file reaches, and everything that reaches it, instead of its first hop"><input type="checkbox" id="t-reach"> reach</label>
       </span>
       <button id="issues-btn">issues <span id="issue-count"></span></button>
     </header>
@@ -1188,6 +1198,9 @@
     // The edges that close a cycle, keyed the way a drawn path carries its endpoints.
     const edgeKey = (e) => `${e.from}>${e.to}`;
     let cycleClosers = new Set();
+    // The drawn graph as adjacency, both ways, rebuilt per render: what the reach walk rides.
+    let adjOut = new Map();
+    let adjIn = new Map();
     // On a fresh session every composition root and the pure-core box start hidden; the domains carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
     const defaultHidden = () =>
       new Set(["@core", ...(data ? data.options.roots.map((r) => "@root:" + r.key) : [])]);
@@ -1206,7 +1219,7 @@
     const byDeg = (a, b) => deg(b) - deg(a) || byPath(a, b);
 
     // The view-mode toggles in the header, persisted alongside block visibility.
-    const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services"];
+    const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach"];
 
     // Block visibility and the view-mode toggles persist per app for the browser session.
     // Storage may be unavailable on a file:// snapshot, so every read falls back to the built-in defaults.
@@ -1433,6 +1446,15 @@
       // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
       // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
       cycleClosers = new Set(data.cycles.flatMap((c) => c.edges.map(edgeKey)));
+      // The adjacency the reach walk rides is the board's own: an edge a filter dropped or a hidden block took away is out of the walk exactly as it is out of the picture, so the reach you read is the reach of the graph in front of you.
+      adjOut = new Map();
+      adjIn = new Map();
+      for (const e of drawn) {
+        if (e.from === e.to || !edgeVisible(e)) continue;
+        (adjOut.get(e.from) ?? adjOut.set(e.from, []).get(e.from)).push(e.to);
+        (adjIn.get(e.to) ?? adjIn.set(e.to, []).get(e.to)).push(e.from);
+      }
+      wrap.classList.toggle("reach", $("t-reach").checked);
       renderBlockBar();
       renderIssues();
       requestAnimationFrame(() => {
@@ -2147,31 +2169,64 @@
     // ---------------------------------------------------------------------------
     // Focus: hovering or pinning a chip raises its edges and its neighbors; raising a cycle raises the set of files it encloses.
 
+    // What a focus reaches, each direction carrying its hop distance: downstream is what this file pulls in, upstream is what breaks when it changes.
+    // One hop answers "who does it touch"; the reach toggle walks the closure, which is the question a reader asks of a tree they did not write.
+    function neighbourhood(id) {
+      const deep = $("t-reach").checked;
+      const walk = (adj) => {
+        const dist = new Map();
+        let frontier = [id];
+        for (let hop = 1; frontier.length; hop++) {
+          const next = [];
+          for (const v of frontier)
+            for (const w of adj.get(v) ?? []) {
+              if (w === id || dist.has(w)) continue;
+              dist.set(w, hop);
+              next.push(w);
+            }
+          if (!deep) break;
+          frontier = next;
+        }
+        return dist;
+      };
+      return { out: walk(adjOut), inc: walk(adjIn), deep };
+    }
+
     function focus(id) {
       svg.classList.add("focused");
-      const related = new Map();
+      const { out, inc, deep } = neighbourhood(id);
       for (const p of svg.querySelectorAll("path.edge")) {
-        const out = Number(p.dataset.from) === id,
-          inc = Number(p.dataset.to) === id;
-        p.classList.toggle("hi-out", out);
-        p.classList.toggle("hi-in", inc);
-        if (out) {
-          p.setAttribute("marker-end", "url(#m-hi-out)");
-          related.set(Number(p.dataset.to), "rel-out");
-        } else if (inc) {
-          p.setAttribute("marker-end", "url(#m-hi-in)");
-          related.set(Number(p.dataset.from), "rel-in");
-        } else
-          p.setAttribute(
-            "marker-end",
-            `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
-          );
+        const u = Number(p.dataset.from),
+          v = Number(p.dataset.to);
+        // An edge runs downstream when it lands on something the focus reaches and leaves either the focus itself or, once the walk runs deep, anything else the focus reaches; upstream mirrors it.
+        const down = out.has(v) && (u === id || (deep && out.has(u)));
+        const up = inc.has(u) && (v === id || (deep && inc.has(v)));
+        p.classList.remove("hi-cycle");
+        p.classList.toggle("hi-out", down);
+        p.classList.toggle("hi-in", !down && up);
+        // The hop the edge lands on is what the fade reads, so a long closure stays legible from its near end.
+        if (down || up) p.style.setProperty("--hop", down ? out.get(v) : inc.get(u));
+        else p.style.removeProperty("--hop");
+        p.setAttribute(
+          "marker-end",
+          down
+            ? "url(#m-hi-out)"
+            : up
+              ? "url(#m-hi-in)"
+              : `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
+        );
       }
       for (const [cid, el] of chips) {
-        el.classList.toggle("rel-out", related.get(cid) === "rel-out");
-        el.classList.toggle("rel-in", related.get(cid) === "rel-in");
-        el.classList.toggle("dim", cid !== id && !related.has(cid));
+        const down = out.has(cid),
+          up = inc.has(cid);
+        el.classList.remove("cycle-member");
+        el.classList.toggle("rel-out", down);
+        el.classList.toggle("rel-in", !down && up);
+        el.classList.toggle("dim", cid !== id && !down && !up);
+        if (down || up) el.style.setProperty("--hop", down ? out.get(cid) : inc.get(cid));
+        else el.style.removeProperty("--hop");
       }
+      return { out, inc, deep };
     }
 
     // A cycle has no direction to read - every file in it reaches every other - so its closing edges all light as the cycle, and the files it encloses raise together.
@@ -2207,13 +2262,16 @@
       svg.classList.remove("focused");
       for (const p of svg.querySelectorAll("path.edge")) {
         p.classList.remove("hi-out", "hi-in", "hi-cycle");
+        p.style.removeProperty("--hop");
         p.setAttribute(
           "marker-end",
           `url(#m-${[...p.classList].find((c) => c !== "edge")})`,
         );
       }
-      for (const el of chips.values())
+      for (const el of chips.values()) {
         el.classList.remove("dim", "rel-out", "rel-in", "pinned", "cycle-member");
+        el.style.removeProperty("--hop");
+      }
     }
 
     function applyPin() {
@@ -2256,8 +2314,14 @@
         showTip(e, `${f.path}\nhidden - click to restore`);
         return;
       }
-      focus(f.id);
-      showTip(e, f.path);
+      // Under a reach walk the counts are the point of the hover: how much this file pulls in, and how much breaks when it changes.
+      const { out, inc, deep } = focus(f.id);
+      showTip(
+        e,
+        deep
+          ? `${f.path}\ndepends on ${out.size} · depended on by ${inc.size}`
+          : f.path,
+      );
     });
     wrap.addEventListener("pointerout", (e) => {
       if (e.target.classList.contains("hit")) {
