@@ -33,6 +33,7 @@
       --bad: #e34f44;
       --smell: #c68118;
       --laundered: #e07b39;
+      --cycle: #a06ce0;
       --hi-out: #3f8de0;
       --hi-in: #1ba46c;
       --accent: #3f8de0;
@@ -159,6 +160,13 @@
     .counts .sev-laundered b {
       color: var(--laundered);
     }
+    /* A cycle is a property of the graph rather than a worse breach, so it takes a hue of its own outside the severity ramp. */
+    .counts .sev-cycle .dot {
+      background: var(--cycle);
+    }
+    .counts .sev-cycle b {
+      color: var(--cycle);
+    }
     /* Unreachable is a review signal rather than a breach (SURFACE.4), so it reads as absence: a hollow dot, and none of the severity colours. */
     .counts .sev-dead .dot {
       background: transparent;
@@ -213,6 +221,9 @@
     }
     .legend i.laundered {
       border-top: 2px solid var(--laundered);
+    }
+    .legend i.cycle {
+      border-top: 2px solid var(--cycle);
     }
     .legend i.type {
       border-top: 2px dotted var(--type);
@@ -452,6 +463,15 @@
         0 0 3px color-mix(in srgb, var(--laundered) 40%, transparent)
       );
     }
+    /* An edge closing a reference cycle is legal where it stands, and the cycle it closes is the finding, so it paints as the cycle rather than as a breach of its own (CHANNEL.5). */
+    #edges path.cycle {
+      stroke: var(--cycle);
+      stroke-width: 1.8;
+      opacity: 1;
+      filter: drop-shadow(
+        0 0 3px color-mix(in srgb, var(--cycle) 40%, transparent)
+      );
+    }
     /* A diagonal reference, the shape no ELDA row draws, reads at full strength and a touch brighter so it stands out from the orthogonal legal runs. */
     #edges path.edge.diagonal {
       opacity: 1;
@@ -477,6 +497,16 @@
       stroke-dasharray: none;
       filter: drop-shadow(
         0 0 4px color-mix(in srgb, var(--hi-in) 50%, transparent)
+      );
+    }
+    /* A raised cycle has no direction to read: every file in it reaches every other, so its closing edges all light the same way. */
+    #edges.focused path.edge.hi-cycle {
+      stroke: var(--cycle);
+      opacity: 1;
+      stroke-width: 2;
+      stroke-dasharray: none;
+      filter: drop-shadow(
+        0 0 4px color-mix(in srgb, var(--cycle) 55%, transparent)
       );
     }
 
@@ -838,6 +868,10 @@
       outline: 2px solid var(--hi-in);
       outline-offset: 1px;
     }
+    .chip.cycle-member {
+      outline: 2px solid var(--cycle);
+      outline-offset: 1px;
+    }
     .root-block .chip, #core-box .chip, #other-box .chip {
       margin: 2px 3px;
     }
@@ -950,6 +984,12 @@
     }
     #issues .item.laundered {
       background: linear-gradient(110deg, var(--laundered), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
+    #issues .item.cycle {
+      background: linear-gradient(110deg, var(--cycle), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
+    #issues .item.cycle .files {
+      margin-top: 2px;
     }
     #issues .unresolved.item {
       color: var(--muted);
@@ -1112,6 +1152,7 @@
           <span><i></i>dependency</span>
           <span><i class="violation"></i>violation</span>
           <span><i class="laundered"></i>laundered</span>
+          <span><i class="cycle"></i>reference cycle</span>
           <span><i class="smell"></i>inadvisable</span>
         </div>
         <div class="col">
@@ -1140,6 +1181,13 @@
     let stickyPaths = [];
     let chips = new Map();
     let pinnedPath = null;
+    // The pin takes one of two shapes: a file, or a whole reference cycle raised from the drawer.
+    // A cycle is named by the files it encloses, so the name survives a rescan that renumbers them, and a cycle an edit dissolved simply stops being found.
+    let pinnedCycle = null;
+    const cycleId = (c) => c.files.map((id) => data.files[id].path).sort().join("|");
+    // The edges that close a cycle, keyed the way a drawn path carries its endpoints.
+    const edgeKey = (e) => `${e.from}>${e.to}`;
+    let cycleClosers = new Set();
     // On a fresh session every composition root and the pure-core box start hidden; the domains carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
     const defaultHidden = () =>
       new Set(["@core", ...(data ? data.options.roots.map((r) => "@root:" + r.key) : [])]);
@@ -1382,6 +1430,9 @@
       // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
       drawn = expunge ? data.flows : data.edges;
       if (threadC) drawn = threadComposers(drawn);
+      // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
+      // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
+      cycleClosers = new Set(data.cycles.flatMap((c) => c.edges.map(edgeKey)));
       renderBlockBar();
       renderIssues();
       requestAnimationFrame(() => {
@@ -1833,10 +1884,12 @@
     // Edges.
 
     // A laundered finding carries a tier, yet it is a graph-only landing rather than an authored breach, so it paints as its own severity ahead of the tier colors.
+    // A cycle closer paints as the cycle once nothing else has named it: where a verdict already sits on the edge, that verdict is the one carrying a remedy at the site, and the cycle is what remains when every edge closing it is legal.
     function edgeClass(e) {
       if (e.laundered) return "laundered";
       if (e.tier === "invariant") return "violation";
       if (e.tier === "smell") return "smell";
+      if (cycleClosers.has(edgeKey(e))) return "cycle";
       if (e.typeOnly) return "type";
       return "ok";
     }
@@ -1945,7 +1998,7 @@
       svg.setAttribute("height", wrap.scrollHeight);
       svg.replaceChildren();
       const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-      defs.innerHTML = ["ok", "type", "smell", "violation", "laundered", "hi-in", "hi-out"]
+      defs.innerHTML = ["ok", "type", "smell", "violation", "laundered", "cycle", "hi-in", "hi-out", "hi-cycle"]
         .map((c) => {
           const color = {
             ok: "var(--ok)",
@@ -1953,8 +2006,10 @@
             smell: "var(--smell)",
             violation: "var(--bad)",
             laundered: "var(--laundered)",
+            cycle: "var(--cycle)",
             "hi-in": "var(--hi-in)",
             "hi-out": "var(--hi-out)",
+            "hi-cycle": "var(--cycle)",
           }[c];
           return `<marker id="m-${c}" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.8 L9.5 5 L0 9.2 L2.6 5 z" fill="${color}"/></marker>`;
         })
@@ -2090,15 +2145,10 @@
     }
 
     // ---------------------------------------------------------------------------
-    // Focus: hovering or pinning a chip raises its edges and its neighbors.
+    // Focus: hovering or pinning a chip raises its edges and its neighbors; raising a cycle raises the set of files it encloses.
 
-    let focused = null;
-
-    function focus(id, pointerover) {
+    function focus(id) {
       svg.classList.add("focused");
-      if (!pointerover) {
-        focused = id;
-      }
       const related = new Map();
       for (const p of svg.querySelectorAll("path.edge")) {
         const out = Number(p.dataset.from) === id,
@@ -2124,25 +2174,57 @@
       }
     }
 
+    // A cycle has no direction to read - every file in it reaches every other - so its closing edges all light as the cycle, and the files it encloses raise together.
+    // A view that redraws the arrows through their conduits leaves those closing edges off the board; the raised files still carry the cycle.
+    function focusCycle(cycle) {
+      svg.classList.add("focused");
+      const members = new Set(cycle.files);
+      const closers = new Set(cycle.edges.map(edgeKey));
+      for (const p of svg.querySelectorAll("path.edge")) {
+        const closes = closers.has(`${p.dataset.from}>${p.dataset.to}`);
+        p.classList.remove("hi-out", "hi-in");
+        p.classList.toggle("hi-cycle", closes);
+        p.setAttribute(
+          "marker-end",
+          closes
+            ? "url(#m-hi-cycle)"
+            : `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
+        );
+      }
+      for (const [cid, el] of chips) {
+        el.classList.remove("rel-out", "rel-in", "pinned");
+        el.classList.toggle("cycle-member", members.has(cid));
+        el.classList.toggle("dim", !members.has(cid));
+      }
+    }
+
+    // Leaving a chip while a pin is live restores the pin rather than clearing the board, and the pin knows which of its two shapes it is.
     function blur(pinned, pointerout) {
       if (!pinned && pointerout) {
-        focus(focused);
+        applyPin();
         return;
       }
-      focused = null;
       svg.classList.remove("focused");
       for (const p of svg.querySelectorAll("path.edge")) {
-        p.classList.remove("hi-out", "hi-in");
+        p.classList.remove("hi-out", "hi-in", "hi-cycle");
         p.setAttribute(
           "marker-end",
           `url(#m-${[...p.classList].find((c) => c !== "edge")})`,
         );
       }
       for (const el of chips.values())
-        el.classList.remove("dim", "rel-out", "rel-in", "pinned");
+        el.classList.remove("dim", "rel-out", "rel-in", "pinned", "cycle-member");
     }
 
     function applyPin() {
+      if (pinnedCycle !== null) {
+        const cycle = data.cycles.find((c) => cycleId(c) === pinnedCycle);
+        if (cycle) {
+          focusCycle(cycle);
+          return;
+        }
+        pinnedCycle = null;
+      }
       if (pinnedPath === null) {
         blur();
         return;
@@ -2174,7 +2256,7 @@
         showTip(e, `${f.path}\nhidden - click to restore`);
         return;
       }
-      focus(f.id, true);
+      focus(f.id);
       showTip(e, f.path);
     });
     wrap.addEventListener("pointerout", (e) => {
@@ -2184,7 +2266,7 @@
       }
       const chip = e.target.closest(".chip");
       if (!chip || chip.contains(e.relatedTarget)) return;
-      blur(pinnedPath === null, true);
+      blur(pinnedPath === null && pinnedCycle === null, true);
       hideTip();
     });
     wrap.addEventListener("pointermove", (e) => {
@@ -2204,6 +2286,7 @@
       if (e.ctrlKey || e.altKey) {
         window.location.href = getEditorLink(f.path);
       }
+      pinnedCycle = null;
       pinnedPath = pinnedPath === f.path ? null : f.path;
       render();
     });
@@ -2246,8 +2329,9 @@
         e.preventDefault();
     });
     document.body.addEventListener("click", () => {
-      if (!suppressClick && pinnedPath !== null) {
+      if (!suppressClick && (pinnedPath !== null || pinnedCycle !== null)) {
         pinnedPath = null;
+        pinnedCycle = null;
         applyPin();
       }
     });
@@ -2384,6 +2468,7 @@
       // Clicking a finding reveals the file it names: the chip pins on the diagram and scrolls into view.
       const pinId = (id) => (ev) => {
         ev.stopPropagation();
+        pinnedCycle = null;
         pinnedPath = data.files[id].path;
         applyPin();
         chips.get(id)?.scrollIntoView({
@@ -2393,6 +2478,18 @@
         });
       };
       const pinFrom = (e) => pinId(e.from);
+      // A cycle names no single culprit, so clicking one raises the whole set and scrolls to the first file it encloses.
+      const pinCycle = (c) => (ev) => {
+        ev.stopPropagation();
+        pinnedPath = null;
+        pinnedCycle = cycleId(c);
+        applyPin();
+        chips.get(c.files[0])?.scrollIntoView({
+          block: "center",
+          inline: "center",
+          behavior: "smooth",
+        });
+      };
       // A finding names a file, and the name is the way into it: the path opens the editor, while the item around it still pins the chip on the diagram.
       // Only the path is the link, so the two actions never compete for the same click.
       const pathLink = (path) =>
@@ -2444,6 +2541,22 @@
             ),
           ),
       );
+      // A cycle of legal references is invisible to every per-file rule, because no file in it is at fault (CHANNEL.5): every file in a cycle reaches every other, so the cycle is what a reviewer adjudicates, naming the settling element that encloses it or breaking the cycle.
+      section("Reference cycles (graph-only)", data.cycles, (c) =>
+        h(
+          "div",
+          { class: "item cycle", onclick: pinCycle(c) },
+          h(
+            "div",
+            { class: "files" },
+            ...c.files.flatMap((id, i) => [
+              i ? " ⇄ " : "",
+              pathLink(data.files[id].path),
+            ]),
+          ),
+          h("div", { class: "msg" }, c.verdict),
+        ),
+      );
       section(
         "Unresolved specifiers",
         data.edges.filter((e) => e.to == null),
@@ -2476,13 +2589,16 @@
       const bad = data.edges.filter((e) => e.tier === "invariant").length;
       const smell = data.edges.filter((e) => e.tier === "smell").length;
       const laundered = data.flows.filter((f) => f.laundered).length;
-      $("issue-count").textContent = `${bad + smell + laundered}`;
-      $("issue-count").classList.toggle("hot", bad + smell + laundered > 0);
+      const cycles = data.cycles.length;
+      const found = bad + smell + laundered + cycles;
+      $("issue-count").textContent = `${found}`;
+      $("issue-count").classList.toggle("hot", found > 0);
       $("counts").replaceChildren(
         stat(data.files.length, "files"),
         stat(data.edges.length, "edges"),
         stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
         stat(laundered, "laundered", laundered ? "sev-laundered" : "sev-zero"),
+        stat(cycles, "cycles", cycles ? "sev-cycle" : "sev-zero"),
         stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
         stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
       );

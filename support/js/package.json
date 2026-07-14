@@ -13,12 +13,15 @@
   "scripts": {
     "presets": "node presets.mjs",
     "selftest": "node selftest.mjs",
-    "test": "node presets.mjs && node selftest.mjs"
+    "test": "node presets.mjs && node selftest.mjs",
+    "selftest-viz": "node ./visualize.js ./fixture"
   },
   "files": [
     "index.js",
     "model.js",
     "flow.js",
+    "graph.js",
+    "scan.js",
     "visualize.js",
     "viewer.html",
     "presets.mjs",
