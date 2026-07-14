@@ -10,12 +10,20 @@
   "bin": {
     "elda-viz": "./visualize.js"
   },
+  "scripts": {
+    "presets": "node presets.mjs",
+    "selftest": "node selftest.mjs",
+    "test": "node presets.mjs && node selftest.mjs"
+  },
   "files": [
     "index.js",
     "model.js",
     "flow.js",
     "visualize.js",
     "viewer.html",
+    "presets.mjs",
+    "selftest.mjs",
+    "fixture",
     "adopting.json",
     "aligned.json",
     "justified.json",

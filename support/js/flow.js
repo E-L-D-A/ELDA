@@ -6,7 +6,7 @@
 
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { parseSync } from 'oxc-parser';
-import { norm, classify } from './model.js';
+import { norm, classify, isRelative } from './model.js';
 
 export const CODE_RE = /\.(m|c)?[tj]sx?$/;
 export const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs', '.d.ts'];
@@ -90,6 +90,29 @@ const isSurface = (absPath) => {
 };
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
+
+// The src directory of the app a file belongs to: the one holding `domains/`, which is what an alias like `#/x` resolves against.
+// A file inside the tree names it outright. A file outside it - a route tree, a server shell, a build config at the app root - is found by walking up and testing each level for `domains/` and for a `src/domains/` child, so a root that sits beside src rather than under it still resolves.
+// Cached per starting directory; a null result is cached too, so a file in a tree with no domains costs one walk.
+const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } };
+const srcDirs = new Map();
+export function srcDirOf(filename) {
+  const f = norm(filename);
+  const inside = f.match(/^(.*)\/domains\//);
+  if (inside) return inside[1];
+  const start = dirOf(f);
+  if (srcDirs.has(start)) return srcDirs.get(start);
+  let found = null;
+  let dir = start;
+  while (dir && dir.includes('/')) {
+    if (isDir(dir + '/domains')) { found = dir; break; }
+    if (isDir(dir + '/src/domains')) { found = dir + '/src'; break; }
+    dir = dirOf(dir);
+  }
+  srcDirs.set(start, found);
+  return found;
+}
+
 const normalizePath = (p) => {
   const out = [];
   for (const s of norm(p).split('/')) {
@@ -111,12 +134,18 @@ export function createWalker({ srcDir, domainAlias, appAlias }) {
     let p = null;
     if (bare.startsWith(domainAlias + '/')) p = root + '/domains/' + bare.slice(domainAlias.length + 1);
     else if (bare.startsWith(appAlias + '/')) p = root + '/' + bare.slice(appAlias.length + 1);
-    else if (bare.startsWith('./') || bare.startsWith('../')) p = dirOf(norm(fromAbs)) + '/' + bare;
+    else if (isRelative(bare)) p = dirOf(norm(fromAbs)) + '/' + bare;
     if (p == null) return null;
     p = normalizePath(p);
     const exact = tryFile(p);
     if (exact) return exact;
     for (const ext of EXT_CANDIDATES) { const hit = tryFile(p + ext); if (hit) return hit; }
+    // TypeScript's ESM convention writes the emitted extension while the source carries the authoring one, so `./x.js` is how a `.ts` module is imported under NodeNext.
+    // Left unresolved it would report as an undecidable reach, and the rules that only judge a resolved target would fall silent on it.
+    const swapped = p.replace(/\.([cm]?)js$/, '.$1ts');
+    if (swapped !== p) {
+      for (const ext of ['', 'x']) { const hit = tryFile(swapped + ext); if (hit) return hit; }
+    }
     for (const ext of EXT_CANDIDATES) { const hit = tryFile(p + '/index' + ext); if (hit) return hit; }
     return null;
   };

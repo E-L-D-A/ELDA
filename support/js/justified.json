@@ -5,7 +5,17 @@
   ],
   "rules": {
     "elda/imports": "error",
+    "elda/no-surface-declarations": "error",
+    "elda/no-self-surface": "error",
     "elda/no-layer-branches": "error",
+    "elda/no-async-inner": "error",
+    "elda/no-mutable-surface": "error",
+    "elda/ambient-ownership": "error",
+    "elda/no-service-coupling": "error",
+    "elda/no-adapter-coupling": "error",
+    "elda/no-penetration": "error",
+    "elda/no-deep-side-effects": "error",
+    "elda/vocab-gate": "error",
     "elda/no-diagonal-reach": [
       "warn",
       {
@@ -21,14 +31,6 @@
         "acrossSubdomains": "error",
         "withinSubdomain": "error"
       }
-    ],
-    "elda/no-async-inner": "error",
-    "elda/no-mutable-surface": "error",
-    "elda/ambient-ownership": "error",
-    "elda/no-service-coupling": "error",
-    "elda/no-adapter-coupling": "error",
-    "elda/no-penetration": "error",
-    "elda/no-deep-side-effects": "error",
-    "elda/vocab-gate": "error"
+    ]
   }
 }

@@ -12,8 +12,6 @@ A whole-project pass over the resolved module graph, complementing the per-file 
 
 ## Per-file rules
 
-- **Composition-root reach: nested form vs flat form (undecided).** `elda/imports` errors on a root importing `#/parent/child/services` (ROOT.1 / SURFACE.7: 'parent/child' is internal to 'parent') yet accepts `#/parent/child.services`, a chain-1 layer file with the same semantics: the flat spelling launders the nested reach, so the rule currently flags the honest form and passes the laundered one. The rule should allow both or disallow both; which way is an open design decision (does a root's license stop at the top-level domain's own surfaces, or extend to any published services file one level down?).
-
 - **`no-deep-side-effects` unit semantics.** The rule reads "same directory = same unit" while the coupling rules read shared names; a side-effect import crossing unit names inside one directory currently passes. Align it with `unitOf` at its next touch.
 
-- **Non-literal dynamic imports.** `import(expr)` with a template or computed specifier is invisible to every import-reading rule and statically undecidable, so it stays with review as a standing blind spot.
+- **The undecidable-reference message cites one constraint for every role.** A specifier the analyzers cannot resolve, and a dynamic import with a computed specifier, both report as unjudged and both cite ROOT.1 - which is the composition root's constraint, and the wrong citation on a domain file's reach. The report is correct to fire (an undecidable reference is a real finding, since a reach that cannot be judged cannot be permitted); the citation needs to follow the reporting file's role.

@@ -8,13 +8,13 @@
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
-import { classify, diagonalVerdict, fileRole, importVerdict, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, targetOf } from './model.js';
+import { classify, diagonalVerdict, fileRole, importVerdict, isDataPath, isRelative, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, selfSurfaceVerdict, targetOf } from './model.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -47,7 +47,7 @@ if (!existsSync(join(srcDir, 'domains'))) {
 // Project options, read from the app's .oxlintrc.json when it configures elda/imports; the config may carry // comments, so strip them before parsing.
 
 function readOptions() {
-  const defaults = { domainAlias: '#', appAlias: '@', compositionRoot: 'routes' };
+  const defaults = { domainAlias: '#', appAlias: '@', compositionRoot: 'routes', core: 'core' };
   const rcPath = join(appDir, '.oxlintrc.json');
   if (!existsSync(rcPath)) return defaults;
   try {
@@ -62,25 +62,29 @@ function readOptions() {
   }
 }
 
-const { domainAlias, appAlias, compositionRoot } = readOptions();
+const { domainAlias, appAlias, compositionRoot, core } = readOptions();
 
-// The app's composition roots, each a top-level runtime the diagram draws as its own bar: the configured client root under src/, the production server, and the build config.
+// A declared area, resolved to the thing on disk that holds it: a directory, or a single module where the area names one, since a build config is a composition root that lives as one file.
+// An area sits under src/ (a route tree) or beside it at the app root (a server shell, that build config), so both are tried, and an entry resolving to nothing is omitted - an app with no server simply draws no server bar.
+// The areas are read from the app's config rather than guessed by name, so an app composing at a worker, a CLI, or three servers draws each of them without this tool knowing what any of them is called.
 // Roots communicate only by serialization (ROOT.5), so each scans as its own block feeding the shared domains.
-// The list is existence-filtered, so an app without a server or a Vite config simply omits that bar.
-function compositionRoots() {
-  const first = (...paths) => paths.find(existsSync) ?? null;
-  return [
-    { key: compositionRoot, label: 'src/' + compositionRoot, dir: join(srcDir, compositionRoot) },
-    { key: 'server', label: 'server', dir: join(appDir, 'server') },
-    { key: 'vite', label: 'vite.config', file: first(join(appDir, 'vite.config.ts'), join(appDir, 'vite.config.js'), join(appDir, 'vite.config.mjs')) },
-  ].filter((r) => (r.dir && existsSync(r.dir)) || (r.file && existsSync(r.file)));
+function areaTargets(areas) {
+  const out = [];
+  for (const a of (Array.isArray(areas) ? areas : [areas]).filter(Boolean)) {
+    const hit = [join(srcDir, a), join(appDir, a)].find(existsSync);
+    if (!hit) continue;
+    const label = norm(hit).slice(norm(appDir).length + 1);
+    out.push(statSync(hit).isDirectory() ? { key: a, label, dir: hit } : { key: a, label, file: hit });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
 // Scan: walk the ELDA-relevant roots and classify every file.
 
-const STYLE_RE = /\.(css|scss|sass|less)$/;
-const ASSET_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i;
+// A stylesheet is code (SURFACE.6) and draws in its layer x subdomain cell; everything that is neither a module nor a stylesheet is pure data, read as the complement (isDataPath) so that no extension the tool has never met classifies as a rankless surface.
+const STYLE_RE = /\.(css|scss|sass|less)$/i;
+const isAsset = (p) => isDataPath(p);
 
 function* walk(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -92,12 +96,12 @@ function* walk(dir) {
 }
 
 function buildGraph() {
-  const roots = compositionRoots();
-  // Domains and core scan by directory; each composition root scans its directory or its single config file and stamps every file with its root key, so the diagram draws one bar per root.
+  const roots = areaTargets(compositionRoot);
+  // Domains scan by directory; each composition root scans its directory or its single module and stamps every file with its root key, so the diagram draws one bar per root; each declared core scans as its own dependency-free block.
   const areas = [
     { dir: join(srcDir, 'domains') },
     ...roots.map((r) => ({ root: r.key, dir: r.dir, file: r.file })),
-    { dir: join(srcDir, 'core') },
+    ...areaTargets(core).map((c) => ({ dir: c.dir, file: c.file })),
   ];
   const files = [];
   const byPath = new Map();
@@ -107,9 +111,9 @@ function buildGraph() {
     if (!target || !existsSync(target)) continue;
     for (const abs of area.file ? [area.file] : walk(area.dir)) {
       const path = norm(abs.slice(appDir.length + 1));
-      const kind = CODE_RE.test(path) ? 'code' : STYLE_RE.test(path) ? 'style' : ASSET_RE.test(path) ? 'asset' : null;
+      const kind = CODE_RE.test(path) ? 'code' : STYLE_RE.test(path) ? 'style' : isAsset(path) ? 'asset' : null;
       if (!kind) continue;
-      let role = area.root ? { kind: 'composition-root', root: area.root } : fileRole('/' + path, compositionRoot);
+      let role = area.root ? { kind: 'composition-root', root: area.root } : fileRole('/' + path, compositionRoot, core);
       // A pure-data asset carries no behaviour and classifies as vocabulary (SURFACE.6): entities of the subdomain its directory names.
       if (kind === 'asset') {
         const m = ('/' + path).match(/\/domains\/(.+)$/);
@@ -132,12 +136,21 @@ function buildGraph() {
     let p = null;
     if (bare.startsWith(domainAlias + '/')) p = 'src/domains/' + bare.slice(domainAlias.length + 1);
     else if (bare.startsWith(appAlias + '/')) p = 'src/' + bare.slice(appAlias.length + 1);
-    else if (bare.startsWith('./') || bare.startsWith('../')) p = posixResolve(relDir, bare).slice(1);
+    else if (isRelative(bare)) p = posixResolve(relDir, bare).slice(1);
     if (p == null) return { external: true, node: null };
     if (byPath.has(p)) return { external: false, node: byPath.get(p) };
     for (const ext of EXT_CANDIDATES) if (byPath.has(p + ext)) return { external: false, node: byPath.get(p + ext) };
     for (const ext of EXT_CANDIDATES) if (byPath.has(p + '/index' + ext)) return { external: false, node: byPath.get(p + '/index' + ext) };
     return { external: false, node: null };
+  };
+
+  // The reference target read off the file a specifier actually resolved to, which is the resolved-path reading the plugin gets from targetOfPath.
+  // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.
+  const targetOfNode = (node) => {
+    if (node == null) return null;
+    const f = files[node];
+    if (f.role.kind !== 'domain' && f.role.kind !== 'surface') return null;
+    return { ...f.role, asset: f.kind === 'asset' };
   };
 
   const edges = [];
@@ -158,11 +171,14 @@ function buildGraph() {
     for (const ref of refs) {
       const { external, node } = resolveNode(relDir, ref.spec);
       if (external) continue;
-      const t = targetOf(relPath, ref.spec, domainAlias, appAlias);
+      // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
+      // A specifier that resolves to no scanned file keeps the tolerant reading, which is the plugin's fallback too.
+      const resolved = targetOfNode(node);
+      const t = resolved ?? targetOf(relPath, ref.spec, domainAlias, appAlias);
       let verdict = null;
       let tier = null;
       if (t && file.role.kind !== 'other') {
-        verdict = importVerdict(file.role, t, domainAlias);
+        verdict = importVerdict(file.role, t, domainAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
         if (verdict) tier = 'invariant';
         else if (!ref.typeOnly && file.role.kind === 'domain') {
           verdict = diagonalVerdict(file.role, t);
@@ -184,7 +200,7 @@ function buildGraph() {
   const walker = createWalker({ srcDir, domainAlias, appAlias });
   return {
     app: norm(appDir).split('/').pop(),
-    options: { domainAlias, appAlias, compositionRoot, roots: roots.map((r) => ({ key: r.key, label: r.label })) },
+    options: { domainAlias, appAlias, compositionRoot, core, roots: roots.map((r) => ({ key: r.key, label: r.label })) },
     files,
     edges,
     flows: expandFlows(files, edges, walker, appDir, byPath),
@@ -311,7 +327,7 @@ const rescan = () => {
 // Recursive watch covers the whole src tree on Windows and macOS; where a runtime lacks it, fall back to one watcher per directory.
 try {
   watch(srcDir, { recursive: true }, (_e, name) => {
-    if (name && (CODE_RE.test(name) || STYLE_RE.test(name) || ASSET_RE.test(name))) rescan();
+    if (name && (CODE_RE.test(name) || STYLE_RE.test(name) || isAsset(name))) rescan();
   });
 } catch {
   const dirs = [srcDir];

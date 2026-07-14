@@ -5,7 +5,17 @@
   ],
   "rules": {
     "elda/imports": "warn",
+    "elda/no-surface-declarations": "warn",
+    "elda/no-self-surface": "warn",
     "elda/no-layer-branches": "warn",
+    "elda/no-async-inner": "warn",
+    "elda/no-mutable-surface": "warn",
+    "elda/ambient-ownership": "warn",
+    "elda/no-service-coupling": "warn",
+    "elda/no-adapter-coupling": "warn",
+    "elda/no-penetration": "warn",
+    "elda/no-deep-side-effects": "warn",
+    "elda/vocab-gate": "warn",
     "elda/no-diagonal-reach": [
       "warn",
       {
@@ -21,14 +31,6 @@
         "acrossSubdomains": "warn",
         "withinSubdomain": "warn"
       }
-    ],
-    "elda/no-async-inner": "warn",
-    "elda/no-mutable-surface": "warn",
-    "elda/ambient-ownership": "warn",
-    "elda/no-service-coupling": "warn",
-    "elda/no-adapter-coupling": "warn",
-    "elda/no-penetration": "warn",
-    "elda/no-deep-side-effects": "warn",
-    "elda/vocab-gate": "warn"
+    ]
   }
 }

@@ -2,22 +2,33 @@
 // The lint rules (index.js) and the dependency visualizer (visualize.js) both read this module, so the linter and the diagram judge every edge identically.
 // Everything here is pure: strings in, plain objects out, no lint-host or filesystem coupling.
 
-// The layer vocabulary, in rank order; the rank map and the suffix test derive from it.
+// The layer vocabulary, in rank order; the rank map and the name reading (layerOf, below) both derive from it.
 export const LAYERS = ['entities', 'use-cases', 'adapters', 'services'];
 export const LAYER_RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
-export const LAYER_SUFFIX_RE = new RegExp(`\\.(${LAYERS.join('|')})$`);
 
 export const norm = (p) => String(p ?? '').replace(/\\/g, '/');
 
-// After the real extension, a file name may carry markers the classification sees through: runtime-context markers (`auth.services.server.ts` is server-only) and build-convention compounds (`grid-vars.services.css.ts` is a vanilla-extract module).
-// A marker is a coloring, orthogonal to the layer axis.
-// This list is the marker vocabulary.
-const MARKERS = ['server', 'client', 'css'];
-const MARKER_RE = new RegExp(`\\.(${MARKERS.join('|')})$`);
-export const stripExt = (name) => {
-  let n = name.replace(/\.d\.ts$/, '').replace(/\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less)$/, '');
-  while (MARKER_RE.test(n)) n = n.replace(MARKER_RE, '');
-  return n;
+// The code extensions: modules, and stylesheets, which are code and classify by their layer and unit like any module (SURFACE.6).
+// A real extension names a file's type rather than a concern, so unlike the marker list this one is genuinely closed, and it strips first.
+export const CODE_EXT_RE = /(\.d\.ts|\.[cm]?[tj]sx?|\.(?:css|scss|sass|less))$/i;
+export const stripExt = (name) => String(name ?? '').replace(CODE_EXT_RE, '');
+
+// A relative specifier. The bare dot forms name a directory's barrel and every resolver honours them, so `import { x } from '.'` is the canonical self-barrel import.
+// Testing only the './' and '../' prefixes drops them, and the drop fails open: the specifier resolves nowhere, so the reference carries no target and every rule that reads one goes quiet on it.
+export const isRelative = (spec) =>
+  typeof spec === 'string' && (spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../'));
+
+// A file name reads RIGHT TO LEFT - `<name>.<layer>.<marker>...` - and the layer is the rightmost dot-segment that names a layer.
+// Everything left of it is the unit's name, and an empty name is the subdomain's own bare layer file; everything right of it is markers.
+// A marker is a coloring orthogonal to the layer axis: a runtime context (`.server`), a build convention (`.css` for a vanilla-extract module), a tooling suffix (`.stories`, `.spec`). There may be any number of them, under any name, and the model does not enumerate them.
+// It must not enumerate them, because an enumerated list fails OPEN: a marker the list has not been told about leaves the layer unmatched, silently demotes a layer file to a rankless surface, and takes every layer rule off it.
+// Reading right to left is also what keeps `services.adapters.css.ts` decidable - the unit is `services`, the layer is `adapters`, `.css` is a marker - where a left-to-right read would take `services` for the layer and lose the file.
+export const layerOf = (stripped) => {
+  const parts = String(stripped ?? '').split('.');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (LAYERS.includes(parts[i])) return { layer: parts[i], name: parts.slice(0, i).join('.') };
+  }
+  return null;
 };
 
 // Classify a path inside domains/ into its subdomain chain and its layer.
@@ -36,19 +47,19 @@ export function classify(segs) {
     const last = i === segs.length - 1;
     const seg = last ? stripExt(segs[i]) : segs[i];
     if (layer) { sub.push(seg); continue; }
-    if (LAYERS.includes(seg)) {
-      layer = seg;
-      via = last ? 'leaf' : 'branch';
-      if (!last) branchDir = true;
-      continue;
-    }
-    const sfx = seg.match(LAYER_SUFFIX_RE);
-    if (sfx) {
-      layer = sfx[1];
-      via = last ? 'suffix' : 'unit-dir';
-      // A suffixed file's own name states its part; files sharing a name are one unit (SURFACE.5).
-      if (last) name = seg.slice(0, -sfx[0].length);
-      else sub.push(seg);
+    const hit = layerOf(seg);
+    if (hit) {
+      layer = hit.layer;
+      if (hit.name === '') {
+        // A bare reserved name, markers and all (`services.ts`, `services.server.ts`): the subdomain's own layer aggregate, or - as a directory - the legacy layer bucket.
+        via = last ? 'leaf' : 'branch';
+        if (!last) branchDir = true;
+      } else {
+        // A suffixed file's own name states its part; files sharing a name are one unit (SURFACE.5).
+        via = last ? 'suffix' : 'unit-dir';
+        if (last) name = hit.name;
+        else sub.push(seg);
+      }
       continue;
     }
     if (last) surface = seg;
@@ -58,7 +69,18 @@ export function classify(segs) {
 }
 
 // Where does the current file sit in the ELDA structure?
-export function fileRole(filename, compositionRoot) {
+// A path-area test anchored on whole segments, so 'routes' matches '/routes/' and never '/my-routes-helper/'.
+// An area names a directory holding the file, or the file itself: an app composes at several entries and one of them is routinely a single module, since a build config is a composition root that lives as one file at the app root.
+// A directory-only test cannot name that root, and a root the test cannot see is a root no rule is ever read on: the file classifies as unrelated to the structure, every rule declines it, and the tree reports clean while the root reaches wherever it likes.
+// An area is also a list, because an app composes at several entries and may hold more than one dependency-free core.
+const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const inArea = (filename, areas) =>
+  (Array.isArray(areas) ? areas : [areas]).some((a) => a && new RegExp(`(^|/)${escapeRe(a)}(/|$)`).test(filename));
+
+// Naming a core buys no enforcement. ROOT.6 ("pure core is dependency-free; arrows point from domains into core, never back") is a property, not a place:
+// a module that references no domain satisfies it wherever it lives, and one that references a domain is either a domain, a declared root, or a conduit laundering the reach - which is what the unclassified-file reading reports.
+// So the area is declared only to tell the informer which box to draw, and an app may hold any number of cores, or none.
+export function fileRole(filename, compositionRoot, core = 'core') {
   const m = filename.match(/\/domains\/(.+)$/);
   if (m) {
     const c = classify(m[1].split('/').filter(Boolean));
@@ -66,8 +88,8 @@ export function fileRole(filename, compositionRoot) {
     if (c.surface && c.chain.length > 0) return { kind: 'surface', ...c };
     return { kind: 'other' };
   }
-  if (new RegExp(`/${compositionRoot}/`).test(filename)) return { kind: 'composition-root' };
-  if (/\/core\//.test(filename)) return { kind: 'core' };
+  if (inArea(filename, compositionRoot)) return { kind: 'composition-root' };
+  if (inArea(filename, core)) return { kind: 'core' };
   return { kind: 'other' };
 }
 
@@ -97,7 +119,7 @@ export function posixResolve(dir, spec) {
 }
 
 export function relativeTarget(filename, spec) {
-  if (typeof spec !== 'string' || !(spec.startsWith('./') || spec.startsWith('../'))) return null;
+  if (!isRelative(spec)) return null;
   const resolved = posixResolve(filename.slice(0, filename.lastIndexOf('/')), spec);
   const m = resolved.match(/\/domains\/(.+)$/);
   if (!m) return null;
@@ -112,15 +134,35 @@ function finishTarget(t) {
   return t;
 }
 
-// Pure-data assets (images, fonts, media) carry no behaviour; importing one yields a value.
-// That is vocabulary, classified as `entities` (SURFACE.6): importable from any layer inside the owning domain's tree, surface-gated across boundaries.
-// CSS is deliberately excluded: it is code, and classifies by its layer and unit like any module.
-export const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)(\?.*)?$/i;
+// Pure-data files (images, fonts, media, JSON, anything that is not code) carry no behaviour; importing one yields a value.
+// That is vocabulary, classified as `entities` (SURFACE.6): importable from any layer inside the owning domain's tree, and surface-gated across boundaries.
+// Data is read as the COMPLEMENT of code, and never as a list of its own. A list fails open on the first extension it has not been told about: the file classifies as a rankless named surface instead, its cross-boundary reach stops being surface-gated because a surface target passes, and reading it from inside its own domain reports as a self-surface import.
+// The test needs a resolved path, where the trailing extension is always there to read. A specifier normally omits it (`./cart.use-cases`), so the complement cannot be read on one, and the specifier path keeps the media list below as its degraded fallback - reached only when the file does not resolve, where nothing else is decidable either.
+export const isDataPath = (p) => {
+  const s = String(p ?? '').split('?')[0];
+  return /\.[^./\\]+$/.test(s) && !CODE_EXT_RE.test(s);
+};
+export const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav|json|jsonc|txt|csv|md|wasm|graphql|gql|ya?ml|toml)(\?.*)?$/i;
+
+// Vocabulary carries a rank and no surface: a data file classifies as its subdomain's Entities, and it is not a named surface of the subdomain just because its name is plain.
+// Leaving `surface` set is what let a cross-domain asset reach pass, since every boundary rule reads a surface target as a legal way in.
+const asData = (t) => ({ ...t, layer: 'entities', via: 'leaf', surface: null, asset: true });
 
 export function targetOf(filename, spec, domainAlias, appAlias) {
   const t = parseSpec(spec, domainAlias, appAlias) ?? relativeTarget(filename, spec);
-  if (t && typeof spec === 'string' && DATA_RE.test(spec)) return { ...t, layer: 'entities', via: 'leaf', asset: true };
+  if (t && typeof spec === 'string' && DATA_RE.test(spec)) return asData(t);
   return t;
+}
+
+// Classify a reference target from the path the specifier actually resolved to, rather than from the specifier's own shape.
+// A specifier's trailing plain segment is ambiguous - `#/checkout/payment` is either a named surface of `checkout` or the `payment` subdomain's barrel - and only the filesystem knows which, so a caller that can resolve reads the target here and judges it once.
+// The caller supplies the resolution (model.js touches no filesystem); a path that lands outside `domains/`, or directly in it with no domain to belong to, carries no target and returns null.
+export function targetOfPath(absPath) {
+  const m = norm(absPath).match(/\/domains\/(.+)$/);
+  if (!m) return null;
+  const t = classify(m[1].split('/').filter(Boolean));
+  if (t.chain.length === 0) return null;
+  return isDataPath(absPath) ? asData(t) : t;
 }
 
 // Relationship between the importer's subdomain chain and the target's: the shared prefix decides whether the reference stays inside one subdomain, descends into an owned child, climbs toward an ancestor, or crosses to a peer at the divergence point.
@@ -133,8 +175,10 @@ export function rel(a, b) {
   return { p, kind: 'peer' };
 }
 
-// A services target in surface form is the runtime-composition surface itself (`x/services` with nothing after it), the thing a composer reaches; anything past it is internals.
-export const isServicesSurface = (t) => t.layer === 'services' && t.sub.length === 0;
+// A services target in surface form is the runtime-composition surface itself, the thing a composer reaches; anything past it is internals.
+// The leaf layout spells it `x/services`, and the legacy layer-directory layout spells the same surface `x/services/index`. Both are the surface: the analyzers read the legacy layout correctly by promise (no-layer-branches flags the layout, and no rule misjudges it), so reading only the leaf spelling turns a graded OWNER.5 mounting into a hard boundary breach on a tree that has not migrated yet.
+export const isServicesSurface = (t) => t.layer === 'services'
+  && (t.sub.length === 0 || (t.via === 'branch' && t.sub.length === 1 && t.sub[0] === 'index'));
 
 // The hard, decidable layer + boundary invariants (Tier 1), judged for one reading of one reference:
 //   LAYER.1    an inner layer never imports an outer one (alias and relative paths alike);
@@ -211,15 +255,33 @@ export function judgeImport(role, t, domainAlias) {
   return `ELDA SURFACE.3: reference '${sib}' through a public surface (${domainAlias}/${sib}, or a named surface entry), never its ${t.layer} layer.`;
 }
 
-// The full verdict for one reference: judge the direct reading, and where a trailing plain segment is ambiguous between a named surface and a nested subdomain's barrel, accept the reference when either reading is legal, so the ambiguity never false-positives.
-export function importVerdict(role, t, domainAlias) {
+// The full verdict for one reference.
+// A target read from a resolved path (targetOfPath) is a fact, so it is judged once and the verdict stands.
+// A target read from the specifier alone carries the trailing-segment ambiguity - a named surface of the chain, or a nested subdomain's barrel - so both readings are tried and the reference is accepted when either is legal, and the ambiguity never manufactures a finding.
+// The tolerant reading is the fallback a caller reaches when it cannot resolve at all, which happens for a specifier that names no file; a caller with a filesystem resolves first and never pays the tolerance.
+export function importVerdict(role, t, domainAlias, resolved = false) {
   const verdictA = judgeImport(role, t, domainAlias);
   if (verdictA === null) return null;
-  if (t.surface && t.surface !== 'index' && !t.layer) {
+  if (!resolved && t.surface && t.surface !== 'index' && !t.layer) {
     const b = { ...t, chain: [...t.chain, t.surface], surface: 'index' };
     if (judgeImport(role, b, domainAlias) === null) return null;
   }
   return verdictA;
+}
+
+// A surface is what a domain shows its consumers (SURFACE.3 binds "Consumers"), and a domain is not a consumer of itself.
+// Read from inside, the surface is a hop that houses no decision (META.5), and it houses no rank either: a binding taken through it arrives with no layer at all.
+// That blinds LAYER.1 outright, and the blinding is one-directional in the dangerous direction - the consumable surface legally carries use-cases (SURFACE.2), so an entities or use-cases file can take an outer-layer binding straight through its own barrel and no per-file rule sees the inversion.
+// The landing walk does not cover it either: it grades value flows landing BELOW the consumer's rank (the diagonals), and a LAYER.1 inversion lands above.
+// A self-reference is also a module cycle by construction, and the cycle audit (CHANNEL.5) is a scheduled review rather than a gate.
+// Only the rankless surfaces are the rule's business; the runtime-composition surface is a layer file that holds rank, so a sibling reaching it is a lateral the OWNER.5 rules already grade.
+export function selfSurfaceVerdict(role, t) {
+  if (role.kind !== 'domain' && role.kind !== 'surface') return null;
+  if (!t || t.asset || t.layer || !t.surface) return null;
+  if (rel(role.chain, t.chain).kind !== 'same') return null;
+  const own = role.chain.join('/');
+  const face = t.surface === 'index' ? 'its own barrel' : `its own named surface '${t.surface}'`;
+  return `ELDA LAYER.1 / SURFACE.3: a surface is a domain's face to its consumers, and '${own}' is not a consumer of itself; this reference takes ${face} from inside. A surface holds no rank, so the binding arrives carrying no layer and LAYER.1 cannot be read on this reference at all: an inner layer reaches an outer one straight through the surface and no per-file rule sees it. Import the file that owns the binding.`;
 }
 
 // OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
@@ -315,8 +377,24 @@ export function rootLandedVerdict(role, t) {
   return `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${t.chain.join('/')}' at ${t.layer}. Consuming ${t.layer} is a service's own work, so the reach marks a service smashed into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
 }
 
-// The diagonal's distance class - how wide a boundary the landed flow crosses: within one subdomain, across subdomains of one domain, or across domains.
-// Severity grows with the width, and a lint level binds per rule, so each class reports through its own rule and the presets map the gradient onto the levels.
+// SURFACE.2 read on the runtime-composition surface: the mirror of the clause it already states for the consumable one.
+// A services file may IMPORT any inner layer to wire it, since composing owned parts re-owns nothing; what it RE-EXPORTS is the service contract its composition root consumes.
+// A use-case does not become a service by transiting a services file, so publication is judged at the seam where the decision was made, and not once per consuming root.
+// Enforcing it also makes the walk's terminus sound: a name published on a services surface is either declared there or forwarded from another services file, so by induction its owner is a services file.
+export function publishVerdict(role, t) {
+  if (role.kind !== 'domain' || role.layer !== 'services') return null;
+  if (!t || t.asset) return null; // A bare package is outside ELDA's jurisdiction; an asset is vocabulary from any layer (SURFACE.6).
+  if (t.layer === 'services') return null;
+  const what = t.layer
+    ? `the ${t.layer} layer of '${t.chain.join('/')}'`
+    : `the consumable surface '${[...t.chain, t.surface].filter(Boolean).join('/')}'`;
+  return `ELDA SURFACE.2 (published): the runtime-composition surface publishes the domain's services to its composition root, and this re-export forwards ${what} onto it instead. A use-case does not become a service by transiting a services file: consume it here and declare the service that owns it, or publish it on the consumable surface where it belongs.`;
+}
+
+// The diagonal's boundary class - whose contract the landed flow crossed: no surface at all (two units of one subdomain), a surface the domain itself declared, or a foreign domain's surface.
+// It is the shared-prefix question rel() already answers, so it reads the same at every nesting depth: an owner nine levels down is the same owner as one level down, and a foreign domain is foreign at every depth.
+// Severity grows with the ownership regime and never with distance. The levels between a deep importer and its target are the importer's own ancestors rather than conduits on the edge, so counting them would grade a file for where it lives instead of for what it depends on.
+// A lint level binds per rule, so each class reports through its own rule and the presets map the gradient onto the levels. How far a value laundered is an unbounded quantity: it rides each finding as the landed-via chain, and is never graded.
 export function diagonalScope(role, t) {
   const r = rel(role.chain, t.chain);
   if (r.kind === 'same') return 'within-subdomain';

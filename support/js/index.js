@@ -14,21 +14,41 @@
 
 import {
   LAYERS,
-  LAYER_SUFFIX_RE,
-  DATA_RE,
+  layerOf,
   norm,
   classify,
   fileRole,
+  inArea,
+  isRelative,
   targetOf,
+  targetOfPath,
   importVerdict,
   lateralVerdict,
   landedVerdict,
   rootLandedVerdict,
+  publishVerdict,
+  selfSurfaceVerdict,
   diagonalScope,
 } from './model.js';
-import { createWalker } from './flow.js';
+import { createWalker, srcDirOf } from './flow.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
+
+// A dynamic specifier is statically known when it is a quoted string OR a template with no substitutions; a bundler resolves both identically.
+// Reading only `Literal` would let a backtick delete the rule, so the template form is read too, and a genuinely computed specifier returns null for the caller to fail closed on.
+const staticSpec = (node) => {
+  const s = node.source;
+  if (!s) return null;
+  if (s.type === 'Literal') return typeof s.value === 'string' ? s.value : null;
+  if (s.type === 'TemplateLiteral' && (s.expressions ?? []).length === 0 && (s.quasis ?? []).length === 1) {
+    const q = s.quasis[0].value ?? {};
+    return q.cooked ?? q.raw ?? null;
+  }
+  return null;
+};
+
+// A declared area is one directory name or a list of them: an app composes at several entries (a route tree, a server shell, a build config) and may hold any number of dependency-free cores.
+const AREA = { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'string' } }] };
 
 function options(context) {
   const o = (context.options && context.options[0]) || {};
@@ -36,11 +56,35 @@ function options(context) {
     domainAlias: o.domainAlias ?? '#',
     appAlias: o.appAlias ?? '@',
     compositionRoot: o.compositionRoot ?? 'routes',
+    core: o.core ?? 'core',
   };
 }
 
+// The walker for the app a file belongs to: it resolves specifiers the way the bundler would, and follows value names to their landings.
+// Memoized per src directory, so a lint pass builds one per app and every rule shares its parse cache.
+const walkers = new Map();
+const walkerFor = (srcDir, domainAlias, appAlias) => {
+  const key = `${srcDir}|${domainAlias}|${appAlias}`;
+  if (!walkers.has(key)) walkers.set(key, createWalker({ srcDir, domainAlias, appAlias }));
+  return walkers.get(key);
+};
+const walkerOf = (filename, domainAlias, appAlias) => {
+  const srcDir = srcDirOf(filename);
+  return srcDir ? walkerFor(srcDir, domainAlias, appAlias) : null;
+};
+
+// Resolve first, judge second.
+// A specifier's trailing plain segment does not say whether it names a surface of the chain or a nested subdomain's barrel, and reading the shape alone forces a rule to accept a reference whenever EITHER reading is legal - a tolerance that buys silence on the ambiguity by spending it on everything the ambiguity overlaps.
+// The filesystem knows which file the specifier means, so the target is read off the resolved path and judged once.
+// Where resolution finds no file the tolerant reading stands, which keeps a broken path from manufacturing a finding; a root's landing walk reports that same unresolvable path separately, so the silence here is covered.
+const resolvedTargetFor = (walker, filename, spec, domainAlias, appAlias) => {
+  const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
+  const t = abs ? targetOfPath(abs) : null;
+  return t ? { t, resolved: true } : { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false };
+};
+
 // elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in model.js for the per-constraint reading).
-// A trailing plain segment is ambiguous between a named surface of the chain and a nested subdomain's barrel; the verdict tries both readings and stays quiet if either is legal, so it never false-positives on the ambiguity.
+// Targets are resolved against the filesystem before they are judged, so each reference is read as the one file it means.
 // The graded lateral smells are the separate warn-level rules (no-service-coupling, no-adapter-coupling).
 const imports = {
   meta: {
@@ -49,52 +93,172 @@ const imports = {
       properties: {
         domainAlias: { type: 'string' },
         appAlias: { type: 'string' },
-        compositionRoot: { type: 'string' },
+        compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias, compositionRoot } = options(context);
+    const { domainAlias, appAlias, compositionRoot, core } = options(context);
     const filename = filenameOf(context);
-    const role = fileRole(filename, compositionRoot);
+    const role = fileRole(filename, compositionRoot, core);
     if (role.kind === 'other') return {};
 
+    const walker = walkerOf(filename, domainAlias, appAlias);
+    const targetFor = (spec) => resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+
     const check = (node, spec) => {
-      const t = targetOf(filename, spec, domainAlias, appAlias);
+      const { t, resolved } = targetFor(spec);
       if (!t) return;
-      const verdict = importVerdict(role, t, domainAlias);
+      const verdict = importVerdict(role, t, domainAlias, resolved);
       if (verdict) context.report({ node, message: verdict });
     };
 
     // On the root's row ROOT.1 is a landing question: a barrel carries no layer of its own, so the per-specifier reading above passes a binding that in fact lands on a use-case.
     // The walk follows each value name to the file that owns it and judges it there, the way the diagonal rule already reads domain files.
     const isRoot = role.kind === 'composition-root';
-    const srcRoot = isRoot ? filename.match(new RegExp(`^(.*)/${compositionRoot}/`)) : null;
-    const walker = srcRoot ? walkerFor(srcRoot[1], domainAlias, appAlias) : null;
     const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
+    // A specifier shaped like in-tree code is ELDA's business; a bare package name is outside its jurisdiction and stays exempt.
+    const inTree = (spec) =>
+      typeof spec === 'string' &&
+      (isRelative(spec) || spec.startsWith(domainAlias + '/') || spec.startsWith(appAlias + '/'));
     const landed = (node, spec, names) => {
       if (!walker || (names !== '*' && names.length === 0)) return;
       const found = walker.landings(filename, spec, names);
-      if (found == null) return;
+      // In-tree code that resolves to no file is undecidable, not innocent: the reach cannot be judged, so it reports.
+      if (found == null) {
+        if (inTree(spec)) {
+          context.report({ node, message: `ELDA ROOT.1 (unjudged): '${spec}' is shaped like in-tree code yet resolves to no file, so where this binding lands cannot be judged. A composition root's reach has to be decidable.` });
+        }
+        return;
+      }
       for (const l of found) {
         const m = norm(l.path).match(/\/domains\/(.+)$/);
-        if (!m) continue;
-        const t = { ...classify(m[1].split('/').filter(Boolean)), asset: DATA_RE.test(l.path) };
-        const verdict = rootLandedVerdict(role, t);
+        if (!m) {
+          // A landing outside every domain carries no layer and no owner, so ROOT.1 cannot be read on it at all, and an un-owned module is where a domain's logic goes to hide.
+          // Two landings sit outside a domain by right. Pure core depends on nothing in any domain (ROOT.6), so consuming it re-owns nothing. A declared root's own modules ARE the root, and a root composes its glue at itself (ROOT.2), so a root reaching a sibling module of its own area has crossed no boundary.
+          if (!inArea(norm(l.path), core) && !inArea(norm(l.path), compositionRoot)) {
+            context.report({ node, message: `ELDA ROOT.1 (unjudged): this binding lands on '${relOf(l.path)}', a module outside every domain and outside every declared root, so the layer and owner it carries cannot be judged. Route the reach through a domain's surface, or move the module into the domain that owns it.` });
+          }
+          continue;
+        }
+        const t = targetOfPath(l.path);
+        const verdict = t && rootLandedVerdict(role, t);
         if (verdict) context.report({ node, message: l.via && l.via.length ? `${verdict} (landed via ${l.via.map(relOf).join(' -> ')})` : verdict });
       }
     };
+    // SURFACE.2's mirror: a services file may import any inner layer to wire it, but what it RE-EXPORTS is the service contract its composition root consumes.
+    // Only publication is judged here; consumption stays free, which is what "composing owned parts re-owns nothing" means.
+    const published = (node, spec) => {
+      if (node.exportKind === 'type') return;
+      const verdict = publishVerdict(role, targetFor(spec).t);
+      if (verdict) context.report({ node, message: verdict });
+    };
+
     const judge = (node, spec, names) => {
       check(node, spec);
       if (isRoot) landed(node, spec, names);
     };
+    const judgeExport = (node, spec, names) => {
+      judge(node, spec, names);
+      published(node, spec);
+    };
 
     return {
       ImportDeclaration: (node) => node.source && judge(node, node.source.value, valueNames(node)),
-      ExportNamedDeclaration: (node) => node.source && judge(node, node.source.value, valueNames(node)),
-      ExportAllDeclaration: (node) => node.source && judge(node, node.source.value, node.exportKind === 'type' ? [] : '*'),
-      ImportExpression: (node) => node.source && node.source.type === 'Literal' && judge(node, node.source.value, '*'),
+      ExportNamedDeclaration: (node) => node.source && judgeExport(node, node.source.value, valueNames(node)),
+      ExportAllDeclaration: (node) => node.source && judgeExport(node, node.source.value, node.exportKind === 'type' ? [] : '*'),
+      // A computed specifier resolves nowhere the analyzers can follow. The resolution is undecidable; the silence is not.
+      ImportExpression: (node) => {
+        const spec = staticSpec(node);
+        if (spec != null) return judge(node, spec, '*');
+        if (node.source) {
+          context.report({ node, message: `ELDA ROOT.1 (unjudged): a dynamic import with a computed specifier resolves nowhere the analyzers can follow, so the layer and owner it lands on cannot be judged. Give the import a statically-known specifier.` });
+        }
+      },
+    };
+  },
+};
+
+// elda/no-surface-declarations - SURFACE.2 + OWNER.2: a surface curates what the layers own, and declares nothing itself.
+// A binding DECLARED on a surface holds no rank, so it has no layer and no owner: the binding walk terminates on a rankless file and every geometry verdict bails on it (the `!t.layer || t.surface` guard).
+// That makes the barrel the cheapest laundering path in the system - wrap a use-case in a locally-declared function and every reach through it goes silent - so a surface re-exports, and only re-exports.
+// A name bound by an import and then exported keeps its module request, so `export { foo }` over an import stays curation; only a genuine local declaration reports.
+const noSurfaceDeclarations = {
+  create(context) {
+    const { compositionRoot, core } = options(context);
+    const role = fileRole(filenameOf(context), compositionRoot, core);
+    if (role.kind !== 'surface') return {};
+    return {
+      Program: (program) => {
+        const body = program.body ?? [];
+        const imported = new Set();
+        for (const n of body) {
+          if (n.type !== 'ImportDeclaration' || n.importKind === 'type') continue;
+          for (const s of n.specifiers ?? []) {
+            if (s.importKind !== 'type' && s.local && s.local.name) imported.add(s.local.name);
+          }
+        }
+        const report = (node, what) => context.report({
+          node,
+          message: `ELDA SURFACE.2 / OWNER.2: a surface curates what the layers own and holds no rank of its own, so ${what} has no layer and no owner here, and no rule can judge where it sits. Declare it in the layer file that owns it, and re-export it from this surface.`,
+        });
+        for (const n of body) {
+          if (n.type === 'ExportDefaultDeclaration') { report(n, 'a default export'); continue; }
+          if (n.type !== 'ExportNamedDeclaration' || n.exportKind === 'type') continue;
+          if (n.source) continue; // A re-export is exactly what a surface is for.
+          if (n.declaration) {
+            // A type or interface is vocabulary reference, deliberately unregulated at the edges; only value declarations report.
+            const d = n.declaration.type;
+            if (d === 'TSTypeAliasDeclaration' || d === 'TSInterfaceDeclaration' || d === 'TSDeclareFunction') continue;
+            report(n, 'a binding declared on it');
+            continue;
+          }
+          for (const s of n.specifiers ?? []) {
+            if (s.exportKind === 'type') continue;
+            const local = s.local && s.local.name;
+            if (local && !imported.has(local)) report(s, `the locally-declared \`${local}\``);
+          }
+        }
+      },
+    };
+  },
+};
+
+// elda/no-self-surface - LAYER.1 / SURFACE.3: a domain's surface is what it shows its consumers, and a domain is not a consumer of itself.
+// This is the mirror of no-surface-declarations, and the two close the same hole from opposite sides: a surface holds no rank, so a binding DECLARED there has no layer to be judged at, and a binding TAKEN from there arrives with no layer either.
+// The taking side is the sharper of the two, because the consumable surface legally carries use-cases (SURFACE.2): a file at entities or use-cases rank that imports its own barrel can take an outer-layer binding through it, and LAYER.1 - a per-file rule reading the specifier - sees a rankless surface and passes. The landing walk does not cover the gap, since it grades flows landing below the consumer's rank and this inversion lands above.
+// The verdict is selfSurfaceVerdict in model.js; the target must be resolved for the rule to see anything, because a self-reference by alias (`#/shell/viewport` from inside `shell/viewport`) reads syntactically as a reach at the parent's surface and only the resolved path reveals it as the subdomain's own.
+const noSelfSurface = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+        compositionRoot: AREA, core: AREA,
+      },
+      additionalProperties: false,
+    }],
+  },
+  create(context) {
+    const { domainAlias, appAlias, compositionRoot, core } = options(context);
+    const filename = filenameOf(context);
+    const role = fileRole(filename, compositionRoot, core);
+    if (role.kind !== 'domain' && role.kind !== 'surface') return {};
+    const walker = walkerOf(filename, domainAlias, appAlias);
+    // The shared resolve-then-judge helper, so an unresolvable specifier keeps the shape reading here exactly as it does in `imports` and in the diagram.
+    // Judging only a resolved target would take the rule off every specifier the resolver does not model, and take it off silently.
+    const flag = (node, spec) => {
+      const { t } = resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+      const verdict = t && selfSurfaceVerdict(role, t);
+      if (verdict) context.report({ node, message: verdict });
+    };
+    return {
+      ImportDeclaration: (node) => node.source && flag(node, node.source.value),
+      ImportExpression: (node) => { const s = staticSpec(node); if (s != null) flag(node, s); },
+      ExportNamedDeclaration: (node) => node.source && flag(node, node.source.value),
+      ExportAllDeclaration: (node) => node.source && flag(node, node.source.value),
     };
   },
 };
@@ -116,7 +280,7 @@ const noLayerBranches = {
         Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<name>.${bucket}.ts\`) and directories express concerns.` }),
       };
     }
-    const unitDir = dirs.find((s) => LAYER_SUFFIX_RE.test(s));
+    const unitDir = dirs.find((s) => layerOf(s)?.name);
     if (unitDir) {
       return {
         Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${unitDir}/' is a layer-suffixed directory - a branch wearing a file's name. One part's files share a name (\`back-nav.adapters.tsx\` + \`back-nav.adapters.css\`); a grouping directory is a subdomain (a plain name, layer-suffixed files inside).` }),
@@ -157,7 +321,7 @@ function lateralCoupling(layer) {
       const isValue = (node) => node.importKind !== 'type' && node.exportKind !== 'type';
       return {
         ImportDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
-        ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value),
+        ImportExpression: (node) => { const s = staticSpec(node); if (s != null) flag(node, s); },
         ExportNamedDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
         ExportAllDeclaration: (node) => node.source && isValue(node) && flag(node, node.source.value),
       };
@@ -170,18 +334,12 @@ const noAdapterCoupling = lateralCoupling('adapters');
 
 // elda/no-diagonal-reach - SURFACE.5's geometry, enforced on landings: every value reference is followed name by name through surfaces and re-export chains (flow.js) to the files that own the bindings, and each landing is judged by landedVerdict in model.js - the in-subdomain diagonal, and its cross-boundary generalization (the diagrams draw every cross-boundary arrow at equal rank, so a landed value flow below the consumer's own rank is a diagonal no row draws).
 // The direct reference is the walk's zero-hop case, so this subsumes the direct-only check; a specifier that resolves to no file keeps the spec-classified direct judgment, so a broken path never hides a finding.
-// Severity grows with the width of the boundary the launder crosses (diagonalScope in model.js draws the line), and the rule's options map each distance class onto a lint level:
-//   withinSubdomain    within one subdomain - the mildest, a naming-honesty smell between sibling units (default 'warn');
-//   acrossSubdomains   one domain, landing in a different subdomain - a boundary the domain itself declared (default 'warn');
-//   acrossDomains      landing in a foreign domain - the widest, a laundered cross-domain crossing off the use-case row (default 'error').
+// Severity grows with the ownership regime the launder crossed and never with the distance it travelled (diagonalScope in model.js draws the line), and the rule's options map each class onto a lint level:
+//   withinSubdomain    no surface crossed at all - the mildest, a naming-honesty smell between sibling units (default 'warn');
+//   acrossSubdomains   a surface the domain itself declared, at any nesting depth (default 'warn');
+//   acrossDomains      a foreign domain's surface - a laundered cross-domain crossing off the use-case row (default 'error').
 // The lint host binds one level per rule ID and ignores per-report severity, so the mapping is realized as a preset-managed pair sharing this implementation and one option map: `no-diagonal-reach` (configured warn) reports the classes mapped 'warn', and `no-diagonal-reach-gate` (configured error) reports the classes mapped 'error' - a partition, so nothing reports twice and each class keeps its own level.
 // The pair travels together and the presets carry both with the same map; every hit resolves by a rename, a promotion to the bare file, or an equal-rank crossing.
-const walkers = new Map();
-const walkerFor = (srcDir, domainAlias, appAlias) => {
-  const key = `${srcDir}|${domainAlias}|${appAlias}`;
-  if (!walkers.has(key)) walkers.set(key, createWalker({ srcDir, domainAlias, appAlias }));
-  return walkers.get(key);
-};
 
 // AST-level value names: named imports minus type-only ones, `default`, and a namespace or dynamic import as '*' - the whole module.
 function valueNames(node) {
@@ -208,7 +366,7 @@ function diagonalReach(tier) {
         properties: {
           domainAlias: { type: 'string' },
           appAlias: { type: 'string' },
-          compositionRoot: { type: 'string' },
+          compositionRoot: AREA, core: AREA,
           acrossDomains: LEVEL_ENUM,
           acrossSubdomains: LEVEL_ENUM,
           withinSubdomain: LEVEL_ENUM,
@@ -217,7 +375,7 @@ function diagonalReach(tier) {
       }],
     },
     create(context) {
-      const { domainAlias, appAlias, compositionRoot } = options(context);
+      const { domainAlias, appAlias, compositionRoot, core } = options(context);
       const o = (context.options && context.options[0]) || {};
       // This instance reports the classes whose mapped level matches its tier; the twin covers the other half.
       const mine = new Set(
@@ -227,10 +385,9 @@ function diagonalReach(tier) {
       );
       if (mine.size === 0) return {};
       const filename = filenameOf(context);
-      const role = fileRole(filename, compositionRoot);
+      const role = fileRole(filename, compositionRoot, core);
       if (role.kind !== 'domain') return {};
-      const srcRoot = filename.match(/^(.*)\/domains\//);
-      const walker = srcRoot ? walkerFor(srcRoot[1], domainAlias, appAlias) : null;
+      const walker = walkerOf(filename, domainAlias, appAlias);
       const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
       const judge = (node, t, via) => {
         if (!t || !mine.has(diagonalScope(role, t))) return;
@@ -241,15 +398,11 @@ function diagonalReach(tier) {
         if (names !== '*' && names.length === 0) return;
         const found = walker && walker.landings(filename, spec, names);
         if (found == null) { judge(node, targetOf(filename, spec, domainAlias, appAlias)); return; }
-        for (const l of found) {
-          const m = norm(l.path).match(/\/domains\/(.+)$/);
-          if (!m) continue;
-          judge(node, { ...classify(m[1].split('/').filter(Boolean)), asset: DATA_RE.test(l.path) }, l.via);
-        }
+        for (const l of found) judge(node, targetOfPath(l.path), l.via);
       };
       return {
         ImportDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
-        ImportExpression: (node) => node.source && node.source.type === 'Literal' && flag(node, node.source.value, '*'),
+        ImportExpression: (node) => { const s = staticSpec(node); if (s != null) flag(node, s, '*'); },
         ExportNamedDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
         ExportAllDeclaration: (node) => node.source && node.exportKind !== 'type' && flag(node, node.source.value, '*'),
       };
@@ -293,15 +446,15 @@ const noDeepSideEffects = {
       properties: {
         domainAlias: { type: 'string' },
         appAlias: { type: 'string' },
-        compositionRoot: { type: 'string' },
+        compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias, compositionRoot } = options(context);
+    const { domainAlias, appAlias, compositionRoot, core } = options(context);
     const filename = filenameOf(context);
-    const role = fileRole(filename, compositionRoot);
+    const role = fileRole(filename, compositionRoot, core);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
     const m = filename.match(/\/domains\/(.+)$/);
     if (!m) return {};
@@ -387,13 +540,13 @@ const vocabGate = {
   meta: {
     schema: [{
       type: 'object',
-      properties: { compositionRoot: { type: 'string' } },
+      properties: { compositionRoot: AREA, core: AREA },
       additionalProperties: false,
     }],
   },
   create(context) {
     const { compositionRoot } = options(context);
-    if (!new RegExp(`/${compositionRoot}/`).test(filenameOf(context))) return {};
+    if (!inArea(filenameOf(context), compositionRoot)) return {};
     const isStr = (n) => n && n.type === 'Literal' && typeof n.value === 'string';
     return {
       CallExpression(node) {
@@ -431,6 +584,8 @@ const plugin = {
   meta: { name: 'elda' },
   rules: {
     'imports': imports,
+    'no-surface-declarations': noSurfaceDeclarations,
+    'no-self-surface': noSelfSurface,
     'no-layer-branches': noLayerBranches,
     'no-diagonal-reach': noDiagonalReach,
     'no-diagonal-reach-gate': noDiagonalReachGate,
@@ -451,7 +606,7 @@ const plugin = {
 // `justified` holds the justified grade: the graded smells gate too, so a deviation lands only as an inline suppression carrying its justification.
 // A preset supplies the gate; the grade is read off the tree under it.
 // ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped `<name>.json` by path instead (see README).
-const INVARIANTS = ['imports', 'no-layer-branches', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
+const INVARIANTS = ['imports', 'no-surface-declarations', 'no-self-surface', 'no-layer-branches', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
 const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-deep-side-effects', 'vocab-gate'];
 // The diagonal pair rides every preset with one class-to-level map per grade; the two entries project the map's halves (see the rule's comment).
 const DIAGONAL_MAPS = {

@@ -1,11 +1,13 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
-  "jsPlugins": ["@elda/oxlint-plugin"],
+  "jsPlugins": [
+    "@elda/oxlint-plugin"
+  ],
   "rules": {
     "elda/imports": "error",
+    "elda/no-surface-declarations": "error",
+    "elda/no-self-surface": "error",
     "elda/no-layer-branches": "error",
-    "elda/no-diagonal-reach": ["warn", { "acrossDomains": "error", "acrossSubdomains": "warn", "withinSubdomain": "warn" }],
-    "elda/no-diagonal-reach-gate": ["error", { "acrossDomains": "error", "acrossSubdomains": "warn", "withinSubdomain": "warn" }],
     "elda/no-async-inner": "error",
     "elda/no-mutable-surface": "error",
     "elda/ambient-ownership": "error",
@@ -13,6 +15,22 @@
     "elda/no-adapter-coupling": "warn",
     "elda/no-penetration": "warn",
     "elda/no-deep-side-effects": "warn",
-    "elda/vocab-gate": "warn"
+    "elda/vocab-gate": "warn",
+    "elda/no-diagonal-reach": [
+      "warn",
+      {
+        "acrossDomains": "error",
+        "acrossSubdomains": "warn",
+        "withinSubdomain": "warn"
+      }
+    ],
+    "elda/no-diagonal-reach-gate": [
+      "error",
+      {
+        "acrossDomains": "error",
+        "acrossSubdomains": "warn",
+        "withinSubdomain": "warn"
+      }
+    ]
   }
 }
