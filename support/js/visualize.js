@@ -9,7 +9,7 @@
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,9 @@ if (!existsSync(join(srcDir, 'domains'))) {
 
 const viewerPath = join(dirname(fileURLToPath(import.meta.url)), 'viewer.html');
 const viewerHtml = () => readFileSync(viewerPath, 'utf8');
+// Which viewer a page is running, sent alongside the graph.
+// A page reads its own stamp back on every load, and a stamp that moved is the one thing it cannot fix by redrawing: the markup and the script it is running are the ones this file no longer holds.
+const viewerStamp = () => String(statSync(viewerPath).mtimeMs);
 
 // What one scan found: the graph's size, then each class of finding the whole-graph pass can see.
 const summary = (g) => [
@@ -75,7 +78,7 @@ const server = createServer((req, res) => {
     res.end(viewerHtml());
   } else if (url === '/data.json') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(graph));
+    res.end(JSON.stringify({ ...graph, viewer: viewerStamp() }));
   } else if (url === '/events') {
     res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
     res.write('retry: 1000\n\n');
@@ -96,6 +99,21 @@ const rescan = () => {
     console.log(`Rescanned: ${summary(graph)}.`);
   }, 200);
 };
+
+// The viewer is served from disk on every request, so editing it changes what a new page runs while an open one carries on with the old.
+// Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer this file now holds.
+let viewerDebounce = null;
+try {
+  watch(viewerPath, () => {
+    clearTimeout(viewerDebounce);
+    viewerDebounce = setTimeout(() => {
+      for (const c of clients) c.write('data: reload\n\n');
+      if (clients.size) console.log(`Viewer changed; ${clients.size} open page${clients.size > 1 ? 's' : ''} reloading.`);
+    }, 100);
+  });
+} catch {
+  console.warn('Could not watch the viewer; edits to it need a page reload.');
+}
 
 // Recursive watch covers the whole src tree on Windows and macOS; where a runtime lacks it, fall back to one watcher per directory.
 try {
