@@ -463,6 +463,10 @@
         0 0 3px color-mix(in srgb, var(--laundered) 40%, transparent)
       );
     }
+    /* A bundled arrow carries every reference between two folded ranks, so its weight reads the count while its colour keeps the worst verdict among them. */
+    #edges path.edge.bundled {
+      stroke-width: clamp(1.5px, calc(0.9px + var(--n, 1) * 0.3px), 4.5px);
+    }
     /* An edge closing a reference cycle is legal where it stands, and the cycle it closes is the finding, so it paints as the cycle rather than as a breach of its own (CHANNEL.5). */
     #edges path.cycle {
       stroke: var(--cycle);
@@ -689,11 +693,37 @@
       text-align: center;
       padding: 6px 26px;
       border-bottom: 1px solid var(--line);
+      cursor: pointer;
       background: linear-gradient(
         180deg,
         rgb(255 255 255 / 0.035),
         transparent
       );
+    }
+    /* The caret says which way the title goes: down for a box holding its columns, right for one folded into a single one. */
+    .domain > h2::before {
+      content: "◢";
+      position: absolute;
+      left: 9px;
+      color: var(--faint);
+      font-size: 9px;
+    }
+    .domain.folded > h2::before {
+      content: "◤";
+    }
+    .domain > h2:hover::before {
+      color: var(--fg);
+    }
+    /* An aggregate stands for every file of one rank, so it reads as a count rather than a name. */
+    .chip.agg {
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    .chip.agg .agg-n {
+      margin-left: 4px;
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--muted);
     }
     .grid {
       grid-row: 2 / -1;
@@ -840,18 +870,22 @@
     .chip.services {
       background: var(--services-bg);
       border-color: var(--services-bd);
+      outline-color: var(--services-bd);
     }
     .chip.adapters {
       background: var(--adapters-bg);
       border-color: var(--adapters-bd);
+      outline-color: var(--adapters-bd);
     }
     .chip.use-cases {
       background: var(--use-cases-bg);
       border-color: var(--use-cases-bd);
+      outline-color: var(--use-cases-bd);
     }
     .chip.entities {
       background: var(--entities-bg);
       border-color: var(--entities-bd);
+      outline-color: var(--entities-bd);
     }
     .chip .badge {
       font-size: 8px;
@@ -863,8 +897,9 @@
       color: var(--muted);
     }
     .chip.pinned {
-      outline: 2px solid var(--hi-out);
-      outline-offset: 1px;
+      outline-width: 4px;
+      outline-style: solid;
+      outline-offset: 2px;
     }
     .chip.dim {
       opacity: 0.22;
@@ -978,6 +1013,11 @@
     #issues .item:hover {
       border-color: var(--line-strong);
       background: #202634;
+    }
+    /* The finding the board is currently showing, kept lit so the list and the diagram agree on what is being read. */
+    #issues .item.selected {
+      border-color: var(--hi-out);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--hi-out) 16%, transparent);
     }
     #issues .item .msg {
       color: var(--muted);
@@ -1160,15 +1200,15 @@
       <div class="legend">
         <div class="col">
           <span><i></i>dependency</span>
+          <span><i class="type"></i>type-only</span>
+          <span><i class="in"></i>dependency of</span>
+          <span><i class="out"></i>depends on</span>
+        </div>
+        <div class="col">
           <span><i class="violation"></i>violation</span>
           <span><i class="laundered"></i>laundered</span>
           <span><i class="cycle"></i>reference cycle</span>
           <span><i class="smell"></i>inadvisable</span>
-        </div>
-        <div class="col">
-          <span><i class="type"></i>type-only</span>
-          <span><i class="in"></i>dependency of</span>
-          <span><i class="out"></i>depends on</span>
         </div>
       </div>
       <nav id="bottombar"></nav>
@@ -1194,6 +1234,15 @@
     // The pin takes one of two shapes: a file, or a whole reference cycle raised from the drawer.
     // A cycle is named by the files it encloses, so the name survives a rescan that renumbers them, and a cycle an edit dissolved simply stops being found.
     let pinnedCycle = null;
+    // The drawer finding a pin came from. A pin taken anywhere else clears it, so the list never claims to be showing something the board is not.
+    let selectedKey = null;
+    const markSelection = () => {
+      for (const el of $("issues").querySelectorAll(".item"))
+        el.classList.toggle(
+          "selected",
+          selectedKey !== null && el.dataset.key === selectedKey,
+        );
+    };
     const cycleId = (c) => c.files.map((id) => data.files[id].path).sort().join("|");
     // The edges that close a cycle, keyed the way a drawn path carries its endpoints.
     const edgeKey = (e) => `${e.from}>${e.to}`;
@@ -1205,6 +1254,11 @@
     const defaultHidden = () =>
       new Set(["@core", ...(data ? data.options.roots.map((r) => "@root:" + r.key) : [])]);
     let hiddenBlocks = new Set();
+    // Domains drawn compact: the columns fold away, the rows stay, and one aggregate chip stands for every file of a rank. Click a domain's title to fold it, and again to open it.
+    let collapsed = new Set();
+    // The one file each aggregate draws as, keyed by domain and compact row: every reference crossing into that rank lands on it, which is where a bundle forms.
+    let compactRep = new Map();
+    let compactFiles = new Map();
     // Files banished to their domain's hidden shelf by middle-click; session-only on purpose, keyed by path so live rescans keep them hidden.
     const hiddenFiles = new Set();
 
@@ -1226,10 +1280,12 @@
     const storageKey = () => "elda-viz:" + (data ? data.app : "");
     function loadPrefs() {
       hiddenBlocks = defaultHidden();
+      collapsed = new Set();
       try {
         const stored = JSON.parse(sessionStorage.getItem(storageKey()) || "null");
         if (!stored) return;
         if (Array.isArray(stored.hidden)) hiddenBlocks = new Set(stored.hidden);
+        if (Array.isArray(stored.collapsed)) collapsed = new Set(stored.collapsed);
         for (const id of TOGGLES)
           if (typeof stored.toggles?.[id] === "boolean") $(id).checked = stored.toggles[id];
       } catch {}
@@ -1239,7 +1295,7 @@
         const toggles = Object.fromEntries(TOGGLES.map((id) => [id, $(id).checked]));
         sessionStorage.setItem(
           storageKey(),
-          JSON.stringify({ hidden: [...hiddenBlocks], toggles }),
+          JSON.stringify({ hidden: [...hiddenBlocks], collapsed: [...collapsed], toggles }),
         );
       } catch {}
     }
@@ -1272,28 +1328,49 @@
       const r = f.role;
       if (r.kind === "composition-root") return { area: "root", root: r.root };
       if (r.kind === "core") return { area: "core" };
-      if (r.kind === "surface")
+      if (r.kind === "surface" || r.kind === "domain") {
+        const domain = r.chain[0];
+        const row = r.kind === "surface" ? "surface" : r.layer;
+        // A collapsed domain gives up its columns and keeps its rows: every file at one rank draws as that rank's aggregate, so an arrow into the domain still lands on the row it belongs to and a diagonal still reads as one.
+        // Dropping the rows would collapse the one thing the diagram is for, since a reference's meaning is the rank it crosses.
+        // The bands keep their own places above and below the cake: a composer is a composition surface and a bare entities file is the shared base, and each anchors its edges as a band rather than as a cell.
+        if (collapsed.has(domain))
+          return {
+            area: "domain",
+            domain,
+            sub: "",
+            unit: "",
+            row,
+            collapsed: true,
+            band: r.kind === "domain" && unitCol(r) === "" && (r.layer === "services" || r.layer === "entities"),
+          };
         return {
           area: "domain",
-          domain: r.chain[0],
+          domain,
           sub: r.chain.slice(1).join("/"),
-          unit: "",
-          row: "surface",
+          unit: r.kind === "surface" ? "" : unitCol(r),
+          row,
         };
-      if (r.kind === "domain")
-        return {
-          area: "domain",
-          domain: r.chain[0],
-          sub: r.chain.slice(1).join("/"),
-          unit: unitCol(r),
-          row: r.layer,
-        };
+      }
       return { area: "other" };
     }
 
+    // The row a file draws in once its domain is folded: its own rank, or one of the two band keys, which keep the composer cap above the cake and the shared base below it.
+    const compactRow = (p) => (p.band ? (p.row === "services" ? "@root" : "@base") : p.row);
+
+    // Folding a domain is a view change like any other: it persists for the session, and the board redraws around it.
+    function toggleCollapse(name) {
+      if (collapsed.has(name)) collapsed.delete(name);
+      else collapsed.add(name);
+      savePrefs();
+      render();
+    }
+
     // A domain-wide band: the bare composer (the sub-root cap) or the bare entities file (the shared base), lifted out of the cake and spanning its (sub)domain. Edges anchor these vertically only.
+    // A collapsed domain carries its bands in the same places, so it reads its own flag; every other file of it is cake, whatever its rank.
     function isBarFile(f) {
       const p = place(f);
+      if (p.collapsed) return p.band;
       return p.area === "domain" && p.unit === "" && (p.row === "services" || p.row === "entities");
     }
 
@@ -1440,12 +1517,14 @@
       renderRootBar(visible);
       renderCoreBox(visible);
       renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS);
+      // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
+      // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
+      // The closers are keyed before the edges are drawn, because a bundle takes its paint from the worst reference it carries and a cycle closer is one of the paints it can take.
+      cycleClosers = new Set(data.cycles.flatMap((c) => c.edges.map(edgeKey)));
       // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
       drawn = expunge ? data.flows : data.edges;
       if (threadC) drawn = threadComposers(drawn);
-      // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
-      // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
-      cycleClosers = new Set(data.cycles.flatMap((c) => c.edges.map(edgeKey)));
+      if (collapsed.size) drawn = bundleEdges(drawn);
       // The adjacency the reach walk rides is the board's own: an edge a filter dropped or a hidden block took away is out of the walk exactly as it is out of the picture, so the reach you read is the reach of the graph in front of you.
       adjOut = new Map();
       adjIn = new Map();
@@ -1523,6 +1602,10 @@
     function renderDomains(visible, ghost, rowList) {
       const domains = new Map();
       const shelves = new Map();
+      // A folded domain's files, bucketed by the row each draws in: the two bands keep their own keys, so the composer cap and the shared base stay outside the cake exactly as they do in an open box.
+      const compact = new Map();
+      compactRep = new Map();
+      compactFiles = new Map();
       // The bare composer (services) and the bare entities file are the (sub)domain's own composition root and shared base.
       // They lift out of the layer cake into a sub-root cap above the columns and a shared-base bar below them, keyed by domain then subdomain.
       const subRoots = new Map();
@@ -1542,6 +1625,16 @@
           continue;
         }
         if (!visible(f)) continue;
+        if (p.collapsed) {
+          if (!compact.has(p.domain)) compact.set(p.domain, new Map());
+          const rows = compact.get(p.domain);
+          const key = compactRow(p);
+          if (!rows.has(key)) rows.set(key, []);
+          rows.get(key).push(f);
+          // The box still needs its entry, so a folded domain keeps its place in the order.
+          if (!domains.has(p.domain)) domains.set(p.domain, new Map());
+          continue;
+        }
         if (!domains.has(p.domain)) domains.set(p.domain, new Map());
         const subsOf = domains.get(p.domain);
         if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
@@ -1603,11 +1696,108 @@
       }
       const at = (m, ...k) => m.get(k.join("\0")) ?? 0;
 
+      // One chip standing for every file of a folded domain at one rank: it carries the count, the files behind it, and the id that every reference into that rank bundles onto.
+      const aggChip = (name, key, files) => {
+        const rep = Math.min(...files.map((f) => f.id));
+        const row = place(files[0]).row;
+        compactRep.set(name + "\0" + key, rep);
+        compactFiles.set(rep, files);
+        const el = h(
+          "span",
+          {
+            class: "chip agg " + (row === "surface" ? "" : row),
+            "data-id": rep,
+            "data-domain": name,
+          },
+          String(files.length),
+          h("span", { class: "agg-n" }, files.length === 1 ? "file" : "files"),
+        );
+        chips.set(rep, el);
+        return el;
+      };
+
+      // A folded domain draws one column into the same shared row template, so every rank still lines up with the open boxes beside it and an arrow still lands on the row it belongs to.
+      const compactGrid = (name) => {
+        const rows = compact.get(name) ?? new Map();
+        const cell = (key, cls, style) =>
+          rows.has(key)
+            ? h("div", { class: cls, style }, aggChip(name, key, rows.get(key)))
+            : null;
+        return h(
+          "div",
+          { class: "grid", style: "grid-template-columns: 14px minmax(70px, max-content)" },
+          cell("@root", "subroot domainwide", "grid-column: 2; grid-row: 1"),
+          rowList.flatMap((row, ri) => [
+            h(
+              "div",
+              { class: "rail", style: `grid-column: 1; grid-row: ${layerRow(ri)}` },
+              rows.has(row) ? ROW_LABEL[row] : "",
+            ),
+            cell(row, "cell " + row, `grid-column: 2; grid-row: ${layerRow(ri)}`),
+          ]),
+          cell("@base", "subbase domainwide", `grid-column: 2; grid-row: ${DOMBASE_ROW}`),
+        );
+      };
+
+      // The box around a domain, folded or open: its title folds it, the corner button hides it, and a domain holding banished files keeps its shelf either way.
+      const domainBox = (name, grid) => {
+        const shelf = shelves.get(name);
+        return h(
+          "section",
+          {
+            class:
+              "domain" +
+              (shelf ? " has-hidden" : "") +
+              (collapsed.has(name) ? " folded" : ""),
+          },
+          h(
+            "h2",
+            {
+              title: collapsed.has(name)
+                ? "click to open this domain"
+                : "click to fold this domain into one column",
+              onclick: (ev) => {
+                ev.stopPropagation();
+                toggleCollapse(name);
+              },
+            },
+            name,
+            hideBtn(name),
+          ),
+          grid,
+          shelf
+            ? h(
+                "div",
+                { class: "footer" },
+                h(
+                  "button",
+                  {
+                    class: "flabel",
+                    title: "unhide this domain's files",
+                    onclick: (ev) => {
+                      ev.stopPropagation();
+                      for (const f of shelf) hiddenFiles.delete(f.path);
+                      render();
+                    },
+                  },
+                  h("span", { class: "idle" }, "hidden"),
+                  h("span", { class: "act" }, "unhide"),
+                ),
+                shelf.sort(byPath).map((f) => makeChip(f, true)),
+              )
+            : null,
+        );
+      };
+
       const sortedDomains = [...domains.entries()].sort(
         (a, b) => at(domDeg, b[0]) - at(domDeg, a[0]) || a[0].localeCompare(b[0]),
       );
 
       for (const [name, subsOf] of sortedDomains) {
+        if (collapsed.has(name)) {
+          domainsEl.append(domainBox(name, compactGrid(name)));
+          continue;
+        }
         // The subdomains form a tree, not a list, so the columns are laid by walking it: a subdomain emits its own unit columns first, then each child's.
         // That makes a subdomain's tracks contiguous with its descendants', which is what lets one card span exactly a subtree and a child's card sit inside its parent's.
         // Every ancestor gets a node even when it holds no files of its own, since a chain is a path and a gap in it would strand the levels below.
@@ -1790,36 +1980,7 @@
             );
           });
         });
-        const shelf = shelves.get(name);
-        domainsEl.append(
-          h(
-            "section",
-            { class: "domain" + (shelf ? " has-hidden" : "") },
-            h("h2", {}, name, hideBtn(name)),
-            grid,
-            shelf
-              ? h(
-                  "div",
-                  { class: "footer" },
-                  h(
-                    "button",
-                    {
-                      class: "flabel",
-                      title: "unhide this domain's files",
-                      onclick: (ev) => {
-                        ev.stopPropagation();
-                        for (const f of shelf) hiddenFiles.delete(f.path);
-                        render();
-                      },
-                    },
-                    h("span", { class: "idle" }, "hidden"),
-                    h("span", { class: "act" }, "unhide"),
-                  ),
-                  shelf.sort(byPath).map((f) => makeChip(f, true)),
-                )
-              : null,
-          ),
-        );
+        domainsEl.append(domainBox(name, grid));
       }
     }
 
@@ -1896,18 +2057,85 @@
           )
         : null;
 
+      // Reading a tree you did not write starts by folding the whole board and opening the one domain in question, so the fold sits beside the list of domains it acts on.
+      const names = domainBlocks.map(([key]) => key);
+      const allFolded = names.length > 0 && names.every((n) => collapsed.has(n));
+      const foldAll = names.length
+        ? h(
+            "button",
+            {
+              class: "bar-btn",
+              title: allFolded
+                ? "open every domain"
+                : "fold every domain into one column",
+              onclick: () => {
+                collapsed = allFolded ? new Set() : new Set(names);
+                savePrefs();
+                render();
+              },
+            },
+            allFolded ? "open all" : "fold all",
+          )
+        : null;
+
       $("bottombar").replaceChildren(
         row("roots", rootBlocks),
-        row("domains", domainBlocks, unhideFiles),
+        row("domains", domainBlocks, foldAll, unhideFiles),
       );
     }
 
     // ---------------------------------------------------------------------------
     // Edges.
 
+    // The node an endpoint draws as: a file of a folded domain draws as its rank's aggregate, so every reference crossing into that rank lands on one chip, which is where the bundle forms.
+    const nodeOf = (id) => {
+      const p = place(data.files[id]);
+      if (!p.collapsed) return id;
+      return compactRep.get(p.domain + "\0" + compactRow(p)) ?? id;
+    };
+
+    // How the paints rank when several references share one arrow: a bundle takes the worst of them, so folding a domain never swallows a finding.
+    const CLASS_RANK = { violation: 5, laundered: 4, cycle: 3, smell: 2, ok: 1, type: 0 };
+
+    // Every reference crossing a folded domain's boundary bundles into one arrow: it carries the count, paints as its worst member, and lists what it stands for on hover.
+    // A reference between two files of one folded rank is internal to that rank, and the aggregate's own tip is where those files stay visible.
+    function bundleEdges(list) {
+      const out = [];
+      const acc = new Map();
+      for (const e of list) {
+        if (e.to == null) continue;
+        const from = nodeOf(e.from),
+          to = nodeOf(e.to);
+        if (from === e.from && to === e.to) {
+          out.push(e);
+          continue;
+        }
+        if (from === to) continue;
+        const key = `${from}>${to}`;
+        let b = acc.get(key);
+        if (!b) {
+          b = { ...e, from, to, bundle: [] };
+          acc.set(key, b);
+          out.push(b);
+        }
+        b.bundle.push(e);
+      }
+      for (const b of acc.values()) {
+        let worst = b.bundle[0];
+        for (const e of b.bundle)
+          if (CLASS_RANK[edgeClass(e)] > CLASS_RANK[edgeClass(worst)]) worst = e;
+        b.cls = edgeClass(worst);
+        b.verdict = worst.verdict;
+        b.tier = worst.tier;
+      }
+      return out;
+    }
+
     // A laundered finding carries a tier, yet it is a graph-only landing rather than an authored breach, so it paints as its own severity ahead of the tier colors.
     // A cycle closer paints as the cycle once nothing else has named it: where a verdict already sits on the edge, that verdict is the one carrying a remedy at the site, and the cycle is what remains when every edge closing it is legal.
+    // A bundle settled its own paint when it formed, out of the worst reference it carries.
     function edgeClass(e) {
+      if (e.cls) return e.cls;
       if (e.laundered) return "laundered";
       if (e.tier === "invariant") return "violation";
       if (e.tier === "smell") return "smell";
@@ -2051,7 +2279,12 @@
         const cls = edgeClass(en.e);
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", d);
-        path.setAttribute("class", "edge " + cls + (en.sides.kind === "diag" ? " diagonal" : ""));
+        path.setAttribute(
+          "class",
+          "edge " + cls + (en.sides.kind === "diag" ? " diagonal" : "") + (en.e.bundle ? " bundled" : ""),
+        );
+        // A bundled arrow stands for many references, so its weight reads the count while its colour keeps the worst verdict among them.
+        if (en.e.bundle) path.style.setProperty("--n", en.e.bundle.length);
         path.setAttribute("marker-end", `url(#m-${cls})`);
         path.dataset.from = en.e.from;
         path.dataset.to = en.e.to;
@@ -2118,8 +2351,55 @@
       }
     }
 
+    // The verdict as a separated prose block, with the rule id in its tier colour.
+    function verdictBlock(e) {
+      if (!e.verdict) return null;
+      const m = e.verdict.match(/^(ELDA [A-Z]+\.\d+(?: \([^)]+\))?):\s*([\s\S]*)$/);
+      const cls = e.tier === "invariant" ? "violation" : "smell";
+      return m
+        ? h("div", { class: "t-verdict" }, h("b", { class: "t-rule " + cls }, m[1]), ` ${m[2]}`)
+        : h("div", { class: "t-verdict" }, e.verdict);
+    }
+
+    // How an endpoint reads once its domain is folded: the domain and the rank it landed on, since the file behind the aggregate is one of many.
+    const endLabel = (id) => {
+      const f = data.files[id];
+      const p = place(f);
+      if (!p.collapsed) return f.path;
+      const rank = p.band ? (p.row === "services" ? "composer" : "shared base") : ROW_LABEL[p.row] ?? p.row;
+      return `${p.domain} · ${rank}`;
+    };
+
+    // A bundled arrow stands for many references at once, so its tip names the two ends, counts what crosses, and lists the references behind it.
+    function bundleTip(e) {
+      const shown = e.bundle.slice(0, 8);
+      return h(
+        "div",
+        {},
+        h("div", { class: "t-src" }, endLabel(e.from)),
+        h(
+          "div",
+          { class: "t-row t-spec" },
+          `→ ${endLabel(e.to)}`,
+          h("span", { class: "t-kind" }, `${e.bundle.length} reference${e.bundle.length > 1 ? "s" : ""}`),
+        ),
+        h(
+          "div",
+          { class: "t-row t-via" },
+          shown.map((m) =>
+            h("div", {}, `${data.files[m.from].path} → ${data.files[m.to].path}`),
+          ),
+        ),
+        e.bundle.length > shown.length
+          ? h("div", { class: "t-row t-names" }, `+ ${e.bundle.length - shown.length} more`)
+          : null,
+        verdictBlock(e),
+      );
+    }
+
     // The edge tooltip, each fact in its own register: the source module, the authored specifier with its kind badges, the bindings taken, the re-export chain ridden, the module landed on, and the verdict as a separated prose block with the rule id in its tier color.
     function edgeTip(e) {
+      if (e.bundle) return bundleTip(e);
       const kinds = [];
       if (e.typeOnly) kinds.push("type-only");
       if (e.kind === "dynamic") kinds.push("dynamic");
@@ -2149,20 +2429,8 @@
           ? h("div", { class: "t-row t-land" }, `= ${data.files[e.to].path}`)
           : null,
       );
-      if (e.verdict) {
-        const m = e.verdict.match(/^(ELDA [A-Z]+\.\d+(?: \([^)]+\))?):\s*([\s\S]*)$/);
-        const cls = e.tier === "invariant" ? "violation" : "smell";
-        tip.append(
-          m
-            ? h(
-                "div",
-                { class: "t-verdict" },
-                h("b", { class: "t-rule " + cls }, m[1]),
-                ` ${m[2]}`,
-              )
-            : h("div", { class: "t-verdict" }, e.verdict),
-        );
-      }
+      const verdict = verdictBlock(e);
+      if (verdict) tip.append(verdict);
       return tip;
     }
 
@@ -2275,6 +2543,8 @@
     }
 
     function applyPin() {
+      // A pin is exclusive, so the last one lets go before the next takes hold: the drawer re-aims the board without rebuilding it, and a focus pass alone would leave the old chip wearing its ring.
+      for (const el of chips.values()) el.classList.remove("pinned");
       if (pinnedCycle !== null) {
         const cycle = data.cycles.find((c) => cycleId(c) === pinnedCycle);
         if (cycle) {
@@ -2288,9 +2558,12 @@
         return;
       }
       const f = data.files.find((f) => f.path === pinnedPath);
+      // The file has no chip: its domain was hidden or folded away, so the pin drops and the drawer stops claiming to show it.
       if (!f || !chips.has(f.id)) {
         pinnedPath = null;
+        selectedKey = null;
         blur();
+        markSelection();
         return;
       }
       focus(f.id);
@@ -2316,11 +2589,20 @@
       }
       // Under a reach walk the counts are the point of the hover: how much this file pulls in, and how much breaks when it changes.
       const { out, inc, deep } = focus(f.id);
+      // An aggregate stands for a whole rank of a folded domain, so its tip names the files it folded away.
+      const held = compactFiles.get(f.id);
+      const head = held
+        ? [
+            `${endLabel(f.id)} · ${held.length} file${held.length > 1 ? "s" : ""}`,
+            ...held.slice(0, 10).map((x) => "  " + x.path),
+            held.length > 10 ? `  + ${held.length - 10} more` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : f.path;
       showTip(
         e,
-        deep
-          ? `${f.path}\ndepends on ${out.size} · depended on by ${inc.size}`
-          : f.path,
+        deep ? `${head}\ndepends on ${out.size} · depended on by ${inc.size}` : head,
       );
     });
     wrap.addEventListener("pointerout", (e) => {
@@ -2350,14 +2632,19 @@
       if (e.ctrlKey || e.altKey) {
         window.location.href = getEditorLink(f.path);
       }
+      // A pin taken from the board is not a finding, so the drawer's selection lets go.
       pinnedCycle = null;
+      selectedKey = null;
       pinnedPath = pinnedPath === f.path ? null : f.path;
       render();
     });
     // A file joins the hidden shelf with its pin cleared when it was the pinned one.
     function banish(f) {
       hiddenFiles.add(f.path);
-      if (pinnedPath === f.path) pinnedPath = null;
+      if (pinnedPath === f.path) {
+        pinnedPath = null;
+        selectedKey = null;
+      }
     }
 
     // Middle-click banishes a domain file to its domain's hidden shelf, taking every edge that touches it along; the shelf chip's ordinary click brings it back.
@@ -2366,6 +2653,8 @@
       if (e.button !== 1) return;
       const head = e.target.closest(".grouphead, .colhead");
       const chip = e.target.closest(".chip");
+      // An aggregate is a whole rank of a folded domain, so there is no one file behind it to banish.
+      if (chip?.classList.contains("agg")) return;
       if (!head && !chip) return;
       e.preventDefault();
       if (head) {
@@ -2396,7 +2685,9 @@
       if (!suppressClick && (pinnedPath !== null || pinnedCycle !== null)) {
         pinnedPath = null;
         pinnedCycle = null;
+        selectedKey = null;
         applyPin();
+        markSelection();
       }
     });
 
@@ -2522,37 +2813,72 @@
       );
       const issuesBody = h("div", { class: "drawer-body" });
       el.append(issuesBody);
-      const section = (title, items, build) => {
+      // Each finding carries a key drawn from its content, so the one being read stays lit across a rebuild rather than riding a position in a list that shifts under it.
+      const section = (title, items, build, keyOf = (_, i) => String(i)) => {
         if (!items.length) return;
         issuesBody.append(
           h("h3", {}, `${title} (${items.length})`),
-          ...items.map(build),
+          ...items.map((item, i) => {
+            const el = build(item);
+            el.dataset.key = `${title}#${keyOf(item, i)}`;
+            if (el.dataset.key === selectedKey) el.classList.add("selected");
+            return el;
+          }),
         );
       };
-      // Clicking a finding reveals the file it names: the chip pins on the diagram and scrolls into view.
+      // A finding inside a folded domain has no chip of its own to raise, so the domains it names open first.
+      // Returns whether the board was rebuilt, since a rebuild applies the pin itself.
+      const reveal = (ids) => {
+        const shut = [
+          ...new Set(
+            ids
+              .map((id) => place(data.files[id]))
+              .filter((p) => p.collapsed)
+              .map((p) => p.domain),
+          ),
+        ];
+        if (!shut.length) return false;
+        for (const d of shut) collapsed.delete(d);
+        savePrefs();
+        render();
+        return true;
+      };
+      const scrollTo = (id) =>
+        requestAnimationFrame(() =>
+          chips.get(id)?.scrollIntoView({
+            block: "center",
+            inline: "center",
+            behavior: "smooth",
+          }),
+        );
+      // Clicking a finding reveals the file it names: the chip pins on the diagram, the item lights in the drawer, and the board scrolls to it.
+      // A reveal rebuilds the board, and that rebuild applies the pin and the selection on its own.
+      const select = (ev) => {
+        selectedKey = ev.currentTarget?.dataset.key ?? null;
+      };
       const pinId = (id) => (ev) => {
         ev.stopPropagation();
+        select(ev);
         pinnedCycle = null;
         pinnedPath = data.files[id].path;
-        applyPin();
-        chips.get(id)?.scrollIntoView({
-          block: "center",
-          inline: "center",
-          behavior: "smooth",
-        });
+        if (!reveal([id])) {
+          applyPin();
+          markSelection();
+        }
+        scrollTo(id);
       };
       const pinFrom = (e) => pinId(e.from);
       // A cycle names no single culprit, so clicking one raises the whole set and scrolls to the first file it encloses.
       const pinCycle = (c) => (ev) => {
         ev.stopPropagation();
+        select(ev);
         pinnedPath = null;
         pinnedCycle = cycleId(c);
-        applyPin();
-        chips.get(c.files[0])?.scrollIntoView({
-          block: "center",
-          inline: "center",
-          behavior: "smooth",
-        });
+        if (!reveal(c.files)) {
+          applyPin();
+          markSelection();
+        }
+        scrollTo(c.files[0]);
       };
       // A finding names a file, and the name is the way into it: the path opens the editor, while the item around it still pins the chip on the diagram.
       // Only the path is the link, so the two actions never compete for the same click.
@@ -2576,15 +2902,21 @@
           h("div", {}, pathLink(data.files[e.from].path), " → ", h("b", {}, e.spec)),
           h("div", { class: "msg" }, e.verdict),
         );
+      // A reference is named by where it starts, how it is written, what it asks for, and the bindings it takes, which is what survives a rescan.
+      // The bindings are load-bearing: one file can import the same module twice, and those two references are one finding each.
+      const edgeItemKey = (e) =>
+        `${data.files[e.from].path}:${e.kind}:${e.spec}:${(e.names ?? []).join(",")}`;
       section(
         "Violations",
         data.edges.filter((e) => e.tier === "invariant"),
         verdictItem,
+        edgeItemKey,
       );
       section(
         "Inadvisable (graded smells)",
         data.edges.filter((e) => e.tier === "smell"),
         verdictItem,
+        edgeItemKey,
       );
       // Findings the per-file rules cannot see: every hop is clean, the landed flow is not.
       section(
@@ -2604,22 +2936,27 @@
               `via ${f.via.map((id) => data.files[id].path).join("\n   via ")}\n${f.verdict}`,
             ),
           ),
+        (f) => `${data.files[f.from].path}=>${data.files[f.to].path}`,
       );
       // A cycle of legal references is invisible to every per-file rule, because no file in it is at fault (CHANNEL.5): every file in a cycle reaches every other, so the cycle is what a reviewer adjudicates, naming the settling element that encloses it or breaking the cycle.
-      section("Reference cycles (graph-only)", data.cycles, (c) =>
-        h(
-          "div",
-          { class: "item cycle", onclick: pinCycle(c) },
+      section(
+        "Reference cycles (graph-only)",
+        data.cycles,
+        (c) =>
           h(
             "div",
-            { class: "files" },
-            ...c.files.flatMap((id, i) => [
-              i ? " ⇄ " : "",
-              pathLink(data.files[id].path),
-            ]),
+            { class: "item cycle", onclick: pinCycle(c) },
+            h(
+              "div",
+              { class: "files" },
+              ...c.files.flatMap((id, i) => [
+                i ? " ⇄ " : "",
+                pathLink(data.files[id].path),
+              ]),
+            ),
+            h("div", { class: "msg" }, c.verdict),
           ),
-          h("div", { class: "msg" }, c.verdict),
-        ),
+        cycleId,
       );
       section(
         "Unresolved specifiers",
@@ -2632,21 +2969,27 @@
             " → ",
             h("b", {}, e.spec),
           ),
+        edgeItemKey,
       );
       // A file no composition root can reach ships to nobody. SURFACE.4 reads that as a review signal - a domain may expose more than its consumers currently require - so it is listed, never scored as a breach.
       const unreached = data.files.filter((f) => f.reachable === false);
-      section("Unreachable from any root", unreached, (f) =>
-        h(
-          "div",
-          { class: "unreachable item", onclick: pinId(f.id) },
-          pathLink(f.path),
-        ),
+      section(
+        "Unreachable from any root",
+        unreached,
+        (f) =>
+          h(
+            "div",
+            { class: "unreachable item", onclick: pinId(f.id) },
+            pathLink(f.path),
+          ),
+        (f) => f.path,
       );
       section(
         "Unclassified files",
         data.files.filter((f) => place(f).area === "other"),
         (f) =>
           h("div", { class: "item", onclick: pinId(f.id) }, pathLink(f.path)),
+        (f) => f.path,
       );
       if (issuesBody.childElementCount === 1)
         issuesBody.append(h("div", { class: "drawer-empty" }, "No findings"));

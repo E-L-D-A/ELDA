@@ -14,11 +14,9 @@ A whole-project pass over the resolved module graph, complementing the per-file 
 
 ## Visualizer
 
-The diagram reads the current tree: per-edge legality, the cycles the flows close, and the closure a pinned file reaches in either direction. These items extend it to the change and to scale.
+The diagram reads the current tree: per-edge legality, the cycles the flows close, the closure a pinned file reaches in either direction, and the whole board at whatever scale a domain is folded to. What it does not read is the change.
 
 - **Structural diff against a baseline ref.** Scan a git ref in a detached worktree through the same code path (the walk is path-based, so the scan itself needs no change), then diff files, edges and verdicts: new edges drawn hot, removed edges ghosted, newly classified files outlined. The gate stops the illegal delta at authoring time and stays silent on the legal one, and structural erosion is a sequence of individually legal moves - a fresh cross-domain edge that every rule permits and nobody would have approved on purpose. The unit a person reviews is the change, and the unit the diagram draws is the state; this closes that gap. Trigger to build: the first structural regression found after it landed, or the first review that reconstructs a change's structural delta by hand.
-
-- **Collapse a domain to a chip (level of detail).** Past a few thousand files the board itself is the bottleneck: every file draws a chip, and the arrows between two large domains read as a hairball. A collapsed domain draws as a single chip, its inter-domain arrows bundle into one edge carrying the reference count and the worst verdict among them, and the box expands on demand. The hidden shelf and the block bar are the hand-driven form of this and they hold for a tree the reader already knows. This is the precondition for reading any of the diagram on a large tree, because an analysis whose result cannot be drawn legibly is not a review instrument. Trigger to build: the first tree whose board stops being legible under the shelf and the block bar.
 
 ## Per-file rules
 
