@@ -51,6 +51,19 @@ export const layerOf = (stripped) => {
 // Layer membership otherwise rides the file name: the bare reserved names, or a `<name>.<layer>` suffix.
 // A trailing plain name is a surface: `index` the consumable barrel, `services` (a layer name, caught above) the runtime-composition surface, any other name a named surface.
 export function classify(segs) {
+  // A directory that merely repeats the name of the unit inside it is a grouping node for that unit, and LAYER.7 puts units beside subdomains as the concerns a grouping node may express.
+  // It is transparent: it carries no chain segment, so its files stay units of the enclosing subdomain and read the subdomain's shared base like any other unit. Grouping files to rest the eye costs nothing, and only declaring a boundary costs what a boundary costs.
+  // The collapse is decidable from the path alone, because the file states its own unit and the directory qualifies only by repeating it. That repetition is what buys the transparency: a transparent node contributes nothing, so the file must carry its whole identity.
+  // Which is also why the bare form is not available here. `x/entities.ts` already means the shared base of the subdomain `x`, and a folder holding only bare layer files IS the minimal subdomain; letting it also mean "the unit x's entities" would collide two readings with nothing in the file to separate them.
+  // The first segment is the top-level domain and is never a grouping node: a domain names a concern by being one, so `locale/locale.services.ts` is the `locale` unit OF the domain `locale`, however redundant that reads.
+  // Collapsing it would leave the file with no chain at all, which classifies as unrelated to the structure - and a file no rule can place is a file no rule enforces.
+  const leafHit = segs.length ? layerOf(stripExt(segs[segs.length - 1])) : null;
+  const unitName = leafHit ? leafHit.name : '';
+  const unitDirAt =
+    unitName !== '' && segs.length > 2 && segs[segs.length - 2] === unitName
+      ? segs.length - 2
+      : -1;
+
   const chain = [];
   let layer = null;
   let via = null;
@@ -59,6 +72,7 @@ export function classify(segs) {
   let name = null;
   let branchDir = false;
   for (let i = 0; i < segs.length; i++) {
+    if (i === unitDirAt) continue;
     const last = i === segs.length - 1;
     const seg = last ? stripExt(segs[i]) : segs[i];
     if (layer) { sub.push(seg); continue; }
@@ -80,8 +94,15 @@ export function classify(segs) {
     if (last) surface = seg;
     else chain.push(seg);
   }
-  return { chain, layer, via, sub, surface, name, branchDir, segs };
+  return { chain, layer, via, sub, surface, name, branchDir, segs, unitDir: unitDirAt >= 0 };
 }
+
+// Whether a file directly inside a directory belongs to the unit that directory would be a grouping node for: its own unit name is the directory's.
+// Anything else there declares a concern, and a directory that declares a concern is a subdomain rather than a grouping node.
+export const belongsToUnitDir = (fileName, dir) => {
+  const hit = layerOf(stripExt(fileName));
+  return !!hit && hit.name !== '' && hit.name === dir;
+};
 
 // Where does the current file sit in the ELDA structure?
 // A path-area test anchored on whole segments, so 'routes' matches '/routes/' and never '/my-routes-helper/'.

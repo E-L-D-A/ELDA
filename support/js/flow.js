@@ -4,9 +4,25 @@
 // A rank-bearing file is a terminus - a named re-export there re-owns the binding at that file's rank (the seam is the declaration, and a body arrives when logic forms), and the re-owning file's own edges are judged per-file at its own rank.
 // Tables are cached by mtime, so a lint pass or a rescan parses each conduit at most once and an editor session stays correct across edits.
 
-import { readFileSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { parseSync } from 'oxc-parser';
 import { norm, classify, isRelative } from './model.js';
+
+// A directory's entries, cached by mtime: the unit-directory guard has to know what else lives beside a file, and a lint pass asks that of the same directory once per file in it.
+const dirCache = new Map();
+export function dirEntries(absDir) {
+  const p = norm(absDir);
+  let st;
+  try { st = statSync(p); } catch { return null; }
+  const hit = dirCache.get(p);
+  if (hit && hit.mtimeMs === st.mtimeMs) return hit.entries;
+  let entries = null;
+  try {
+    entries = readdirSync(p, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory() }));
+  } catch { entries = null; }
+  dirCache.set(p, { mtimeMs: st.mtimeMs, entries });
+  return entries;
+}
 
 export const CODE_RE = /\.(m|c)?[tj]sx?$/;
 export const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs', '.d.ts'];

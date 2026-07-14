@@ -230,6 +230,25 @@ function buildGraph() {
     }
   }
 
+  // Reachability from the composition roots: the roots are the app's entry points (ROOT.5), and a file joins the reachable set the moment anything reachable references it.
+  // A file no root can reach ships to nobody. It is dead weight, or a capability deliberately ahead of its demand, and SURFACE.4 reads that as a review signal rather than a fault - so this counts and never gates.
+  const outEdges = new Map();
+  for (const e of edges) {
+    if (e.to == null) continue;
+    if (!outEdges.has(e.from)) outEdges.set(e.from, []);
+    outEdges.get(e.from).push(e.to);
+  }
+  const queue = files.filter((f) => f.role.kind === 'composition-root').map((f) => f.id);
+  const reachable = new Set(queue);
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of outEdges.get(queue[i]) ?? []) {
+      if (reachable.has(next)) continue;
+      reachable.add(next);
+      queue.push(next);
+    }
+  }
+  for (const f of files) f.reachable = reachable.has(f.id);
+
   const walker = createWalker({ srcDir, domainAlias, appAlias });
   return {
     app: norm(appDir).split('/').pop(),

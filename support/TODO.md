@@ -15,3 +15,7 @@ A whole-project pass over the resolved module graph, complementing the per-file 
 - **`no-deep-side-effects` unit semantics.** The rule reads "same directory = same unit" while the coupling rules read shared names; a side-effect import crossing unit names inside one directory currently passes. Align it with `unitOf` at its next touch.
 
 - **The undecidable-reference message cites one constraint for every role.** A specifier the analyzers cannot resolve, and a dynamic import with a computed specifier, both report as unjudged and both cite ROOT.1 - which is the composition root's constraint, and the wrong citation on a domain file's reach. The report is correct to fire (an undecidable reference is a real finding, since a reach that cannot be judged cannot be permitted); the citation needs to follow the reporting file's role.
+
+## Ergonomics
+
+- **Ship the visualizer as a VSCode extension.**

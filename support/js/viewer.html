@@ -159,6 +159,14 @@
     .counts .sev-laundered b {
       color: var(--laundered);
     }
+    /* Unreachable is a review signal rather than a breach (SURFACE.4), so it reads as absence: a hollow dot, and none of the severity colours. */
+    .counts .sev-dead .dot {
+      background: transparent;
+      box-shadow: inset 0 0 0 1px var(--muted);
+    }
+    .counts .sev-dead b {
+      color: var(--muted);
+    }
     .bottom {
       position: fixed;
       bottom: 0;
@@ -524,7 +532,7 @@
     #nondomains[hidden] {
       display: none;
     }
-    #core-box {
+    #core-box, #other-box {
       position: relative;
       border: 1px solid var(--line-strong);
       background: var(--box);
@@ -533,6 +541,14 @@
       box-shadow: var(--shadow);
       font: 600 11.5px var(--mono);
       color: var(--muted);
+    }
+    /* A file the classifier could not place carries no layer and no owner, so no rule is read on it. The box says so: dashed, because nothing here is held. */
+    #other-box {
+      border-style: dashed;
+      border-color: var(--bad);
+    }
+    #other-box[hidden] {
+      display: none;
     }
     .hide-btn {
       position: absolute;
@@ -822,7 +838,7 @@
       outline: 2px solid var(--hi-in);
       outline-offset: 1px;
     }
-    .root-block .chip, #core-box .chip {
+    .root-block .chip, #core-box .chip, #other-box .chip {
       margin: 2px 3px;
     }
 
@@ -936,9 +952,21 @@
       background: linear-gradient(110deg, var(--laundered), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
     }
     #issues .unresolved.item {
-      text-decoration: none;
       color: var(--muted);
-      display: block;
+    }
+    /* An unreachable file is not a breach, so it carries no severity stripe; only its path is actionable. */
+    #issues .unreachable.item {
+      color: var(--muted);
+    }
+    /* The path inside a finding is the way into the file: it underlines on hover so it reads as the link it is, while the item around it keeps its own click. */
+    #issues .item a.path {
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px dotted var(--line-strong);
+    }
+    #issues .item a.path:hover {
+      color: var(--fg);
+      border-bottom-color: var(--fg);
     }
 
     #tooltip {
@@ -1071,6 +1099,7 @@
       <div id="main">
         <div id="nondomains" hidden>
           <div id="core-box" hidden></div>
+          <div id="other-box" hidden></div>
         </div>
         <div id="domains"></div>
       </div>
@@ -1162,6 +1191,7 @@
       const p = place(f);
       if (p.area === "root") return "@root:" + p.root;
       if (p.area === "core") return "@core";
+      if (p.area === "other") return "@other";
       if (p.area === "domain") return p.domain;
       return null;
     }
@@ -1391,6 +1421,7 @@
     }
 
     // Non-domain roots render to the left of the domains, past the faint separator.
+    // A file the classifier could not place gets a box of its own beside core. Leaving it undrawn was the worse silence of the two: it is a file in the tree that no rule reads, and the diagram was the one place that could say so.
     function renderCoreBox(visible) {
       const box = $("core-box");
       const coreFiles = data.files
@@ -1402,7 +1433,17 @@
         hideBtn("@core"),
         ...coreFiles.map((f) => makeChip(f)),
       );
-      $("nondomains").hidden = box.hidden;
+      const otherBox = $("other-box");
+      const otherFiles = data.files
+        .filter((f) => place(f).area === "other" && visible(f))
+        .sort(byDeg);
+      otherBox.hidden = otherFiles.length === 0;
+      otherBox.replaceChildren(
+        "unclassified ",
+        hideBtn("@other"),
+        ...otherFiles.map((f) => makeChip(f)),
+      );
+      $("nondomains").hidden = box.hidden && otherBox.hidden;
     }
 
     // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
@@ -1715,6 +1756,8 @@
       const rootBlocks = data.options.roots.map((r) => ["@root:" + r.key, r.label]);
       if (data.files.some((f) => place(f).area === "core"))
         rootBlocks.push(["@core", "src/core"]);
+      if (data.files.some((f) => place(f).area === "other"))
+        rootBlocks.push(["@other", "unclassified"]);
       const domainBlocks = [
         ...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith("@"))),
       ]
@@ -2338,16 +2381,30 @@
           ...items.map(build),
         );
       };
-      const pinFrom = (e) => (ev) => {
+      // Clicking a finding reveals the file it names: the chip pins on the diagram and scrolls into view.
+      const pinId = (id) => (ev) => {
         ev.stopPropagation();
-        pinnedPath = data.files[e.from].path;
+        pinnedPath = data.files[id].path;
         applyPin();
-        chips.get(e.from)?.scrollIntoView({
+        chips.get(id)?.scrollIntoView({
           block: "center",
           inline: "center",
           behavior: "smooth",
         });
       };
+      const pinFrom = (e) => pinId(e.from);
+      // A finding names a file, and the name is the way into it: the path opens the editor, while the item around it still pins the chip on the diagram.
+      // Only the path is the link, so the two actions never compete for the same click.
+      const pathLink = (path) =>
+        h(
+          "a",
+          {
+            class: "path",
+            href: getEditorLink(path),
+            onclick: (ev) => ev.stopPropagation(),
+          },
+          path,
+        );
       const verdictItem = (e) =>
         h(
           "div",
@@ -2355,7 +2412,7 @@
             class: "item " + (e.tier === "invariant" ? "violation" : "smell"),
             onclick: pinFrom(e),
           },
-          h("div", {}, `${data.files[e.from].path} → `, h("b", {}, e.spec)),
+          h("div", {}, pathLink(data.files[e.from].path), " → ", h("b", {}, e.spec)),
           h("div", { class: "msg" }, e.verdict),
         );
       section(
@@ -2379,7 +2436,7 @@
               class: "item laundered",
               onclick: pinFrom(f),
             },
-            h("div", {}, `${data.files[f.from].path} ⇒ ${data.files[f.to].path}`),
+            h("div", {}, pathLink(data.files[f.from].path), " ⇒ ", pathLink(data.files[f.to].path)),
             h(
               "div",
               { class: "msg" },
@@ -2391,12 +2448,28 @@
         "Unresolved specifiers",
         data.edges.filter((e) => e.to == null),
         (e) =>
-          h("a", { class: "unresolved item", href: getEditorLink(data.files[e.from].path) }, `${data.files[e.from].path} → ${e.spec}`),
+          h(
+            "div",
+            { class: "unresolved item", onclick: pinFrom(e) },
+            pathLink(data.files[e.from].path),
+            " → ",
+            h("b", {}, e.spec),
+          ),
+      );
+      // A file no composition root can reach ships to nobody. SURFACE.4 reads that as a review signal - a domain may expose more than its consumers currently require - so it is listed, never scored as a breach.
+      const unreached = data.files.filter((f) => f.reachable === false);
+      section("Unreachable from any root", unreached, (f) =>
+        h(
+          "div",
+          { class: "unreachable item", onclick: pinId(f.id) },
+          pathLink(f.path),
+        ),
       );
       section(
         "Unclassified files",
         data.files.filter((f) => place(f).area === "other"),
-        (f) => h("div", { class: "item" }, f.path),
+        (f) =>
+          h("div", { class: "item", onclick: pinId(f.id) }, pathLink(f.path)),
       );
       if (issuesBody.childElementCount === 1)
         issuesBody.append(h("div", { class: "drawer-empty" }, "No findings"));
@@ -2411,6 +2484,7 @@
         stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
         stat(laundered, "laundered", laundered ? "sev-laundered" : "sev-zero"),
         stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
+        stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
       );
     }
 

@@ -30,8 +30,9 @@ import {
   publishVerdict,
   selfSurfaceVerdict,
   diagonalScope,
+  belongsToUnitDir,
 } from './model.js';
-import { createWalker, srcDirOf } from './flow.js';
+import { createWalker, dirEntries, srcDirOf } from './flow.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 
@@ -246,11 +247,11 @@ const noSelfSurface = {
     const role = fileRole(filename, compositionRoot, core);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
     const walker = walkerOf(filename, domainAlias, appAlias);
-    // The shared resolve-then-judge helper, so an unresolvable specifier keeps the shape reading here exactly as it does in `imports` and in the diagram.
-    // Judging only a resolved target would take the rule off every specifier the resolver does not model, and take it off silently.
+    // Only a resolved target is judged. A specifier that names no file cannot be judged at all, and guessing from its shape would report a dangling `./x` as a self-surface import - a verdict about a file that does not exist.
+    // The undecidability is not lost by the silence: `imports` reports every unresolvable in-tree specifier in its own right, so one rule owns that finding and this one stays quiet rather than doubling it with a guess.
     const flag = (node, spec) => {
-      const { t } = resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
-      const verdict = t && selfSurfaceVerdict(role, t);
+      const { t, found } = resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+      const verdict = found && t && selfSurfaceVerdict(role, t);
       if (verdict) context.report({ node, message: verdict });
     };
     return {
@@ -262,21 +263,40 @@ const noSelfSurface = {
   },
 };
 
-// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container.
+// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container, and a grouping node expresses a concern - a subdomain or a unit.
 // A directory named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one classification, and the tree stops encoding concerns at that node.
 // A layer-SUFFIXED directory (`layouts.services/`) is the same bucket wearing a file's name: it pretends to be one part while hiding a branch underneath - an undeclared subdomain dodging subdomain discipline.
-// Layer membership rides file names (`entities.ts`, `<name>.entities.ts`); a directory expresses a concern, which makes it a subdomain.
-// The analyzers still recognize both legacy layouts so a migrating codebase lints correctly; this rule is the migration's fix-list.
+// A UNIT directory (`back-nav/` holding `back-nav.*`) is the legitimate third shape, and it is transparent: it groups one unit's files so a crowded subdomain reads at a glance, and it carries no boundary of its own.
+// The reading only holds while the directory holds nothing else. A surface, a bare layer file, a second unit or a nested directory each make the directory MEAN something, and a directory that means something is a concern, which is a subdomain - so the two readings would both apply and neither would be true. The mixture reports here, on whatever is not part of the unit.
+// The analyzers still recognize the two legacy layouts so a migrating codebase lints correctly; this rule is the migration's fix-list.
 const noLayerBranches = {
   create(context) {
-    const m = filenameOf(context).match(/\/domains\/(.+)$/);
+    const filename = filenameOf(context);
+    const m = filename.match(/^(.*\/domains)\/(.+)$/);
     if (!m) return {};
-    const segs = m[1].split('/').filter(Boolean);
+    const [, domainsAbs, rel] = m;
+    const segs = rel.split('/').filter(Boolean);
     const dirs = segs.slice(0, -1);
     const bucket = dirs.find((s) => LAYERS.includes(s));
     if (bucket) {
       return {
         Program: (node) => context.report({ node, message: `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<name>.${bucket}.ts\`) and directories express concerns.` }),
+      };
+    }
+    // Walk the file's ancestors: a directory holding a file named for itself is a unit directory, and this file is intruding on it unless it sits directly inside and belongs to that same unit.
+    // The walk starts past the top-level domain, which names a concern by being one and is never a grouping node, so a domain holding a unit of its own name (`locale/locale.services.ts`) is redundant rather than mixed.
+    const leaf = segs[segs.length - 1];
+    for (let i = 1; i < dirs.length; i++) {
+      const dir = dirs[i];
+      const abs = `${domainsAbs}/${segs.slice(0, i + 1).join('/')}`;
+      const entries = dirEntries(abs);
+      if (!entries || !entries.some((e) => !e.dir && belongsToUnitDir(e.name, dir))) continue;
+      if (i === dirs.length - 1 && belongsToUnitDir(leaf, dir)) continue;
+      return {
+        Program: (node) => context.report({
+          node,
+          message: `ELDA LAYER.7: '${dir}/' is a unit directory - it groups the files of the unit '${dir}', carries no boundary, and its files are units of the enclosing subdomain. '${leaf}' is not part of that unit, so the directory declares a concern as well, and a directory that declares a concern is a subdomain. Take one reading: move '${leaf}' out to keep the grouping transparent, or drop the \`${dir}.\` prefix from the unit's files to declare the subdomain (and give it a surface).`,
+        }),
       };
     }
     const unitDir = dirs.find((s) => layerOf(s)?.name);
