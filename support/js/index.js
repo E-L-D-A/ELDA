@@ -19,10 +19,11 @@ import {
   classify,
   fileRole,
   inArea,
-  isRelative,
+  inTreeSpec,
   targetOf,
   targetOfPath,
   importVerdict,
+  unjudgedVerdict,
   lateralVerdict,
   landedVerdict,
   rootLandedVerdict,
@@ -77,10 +78,12 @@ const walkerOf = (filename, domainAlias, appAlias) => {
 // A specifier's trailing plain segment does not say whether it names a surface of the chain or a nested subdomain's barrel, and reading the shape alone forces a rule to accept a reference whenever EITHER reading is legal - a tolerance that buys silence on the ambiguity by spending it on everything the ambiguity overlaps.
 // The filesystem knows which file the specifier means, so the target is read off the resolved path and judged once.
 // Where resolution finds no file the tolerant reading stands, which keeps a broken path from manufacturing a finding; a root's landing walk reports that same unresolvable path separately, so the silence here is covered.
+// `found` says the specifier named a real file; `resolved` says the target was read off that file rather than guessed from the specifier's shape.
+// The two come apart, and conflating them reports every legal reach into pure core or a root's own module as undecidable: those resolve perfectly well and simply carry no domain target, which is a fact about the file and not a failure to find it.
 const resolvedTargetFor = (walker, filename, spec, domainAlias, appAlias) => {
   const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
-  const t = abs ? targetOfPath(abs) : null;
-  return t ? { t, resolved: true } : { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false };
+  if (abs) return { t: targetOfPath(abs), resolved: true, found: true };
+  return { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false, found: false };
 };
 
 // elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in model.js for the per-constraint reading).
@@ -107,8 +110,13 @@ const imports = {
     const walker = walkerOf(filename, domainAlias, appAlias);
     const targetFor = (spec) => resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
 
+    // In-tree code that names no file is undecidable, not innocent. Every role pays this, because a reach nobody can judge is a reach nobody is checking.
     const check = (node, spec) => {
-      const { t, resolved } = targetFor(spec);
+      const { t, resolved, found } = targetFor(spec);
+      if (walker && !found && inTreeSpec(spec, domainAlias, appAlias)) {
+        context.report({ node, message: unjudgedVerdict(role, spec, 'is shaped like in-tree code yet resolves to no file') });
+        return;
+      }
       if (!t) return;
       const verdict = importVerdict(role, t, domainAlias, resolved);
       if (verdict) context.report({ node, message: verdict });
@@ -118,20 +126,11 @@ const imports = {
     // The walk follows each value name to the file that owns it and judges it there, the way the diagonal rule already reads domain files.
     const isRoot = role.kind === 'composition-root';
     const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
-    // A specifier shaped like in-tree code is ELDA's business; a bare package name is outside its jurisdiction and stays exempt.
-    const inTree = (spec) =>
-      typeof spec === 'string' &&
-      (isRelative(spec) || spec.startsWith(domainAlias + '/') || spec.startsWith(appAlias + '/'));
     const landed = (node, spec, names) => {
       if (!walker || (names !== '*' && names.length === 0)) return;
       const found = walker.landings(filename, spec, names);
-      // In-tree code that resolves to no file is undecidable, not innocent: the reach cannot be judged, so it reports.
-      if (found == null) {
-        if (inTree(spec)) {
-          context.report({ node, message: `ELDA ROOT.1 (unjudged): '${spec}' is shaped like in-tree code yet resolves to no file, so where this binding lands cannot be judged. A composition root's reach has to be decidable.` });
-        }
-        return;
-      }
+      // An unresolvable specifier is reported by check(), for every role rather than this one alone.
+      if (found == null) return;
       for (const l of found) {
         const m = norm(l.path).match(/\/domains\/(.+)$/);
         if (!m) {

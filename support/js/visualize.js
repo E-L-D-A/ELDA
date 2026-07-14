@@ -14,7 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
-import { classify, diagonalVerdict, fileRole, importVerdict, isDataPath, isRelative, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, selfSurfaceVerdict, targetOf } from './model.js';
+import { classify, diagonalVerdict, fileRole, importVerdict, inTreeSpec, isDataPath, isRelative, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, selfSurfaceVerdict, targetOf, unjudgedVerdict } from './model.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -103,45 +103,75 @@ function buildGraph() {
     ...roots.map((r) => ({ root: r.key, dir: r.dir, file: r.file })),
     ...areaTargets(core).map((c) => ({ dir: c.dir, file: c.file })),
   ];
-  const files = [];
-  const byPath = new Map();
-
+  // Every file in the scanned areas, before anything is drawn.
+  const found = [];
   for (const area of areas) {
     const target = area.dir ?? area.file;
     if (!target || !existsSync(target)) continue;
     for (const abs of area.file ? [area.file] : walk(area.dir)) {
       const path = norm(abs.slice(appDir.length + 1));
       const kind = CODE_RE.test(path) ? 'code' : STYLE_RE.test(path) ? 'style' : isAsset(path) ? 'asset' : null;
-      if (!kind) continue;
-      let role = area.root ? { kind: 'composition-root', root: area.root } : fileRole('/' + path, compositionRoot, core);
-      // A pure-data asset carries no behaviour and classifies as vocabulary (SURFACE.6): entities of the subdomain its directory names.
-      if (kind === 'asset') {
-        const m = ('/' + path).match(/\/domains\/(.+)$/);
-        if (m) {
-          const c = classify(m[1].split('/').filter(Boolean));
-          role = c.chain.length > 0
-            ? { kind: 'domain', chain: c.chain, layer: c.layer ?? 'entities', via: 'asset', sub: c.sub, surface: null, name: c.surface ?? c.name }
-            : { kind: 'other' };
-        }
-      }
-      const id = files.length;
-      files.push({ id, path, kind, role });
-      byPath.set(path, id);
+      if (kind) found.push({ path, kind, root: area.root });
     }
   }
 
-  // Match a specifier's resolved path against the scanned set the way the bundler would: the exact path, then each source extension, then a directory barrel.
+  // The path a specifier names, or null for a bare package.
+  const specPath = (relDir, spec) => {
+    const bare = String(spec).split('?')[0];
+    if (bare.startsWith(domainAlias + '/')) return 'src/domains/' + bare.slice(domainAlias.length + 1);
+    if (bare.startsWith(appAlias + '/')) return 'src/' + bare.slice(appAlias.length + 1);
+    if (isRelative(bare)) return posixResolve(relDir, bare).slice(1);
+    return null;
+  };
+  // Match that path against a set of real paths the way the bundler would: the exact path, then each source extension, then a directory barrel.
+  const matchIn = (p, set) => {
+    if (p == null) return null;
+    if (set.has(p)) return p;
+    for (const ext of EXT_CANDIDATES) if (set.has(p + ext)) return p + ext;
+    for (const ext of EXT_CANDIDATES) if (set.has(p + '/index' + ext)) return p + '/index' + ext;
+    return null;
+  };
+  const dirOfPath = (p) => (p.lastIndexOf('/') < 0 ? '' : p.slice(0, p.lastIndexOf('/')));
+
+  // A data file joins the graph only when something imports it. A domain's README is data by the complement rule and belongs to no dependency, so drawing it would add a node with no edges and a badge for an extension nobody referenced.
+  // Code and stylesheets always draw: an unreferenced module is a review signal (SURFACE.4) the diagram should show, and knip is what prunes it.
+  const allPaths = new Set(found.map((f) => f.path));
+  const imported = new Set();
+  for (const f of found) {
+    if (f.kind !== 'code') continue;
+    const info = moduleInfo(join(appDir, f.path));
+    if (!info) continue;
+    for (const ref of info.refs) {
+      const hit = matchIn(specPath(dirOfPath(f.path), ref.spec), allPaths);
+      if (hit) imported.add(hit);
+    }
+  }
+
+  const files = [];
+  const byPath = new Map();
+  for (const f of found) {
+    if (f.kind === 'asset' && !imported.has(f.path)) continue;
+    let role = f.root ? { kind: 'composition-root', root: f.root } : fileRole('/' + f.path, compositionRoot, core);
+    // A pure-data asset carries no behaviour and classifies as vocabulary (SURFACE.6): entities of the subdomain its directory names.
+    if (f.kind === 'asset') {
+      const m = ('/' + f.path).match(/\/domains\/(.+)$/);
+      if (m) {
+        const c = classify(m[1].split('/').filter(Boolean));
+        role = c.chain.length > 0
+          ? { kind: 'domain', chain: c.chain, layer: c.layer ?? 'entities', via: 'asset', sub: c.sub, surface: null, name: c.surface ?? c.name }
+          : { kind: 'other' };
+      }
+    }
+    const id = files.length;
+    files.push({ id, path: f.path, kind: f.kind, role });
+    byPath.set(f.path, id);
+  }
+
   const resolveNode = (relDir, spec) => {
-    const bare = spec.split('?')[0];
-    let p = null;
-    if (bare.startsWith(domainAlias + '/')) p = 'src/domains/' + bare.slice(domainAlias.length + 1);
-    else if (bare.startsWith(appAlias + '/')) p = 'src/' + bare.slice(appAlias.length + 1);
-    else if (isRelative(bare)) p = posixResolve(relDir, bare).slice(1);
+    const p = specPath(relDir, spec);
     if (p == null) return { external: true, node: null };
-    if (byPath.has(p)) return { external: false, node: byPath.get(p) };
-    for (const ext of EXT_CANDIDATES) if (byPath.has(p + ext)) return { external: false, node: byPath.get(p + ext) };
-    for (const ext of EXT_CANDIDATES) if (byPath.has(p + '/index' + ext)) return { external: false, node: byPath.get(p + '/index' + ext) };
-    return { external: false, node: null };
+    const hit = matchIn(p, byPath);
+    return { external: false, node: hit == null ? null : byPath.get(hit) };
   };
 
   // The reference target read off the file a specifier actually resolved to, which is the resolved-path reading the plugin gets from targetOfPath.
@@ -172,12 +202,15 @@ function buildGraph() {
       const { external, node } = resolveNode(relDir, ref.spec);
       if (external) continue;
       // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
-      // A specifier that resolves to no scanned file keeps the tolerant reading, which is the plugin's fallback too.
       const resolved = targetOfNode(node);
       const t = resolved ?? targetOf(relPath, ref.spec, domainAlias, appAlias);
       let verdict = null;
       let tier = null;
-      if (t && file.role.kind !== 'other') {
+      // An in-tree specifier naming no file is undecidable, and the shape-only reading of one is the most permissive reading available: a dangling `./x` reads as a reference inside the importer's own subdomain, so a half-finished move would draw an all-grey diagram.
+      if (node == null && file.role.kind !== 'other' && inTreeSpec(ref.spec, domainAlias, appAlias)) {
+        verdict = unjudgedVerdict(file.role, ref.spec, 'is shaped like in-tree code yet resolves to no file');
+        tier = 'invariant';
+      } else if (t && file.role.kind !== 'other') {
         verdict = importVerdict(file.role, t, domainAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
         if (verdict) tier = 'invariant';
         else if (!ref.typeOnly && file.role.kind === 'domain') {

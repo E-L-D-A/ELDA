@@ -18,6 +18,21 @@ export const stripExt = (name) => String(name ?? '').replace(CODE_EXT_RE, '');
 export const isRelative = (spec) =>
   typeof spec === 'string' && (spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../'));
 
+// A specifier shaped like in-tree code is ELDA's business; a bare package name sits outside its jurisdiction and stays exempt.
+export const inTreeSpec = (spec, domainAlias, appAlias) =>
+  isRelative(spec) ||
+  (typeof spec === 'string' && (spec.startsWith(domainAlias + '/') || spec.startsWith(appAlias + '/')));
+
+// A reference the analyzers cannot resolve to a file. The target is unknown, so no invariant can be read on it at all.
+// Staying quiet here fails open in the worst available direction, because the shape-only fallback reads a dangling `./x` as a reference INSIDE the importer's own subdomain, which is the most permissive reading there is: move a file into a new directory and leave its imports behind, and every reach it makes turns into a same-subdomain read that nothing objects to.
+// So the undecidable reach reports, citing the invariants the reading role would otherwise have been judged against.
+export function unjudgedVerdict(role, spec, why) {
+  const cites = role.kind === 'composition-root' ? 'ROOT.1'
+    : role.kind === 'core' ? 'ROOT.6'
+    : 'LAYER.1 / SURFACE.3';
+  return `ELDA ${cites} (unjudged): '${spec}' ${why}, so the file it names, and with it the layer and owner this reference carries, cannot be read - and no invariant can be checked on it. A reach that cannot be judged cannot be permitted: give it a specifier that resolves.`;
+}
+
 // A file name reads RIGHT TO LEFT - `<name>.<layer>.<marker>...` - and the layer is the rightmost dot-segment that names a layer.
 // Everything left of it is the unit's name, and an empty name is the subdomain's own bare layer file; everything right of it is markers.
 // A marker is a coloring orthogonal to the layer axis: a runtime context (`.server`), a build convention (`.css` for a vanilla-extract module), a tooling suffix (`.stories`, `.spec`). There may be any number of them, under any name, and the model does not enumerate them.
@@ -239,7 +254,7 @@ export function judgeImport(role, t, domainAlias) {
   }
 
   if (r.kind === 'to-ancestor') {
-    return `ELDA ROOT.7: a subdomain never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); shared content extracts into a sibling subdomain.`;
+    return `ELDA ROOT.7: a subdomain never references its parent ('${t.chain.join('/') || t.chain[0] || ''}'); either unwrap the subdomain or extract its shared content into a sibling subdomain.`;
   }
 
   // r.kind === 'peer'

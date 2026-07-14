@@ -647,11 +647,25 @@
       gap: 16px 12px;
       padding: 12px 14px;
     }
-    /* The card behind a named subdomain's columns; spacer tracks push the cards apart while unit columns inside share the tighter base gap. */
+    /* The card behind a named subdomain's subtree; spacer tracks push sibling cards apart while unit columns inside share the tighter base gap. */
+    /* Nesting is unbounded, so depth is read as light rather than as indentation: each level sits on its parent and lifts a little further off the page, which keeps a deep subdomain legible without stealing width from its columns. */
     .subpanel {
       margin: -5px -6px -7px;
       border-radius: 10px;
       background: rgb(255 255 255 / 0.02);
+      border: 1px solid transparent;
+    }
+    .subpanel[data-depth="2"] {
+      background: rgb(255 255 255 / 0.035);
+      border-color: rgb(255 255 255 / 0.05);
+    }
+    .subpanel[data-depth="3"] {
+      background: rgb(255 255 255 / 0.05);
+      border-color: rgb(255 255 255 / 0.07);
+    }
+    .subpanel[data-depth="4"] {
+      background: rgb(255 255 255 / 0.065);
+      border-color: rgb(255 255 255 / 0.09);
     }
     /* The bare composer and the bare entities file lift out of the cake: the composer caps the (sub)domain as its sub-composition-root, the entities file underlies it as the shared base. */
     .subroot, .subbase {
@@ -920,6 +934,11 @@
     }
     #issues .item.laundered {
       background: linear-gradient(110deg, var(--laundered), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
+    }
+    #issues .unresolved.item {
+      text-decoration: none;
+      color: var(--muted);
+      display: block;
     }
 
     #tooltip {
@@ -1228,20 +1247,17 @@
     }
 
     // A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
+    // The file's real extension strips generically rather than off a list: a list omits whatever it has not met, which then survives into the name and shows up as a badge beside the one the extension already earned.
     function chipParts(f) {
-      const base = f.path
-        .split("/")
-        .pop()
-        .replace(/\.d\.ts$/, ".dts")
-        .replace(
-          /\.(tsx?|jsx?|mjs|cjs|css|scss|sass|less|svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i,
-          "",
-        );
+      const file = f.path.split("/").pop();
+      const base = /\.d\.ts$/.test(file)
+        ? file.replace(/\.d\.ts$/, ".dts")
+        : file.replace(/\.[^.]+$/, "");
       const segs = base.split(".");
       const label = segs[0];
       const badges = segs.slice(1).filter((s) => !ROWS.includes(s));
       if (f.kind === "style") badges.push("css");
-      if (f.kind === "asset") badges.push(f.path.split(".").pop());
+      if (f.kind === "asset") badges.push(file.split(".").pop().toLowerCase());
       if (f.role.via === "branch" || f.role.via === "unit-dir") badges.push("dir!");
       return { label, badges };
     }
@@ -1439,8 +1455,22 @@
 
       const domainsEl = $("domains");
       domainsEl.replaceChildren();
-      // The shared row template levels every layer row across the domain boxes; each box subgrids into it (domain title, subdomain groups, unit sub-columns, then the layer rows, then the hidden shelf).
-      domainsEl.style.gridTemplateRows = `auto auto auto auto auto repeat(${rowList.length}, auto) auto auto auto`;
+      // Nesting is unbounded, so the rows are cut for the deepest chain in the diagram rather than for a fixed two levels: each level of subdomain needs a head and a sub-root above the cake, and a shared base below it, and the whole thing is capped by the domain's own composer and floored by its own base.
+      // Every domain box subgrids into this one template, which is what levels each layer row across the diagram; a shallow domain simply leaves the deeper rows empty.
+      // The depth is read off every file rather than the visible ones, so hiding a subdomain never reflows the rows underneath.
+      let D = 1;
+      for (const f of data.files) {
+        const p = place(f);
+        if (p.area === "domain" && p.sub !== "")
+          D = Math.max(D, p.sub.split("/").length);
+      }
+      const headRow = (d) => 2 * d;
+      const rootRow = (d) => 2 * d + 1;
+      const COLHEAD_ROW = 2 * D + 2;
+      const layerRow = (i) => 2 * D + 3 + i;
+      const baseRow = (d) => 2 * D + 3 + rowList.length + (D - d);
+      const DOMBASE_ROW = 2 * D + 3 + rowList.length + D;
+      domainsEl.style.gridTemplateRows = `repeat(${rowList.length + 3 * D + 4}, auto)`;
       const dotFirst = (a, b) =>
         a === "" ? -1 : b === "" ? 1 : a.localeCompare(b);
 
@@ -1464,83 +1494,130 @@
       );
 
       for (const [name, subsOf] of sortedDomains) {
-        // Flatten the (subdomain, unit) tree into ordered sub-columns, laying explicit tracks so a thin spacer separates the subdomain groups while unit columns inside a group share the tighter base gap.
-        const subs = [...subsOf.keys()].sort(
-          (a, b) => at(subDeg, name, b) - at(subDeg, name, a) || dotFirst(a, b),
-        );
+        // The subdomains form a tree, not a list, so the columns are laid by walking it: a subdomain emits its own unit columns first, then each child's.
+        // That makes a subdomain's tracks contiguous with its descendants', which is what lets one card span exactly a subtree and a child's card sit inside its parent's.
+        // Every ancestor gets a node even when it holds no files of its own, since a chain is a path and a gap in it would strand the levels below.
+        const parentOf = (k) =>
+          k === "" ? null : k.split("/").slice(0, -1).join("/");
+        const nodes = new Set([...subsOf.keys(), ""]);
+        for (const k of [...nodes]) {
+          let p = parentOf(k);
+          while (p !== null) {
+            nodes.add(p);
+            p = parentOf(p);
+          }
+        }
+        const kids = new Map();
+        for (const k of nodes) {
+          const p = parentOf(k);
+          if (p === null) continue;
+          if (!kids.has(p)) kids.set(p, []);
+          kids.get(p).push(k);
+        }
         const columns = [];
         const groups = [];
         const tracks = [];
         let track = 2;
-        for (const sub of subs) {
-          const units = [...subsOf.get(sub).keys()].sort(
+        // `span` covers the whole subtree, which is what the card, the head and the bands take: a composer composes its children too, so its band must cap them.
+        // `ownSpan` covers only the subdomain's own unit columns, which is what the domain root's own dot-head takes.
+        const emit = (key, depth) => {
+          const start = track;
+          const units = [...(subsOf.get(key)?.keys() ?? [])].sort(
             (a, b) =>
-              at(colDeg, name, sub, b) - at(colDeg, name, sub, a) ||
+              at(colDeg, name, key, b) - at(colDeg, name, key, a) ||
               dotFirst(a, b),
           );
-          if (tracks.length) {
-            tracks.push("2px");
-            track++;
-          }
-          groups.push({ sub, start: track, span: units.length });
           for (const unit of units) {
             tracks.push("minmax(86px, max-content)");
-            columns.push({ sub, unit, rows: subsOf.get(sub).get(unit), track: track++ });
+            columns.push({
+              sub: key,
+              unit,
+              rows: subsOf.get(key).get(unit),
+              track: track++,
+            });
           }
-        }
+          const ownSpan = track - start;
+          const children = (kids.get(key) ?? []).sort(
+            (a, b) => at(subDeg, name, b) - at(subDeg, name, a) || dotFirst(a, b),
+          );
+          for (const child of children) {
+            if (tracks.length) {
+              tracks.push("2px");
+              track++;
+            }
+            emit(child, depth + 1);
+          }
+          if (track > start)
+            groups.push({
+              sub: key,
+              depth,
+              start,
+              span: track - start,
+              ownStart: start,
+              ownSpan,
+            });
+        };
+        emit("", 0);
+
         const grid = h("div", {
           class: "grid",
           style: `grid-template-columns: 14px${tracks.length ? " " + tracks.join(" ") : ""}`,
         });
-        for (const g of groups) {
-          // Named subdomains render as cards: a panel behind the group's own band (grouphead through its base), appended first so the cells paint above it.
-          if (g.sub !== "")
-            grid.append(
-              h("div", {
-                class: "subpanel",
-                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 2 / -2`,
-              }),
-            );
+        // Cards paint shallowest first, so a child's card lands on top of its parent's and the containment reads.
+        for (const g of [...groups].sort((a, b) => a.depth - b.depth)) {
+          if (g.sub === "") continue;
           grid.append(
-            h(
-              "div",
-              {
-                class: "grouphead",
-                style: `grid-column: ${g.start} / span ${g.span}; grid-row: 2`,
-                "data-domain": name,
-                "data-sub": g.sub,
-                title: "middle-click hides the subdomain",
-              },
-              g.sub === "" ? "·" : g.sub + " /",
-            ),
+            h("div", {
+              class: "subpanel",
+              "data-depth": String(Math.min(g.depth, 4)),
+              style: `grid-column: ${g.start} / span ${g.span}; grid-row: ${headRow(g.depth)} / ${baseRow(g.depth) + 1}`,
+            }),
           );
-          // A subdomain's own composer caps its columns as a nested sub-root; its base sits under its cake. The domain-root composer and base span the whole box, rendered once below.
-          if (g.sub !== "") {
-            const rootFiles = (subRoots.get(name)?.get(g.sub) ?? []).sort(byDeg);
-            if (rootFiles.length)
-              grid.append(
-                h(
-                  "div",
-                  {
-                    class: "subroot",
-                    style: `grid-column: ${g.start} / span ${g.span}; grid-row: 3`,
-                  },
-                  rootFiles.map((f) => makeChip(f)),
-                ),
-              );
-            const baseFiles = (subBases.get(name)?.get(g.sub) ?? []).sort(byDeg);
-            if (baseFiles.length)
-              grid.append(
-                h(
-                  "div",
-                  {
-                    class: "subbase",
-                    style: `grid-column: ${g.start} / span ${g.span}; grid-row: ${rowList.length + 5}`,
-                  },
-                  baseFiles.map((f) => makeChip(f)),
-                ),
-              );
-          }
+        }
+        for (const g of groups) {
+          // A named subdomain's head labels its whole subtree; the domain root's dot-head labels only the columns it owns directly.
+          const headStart = g.sub === "" ? g.ownStart : g.start;
+          const headSpan = g.sub === "" ? g.ownSpan : g.span;
+          if (headSpan > 0)
+            grid.append(
+              h(
+                "div",
+                {
+                  class: "grouphead",
+                  style: `grid-column: ${headStart} / span ${headSpan}; grid-row: ${headRow(Math.max(g.depth, 1))}`,
+                  "data-domain": name,
+                  "data-sub": g.sub,
+                  title: "middle-click hides the subdomain",
+                },
+                g.sub === "" ? "·" : g.sub.split("/").pop() + " /",
+              ),
+            );
+          if (g.sub === "") continue;
+          // The subdomain's own composer caps its subtree as a nested sub-root, and its bare entities file underlies the same span as the shared base.
+          const rootFiles = (subRoots.get(name)?.get(g.sub) ?? []).sort(byDeg);
+          if (rootFiles.length)
+            grid.append(
+              h(
+                "div",
+                {
+                  class: "subroot",
+                  style: `grid-column: ${g.start} / span ${g.span}; grid-row: ${rootRow(g.depth)}`,
+                },
+                rootFiles.map((f) => makeChip(f)),
+              ),
+            );
+          const baseFiles = (subBases.get(name)?.get(g.sub) ?? []).sort(byDeg);
+          if (baseFiles.length)
+            grid.append(
+              h(
+                "div",
+                {
+                  class: "subbase",
+                  style: `grid-column: ${g.start} / span ${g.span}; grid-row: ${baseRow(g.depth)}`,
+                },
+                baseFiles.map((f) => makeChip(f)),
+              ),
+            );
         }
         // The domain's own composer caps the whole box as its composition root; its shared base underlies everything. Both span every column.
         const domRoots = (subRoots.get(name)?.get("") ?? []).sort(byDeg);
@@ -1557,7 +1634,7 @@
           grid.append(
             h(
               "div",
-              { class: "subbase domainwide", style: `grid-column: 2 / -1; grid-row: ${rowList.length + 6}` },
+              { class: "subbase domainwide", style: `grid-column: 2 / -1; grid-row: ${DOMBASE_ROW}` },
               domBases.map((f) => makeChip(f)),
             ),
           );
@@ -1567,7 +1644,7 @@
               "div",
               {
                 class: "colhead",
-                style: `grid-column: ${col.track}; grid-row: 4`,
+                style: `grid-column: ${col.track}; grid-row: ${COLHEAD_ROW}`,
                 "data-domain": name,
                 "data-sub": col.sub,
                 "data-unit": col.unit,
@@ -1582,7 +1659,7 @@
           grid.append(
             h(
               "div",
-              { class: "rail", style: `grid-column: 1; grid-row: ${ri + 5}` },
+              { class: "rail", style: `grid-column: 1; grid-row: ${layerRow(ri)}` },
               rowHasFiles ? ROW_LABEL[row] : "",
             ),
           );
@@ -1592,7 +1669,7 @@
                 "div",
                 {
                   class: "cell " + row,
-                  style: `grid-column: ${col.track}; grid-row: ${ri + 5}`,
+                  style: `grid-column: ${col.track}; grid-row: ${layerRow(ri)}`,
                 },
                 (col.rows.get(row) ?? []).sort(byDeg).map((f) => makeChip(f)),
               ),
@@ -1742,11 +1819,15 @@
       if (fromBar || toBar) {
         const bar = fromBar ? pf : pt,
           other = fromBar ? pt : pf;
-        // A band spans its own subdomain's columns, and a domain-wide band (empty subdomain) spans the whole domain; an edge into that span drops vertically.
+        // A band spans its own subdomain's whole subtree, since a composer composes its nested children too, and a domain-wide band (empty subdomain) spans the whole domain; an edge into that span drops vertically.
+        const under = (bar, other) =>
+          bar.sub === "" ||
+          other.sub === bar.sub ||
+          other.sub.startsWith(bar.sub + "/");
         if (
           other.area === "domain" &&
           bar.domain === other.domain &&
-          (bar.sub === "" || bar.sub === other.sub)
+          under(bar, other)
         )
           return "v";
         // Outside its span, an equal-rank reference reads horizontally and anything else is a true diagonal.
@@ -2078,7 +2159,7 @@
         return;
       }
       if (e.ctrlKey || e.altKey) {
-        window.location.href = ("vscode://file/" + data.cwd + "/" + f.path);
+        window.location.href = getEditorLink(f.path);
       }
       pinnedPath = pinnedPath === f.path ? null : f.path;
       render();
@@ -2310,7 +2391,7 @@
         "Unresolved specifiers",
         data.edges.filter((e) => e.to == null),
         (e) =>
-          h("div", { class: "item" }, `${data.files[e.from].path} → ${e.spec}`),
+          h("a", { class: "unresolved item", href: getEditorLink(data.files[e.from].path) }, `${data.files[e.from].path} → ${e.spec}`),
       );
       section(
         "Unclassified files",
@@ -2405,6 +2486,10 @@
       es.onmessage = load;
     }
     await load();
+
+    function getEditorLink(path) {
+      return "vscode://file/" + data.cwd + "/" + path;
+    }
     </script>
   </body>
 </html>
