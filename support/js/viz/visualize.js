@@ -8,14 +8,21 @@
 // appDir is the app workspace holding src/ (defaults to the working directory); its .oxlintrc.json supplies the elda/imports options when present.
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
-import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, statSync, watch, writeFileSync } from 'node:fs';
-import { createServer } from 'node:http';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  watch,
+  writeFileSync,
+} from "node:fs";
+import { createServer } from "node:http";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { CODE_RE } from '../core/flow.js';
-import { STYLE_RE, buildGraph, isAsset, walk } from '../core/scan.js';
+import { CODE_RE } from "../core/flow.js";
+import { STYLE_RE, buildGraph, isAsset, walk } from "../core/scan.js";
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -27,43 +34,87 @@ let outFile = null;
 let open = true;
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
-  if (a === '--port') port = Number(args[++i]);
-  else if (a.startsWith('--port=')) port = Number(a.slice(7));
-  else if (a === '--out') outFile = args[++i];
-  else if (a.startsWith('--out=')) outFile = a.slice(6);
-  else if (a === '--no-open') open = false;
-  else if (a === '--help' || a === '-h') {
-    console.log('elda-viz [appDir] [--port N] [--out file.html] [--no-open]');
+  if (a === "--port") port = Number(args[++i]);
+  else if (a.startsWith("--port=")) port = Number(a.slice(7));
+  else if (a === "--out") outFile = args[++i];
+  else if (a.startsWith("--out=")) outFile = a.slice(6);
+  else if (a === "--no-open") open = false;
+  else if (a === "--help" || a === "-h") {
+    console.log("elda-viz [appDir] [--port N] [--out file.html] [--no-open]");
     process.exit(0);
   } else appDir = resolve(a);
 }
 
-const srcDir = join(appDir, 'src');
-if (!existsSync(join(srcDir, 'domains'))) {
-  console.error(`No src/domains under ${appDir}; pass the app workspace directory.`);
+const srcDir = join(appDir, "src");
+if (!existsSync(join(srcDir, "domains"))) {
+  console.error(
+    `No src/domains under ${appDir}; pass the app workspace directory.`,
+  );
   process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
 // Output: a standalone snapshot, or a live server with rescans pushed over SSE.
 
-const viewerPath = join(dirname(fileURLToPath(import.meta.url)), 'viewer.html');
-const viewerHtml = () => readFileSync(viewerPath, 'utf8');
+const here = dirname(fileURLToPath(import.meta.url));
+const viewerPath = join(here, "viewer.html");
+const viewerDir = join(here, "viewer");
+
+// The viewer is a shell plus ES modules under viewer/, assembled into one page here.
+// The modules import each other by bare `@viewer/<name>` specifiers; the import map this builds resolves them - to the served files when live, to inlined data: URLs in a --out snapshot - and the module graph loads from one entry.
+const FRAGMENTS = readdirSync(viewerDir);
+const fragmentPath = (name) => join(viewerDir, name);
+const specOf = (name) => `@viewer/${name.replace(/\.js$/, "")}`;
+const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
+
+// The shell with the import map and the entry module dropped in; `resolve` maps a module name to the URL its specifier points at.
+// The entry loads boot by URL rather than by specifier, because a script element's src is a URL and the import map only resolves the bare specifiers boot's own imports use; the map still carries @viewer/boot, since other modules import from it.
+function assemble(resolve) {
+  const imports = Object.fromEntries(
+    FRAGMENTS.map((name) => [specOf(name), resolve(name)]),
+  );
+  const block = `    <script type="importmap">\n${JSON.stringify({ imports }, null, 2)}\n    </script>`;
+  return readFileSync(viewerPath, "utf8").replace(
+    "    <!--VIEWER SCRIPTS-->",
+    block,
+  );
+}
+
+// Live: the browser fetches each module from the server, so INLINE stays null and the page reads /data.json.
+const viewerHtml = () => assemble((name) => `./viewer/${name}.js`);
+
+// Snapshot: every module is inlined as its own data: URL, with the scanned graph injected into state before it is encoded, so the file needs no server and no network.
+function snapshotHtml(graph) {
+  const dataUrl = (name) => {
+    let src = readFileSync(fragmentPath(name), "utf8");
+    if (name === "state") src = src.replace(DATA_RE, JSON.stringify(graph));
+    return `data:text/javascript;base64,${Buffer.from(src, "utf8").toString("base64")}`;
+  };
+  return assemble(dataUrl);
+}
+
 // Which viewer a page is running, sent alongside the graph.
-// A page reads its own stamp back on every load, and a stamp that moved is the one thing it cannot fix by redrawing: the markup and the script it is running are the ones this file no longer holds.
-const viewerStamp = () => String(statSync(viewerPath).mtimeMs);
+// A page reads its own stamp back on every load, and a stamp that moved is the one thing it cannot fix by redrawing: the markup and the modules it is running are the ones the server no longer holds.
+// The stamp is the newest mtime across the shell and every module, so editing any of them reaches an open page.
+const viewerStamp = () =>
+  String(
+    [viewerPath, ...FRAGMENTS.map(fragmentPath)].reduce(
+      (max, p) => Math.max(max, statSync(p).mtimeMs),
+      0,
+    ),
+  );
 
 // What one scan found: the graph's size, then each class of finding the whole-graph pass can see.
-const summary = (g) => [
-  `${g.files.length} files`,
-  `${g.edges.length} edges`,
-  `${g.flows.filter((f) => f.laundered).length} laundered findings`,
-  `${g.cycles.length} reference cycles`,
-].join(', ');
+const summary = (g) =>
+  [
+    `${g.files.length} files`,
+    `${g.edges.length} edges`,
+    `${g.flows.filter((f) => f.laundered).length} laundered findings`,
+    `${g.cycles.length} reference cycles`,
+  ].join(", ");
 
 if (outFile) {
-  const html = viewerHtml().replace(/\/\*\s*__DATA__\s*\*\/\s*null/, JSON.stringify(buildGraph(appDir)));
-  writeFileSync(resolve(outFile), html);
+  writeFileSync(resolve(outFile), snapshotHtml(buildGraph(appDir)));
   console.log(`Wrote ${resolve(outFile)}`);
   process.exit(0);
 }
@@ -72,18 +123,32 @@ let graph = buildGraph(appDir);
 const clients = new Set();
 
 const server = createServer((req, res) => {
-  const url = req.url.split('?')[0];
-  if (url === '/') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  const url = req.url.split("?")[0];
+  if (url === "/") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(viewerHtml());
-  } else if (url === '/data.json') {
-    res.writeHead(200, { 'content-type': 'application/json' });
+  } else if (url === "/data.json") {
+    res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ...graph, viewer: viewerStamp() }));
-  } else if (url === '/events') {
-    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-    res.write('retry: 1000\n\n');
+  } else if (url.startsWith("/viewer/")) {
+    // The viewer's own modules, served with a JavaScript MIME so the browser runs them as modules; the name is matched against the known list so the route reads no path the caller supplies.
+    const name = url.slice("/viewer/".length).replace(/\.js$/, "");
+    if (!FRAGMENTS.includes(name)) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+    res.end(readFileSync(fragmentPath(name), "utf8"));
+  } else if (url === "/events") {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    });
+    res.write("retry: 1000\n\n");
     clients.add(res);
-    req.on('close', () => clients.delete(res));
+    req.on("close", () => clients.delete(res));
   } else {
     res.writeHead(404);
     res.end();
@@ -95,30 +160,37 @@ const rescan = () => {
   clearTimeout(debounce);
   debounce = setTimeout(() => {
     graph = buildGraph(appDir);
-    for (const c of clients) c.write('data: reload\n\n');
+    for (const c of clients) c.write("data: reload\n\n");
     console.log(`Rescanned: ${summary(graph)}.`);
   }, 200);
 };
 
-// The viewer is served from disk on every request, so editing it changes what a new page runs while an open one carries on with the old.
-// Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer this file now holds.
+// The viewer is assembled from disk on every request, so editing the shell or any fragment changes what a new page runs while an open one carries on with the old.
+// Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer the server now holds.
+// Watching the fragment directory covers every fragment plus the shell beside it, so an edit to any of them reaches an open page.
 let viewerDebounce = null;
+const viewerChanged = () => {
+  clearTimeout(viewerDebounce);
+  viewerDebounce = setTimeout(() => {
+    for (const c of clients) c.write("data: reload\n\n");
+    if (clients.size)
+      console.log(
+        `Viewer changed; ${clients.size} open page${clients.size > 1 ? "s" : ""} reloading.`,
+      );
+  }, 100);
+};
 try {
-  watch(viewerPath, () => {
-    clearTimeout(viewerDebounce);
-    viewerDebounce = setTimeout(() => {
-      for (const c of clients) c.write('data: reload\n\n');
-      if (clients.size) console.log(`Viewer changed; ${clients.size} open page${clients.size > 1 ? 's' : ''} reloading.`);
-    }, 100);
-  });
+  watch(viewerPath, viewerChanged);
+  watch(viewerDir, viewerChanged);
 } catch {
-  console.warn('Could not watch the viewer; edits to it need a page reload.');
+  console.warn("Could not watch the viewer; edits to it need a page reload.");
 }
 
 // Recursive watch covers the whole src tree on Windows and macOS; where a runtime lacks it, fall back to one watcher per directory.
 try {
   watch(srcDir, { recursive: true }, (_e, name) => {
-    if (name && (CODE_RE.test(name) || STYLE_RE.test(name) || isAsset(name))) rescan();
+    if (name && (CODE_RE.test(name) || STYLE_RE.test(name) || isAsset(name)))
+      rescan();
   });
 } catch {
   const dirs = [srcDir];
@@ -134,9 +206,12 @@ server.listen(port, () => {
   console.log(`ELDA diagram for ${appDir}`);
   console.log(`${summary(graph)} -> ${url}`);
   if (open) {
-    const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
-      : process.platform === 'darwin' ? ['open', [url]]
-      : ['xdg-open', [url]];
-    spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).unref();
+    const cmd =
+      process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", url]]
+        : process.platform === "darwin"
+          ? ["open", [url]]
+          : ["xdg-open", [url]];
+    spawn(cmd[0], cmd[1], { stdio: "ignore", detached: true }).unref();
   }
 });
