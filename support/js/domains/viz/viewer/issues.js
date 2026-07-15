@@ -142,8 +142,9 @@ export function renderIssues() {
     );
   // A reference is named by where it starts, how it is written, what it asks for, and the bindings it takes, which is what survives a rescan.
   // The bindings are load-bearing: one file can import the same module twice, and those two references are one finding each.
+  // The names ride as an array of bindings or as the string '*' for a namespace or dynamic import, so the key takes either shape as it comes.
   const edgeItemKey = (e) =>
-    `${data.files[e.from].path}:${e.kind}:${e.spec}:${(e.names ?? []).join(",")}`;
+    `${data.files[e.from].path}:${e.kind}:${e.spec}:${Array.isArray(e.names) ? e.names.join(",") : e.names ?? ""}`;
   section(
     "Violations",
     data.edges.filter((e) => e.tier === "invariant"),

@@ -156,9 +156,15 @@ export function buildGraph(appDir) {
 
   const walker = createWalker({ srcDir, domainAlias, appAlias });
   const flows = expandFlows(files, edges, walker, appDir, byPath);
+  // Root glue draws in the bar of the root that reached it, and glue shared between roots gets a bar of its own, so every composition-root file has a place on the board.
+  const rootBars = roots.map((r) => ({ key: r.key, label: r.label }));
+  for (const f of files) {
+    const key = f.role.kind === 'composition-root' ? f.role.root : null;
+    if (key && !rootBars.some((r) => r.key === key)) rootBars.push({ key, label: key === '(shared)' ? 'shared root glue' : key });
+  }
   return {
     app: norm(appDir).split('/').pop(),
-    options: { domainAlias, appAlias, compositionRoot, core, roots: roots.map((r) => ({ key: r.key, label: r.label })) },
+    options: { domainAlias, appAlias, compositionRoot, core, roots: rootBars },
     files,
     edges,
     flows,

@@ -71,8 +71,9 @@ async function load() {
     loadPrefs();
     render();
   } catch (error) {
-    if (INLINE) return;
-    setLive(false);
+    // A failed fetch is the live indicator's business; a failed render is a viewer bug, and swallowing it leaves a half-drawn board with an empty drawer and no trace, which is the worst of the silences.
+    console.error(error);
+    if (!INLINE) setLive(false);
   }
 }
 

@@ -70,13 +70,19 @@ function inferChains(graph) {
     out.get(e.from).push(e);
   }
   const chainOf = new Map();
+  // Which root's reach carried the file: a file whose chain stays empty is that root's own glue, and the key says whose bar it draws in; glue two roots reach at once is shared glue.
+  const rootKeyOf = new Map();
   const roots = new Set(files.filter((f) => f.role.kind === 'composition-root').map((f) => f.id));
   const queue = [...roots];
-  for (const id of roots) chainOf.set(id, []);
+  for (const id of roots) {
+    chainOf.set(id, []);
+    rootKeyOf.set(id, files[id].role.root ?? '(glue)');
+  }
   let guard = 0;
   while (queue.length && guard++ < 200000) {
     const id = queue.shift();
     const chain = chainOf.get(id);
+    const rootKey = rootKeyOf.get(id);
     for (const e of out.get(id) ?? []) {
       let child;
       if (isRelative(e.spec)) {
@@ -87,13 +93,16 @@ function inferChains(graph) {
       }
       const prev = chainOf.get(e.to);
       const next = prev === undefined ? child : merge(prev, child);
-      if (prev === undefined || !same(prev, next)) {
+      const prevKey = rootKeyOf.get(e.to);
+      const nextKey = prevKey === undefined || prevKey === rootKey ? rootKey : '(shared)';
+      if (prev === undefined || !same(prev, next) || prevKey !== nextKey) {
         chainOf.set(e.to, next);
+        rootKeyOf.set(e.to, nextKey);
         if (!roots.has(e.to)) queue.push(e.to);
       }
     }
   }
-  return { chainOf, roots };
+  return { chainOf, rootKeyOf, roots };
 }
 
 // A role per file: kind and chain inferred from the graph, layer and surface from the name.
@@ -101,14 +110,14 @@ function inferChains(graph) {
 // A pure-data file is vocabulary (SURFACE.6): it classifies as its chain's entities and never as a surface, since a surface target passes every boundary rule and an asset must not ride that pass.
 // A file no reference reaches is a lone domain (kind 'other'); we can only lint the structure we can see, and a file the graph cannot place has none yet.
 export function graphRoles(graph) {
-  const { chainOf, roots } = inferChains(graph);
+  const { chainOf, rootKeyOf, roots } = inferChains(graph);
   const roles = new Map();
   for (const f of graph.files) {
     if (roots.has(f.id)) { roles.set(f.id, f.role); continue; }
     const chain = chainOf.get(f.id);
     if (chain === undefined) { roles.set(f.id, { kind: 'other', chain: [], ...nameRole(f.path) }); continue; }
     if (chain === CORE) { roles.set(f.id, { kind: 'core', chain: [], layer: null, surface: null, sub: [] }); continue; }
-    if (chain.length === 0) { roles.set(f.id, { kind: 'composition-root', chain: [], layer: null, surface: null, sub: [], root: '(glue)' }); continue; }
+    if (chain.length === 0) { roles.set(f.id, { kind: 'composition-root', chain: [], layer: null, surface: null, sub: [], root: rootKeyOf.get(f.id) ?? '(glue)' }); continue; }
     if (f.kind === 'asset') {
       roles.set(f.id, { kind: 'domain', chain, layer: 'entities', via: 'asset', surface: null, name: String(f.path).split('/').pop(), sub: [], asset: true });
       continue;
