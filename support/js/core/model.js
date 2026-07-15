@@ -38,7 +38,7 @@ export const layerOf = (stripped) => {
 };
 
 // Classify a path inside domains/ into its subdomain chain and its layer.
-// Directories express concerns: a plain-named directory is a nested subdomain (SURFACE.7); a layer-suffixed directory (`back-nav.adapters/`) and a bare layer-named directory are the two legacy layouts (recognized here, flagged by no-layer-branches per LAYER.7).
+// Directories express concerns: a plain-named directory is a nested subdomain (SURFACE.7); a layer-suffixed directory (`back-nav.adapters/`) and a bare layer-named directory are the two legacy layouts, recognized here so a migrating tree still classifies.
 // Layer membership otherwise rides the file name: the bare reserved names, or a `<name>.<layer>` suffix.
 // A trailing plain name is a surface: `index` the consumable barrel, `services` (a layer name, caught above) the runtime-composition surface, any other name a named surface.
 export function classify(segs) {
@@ -203,7 +203,7 @@ export function rel(a, b) {
 }
 
 // A services target in surface form is the runtime-composition surface itself, the thing a composer reaches; anything past it is internals.
-// The leaf layout spells it `x/services`, and the legacy layer-directory layout spells the same surface `x/services/index`. Both are the surface: the analyzers read the legacy layout correctly by promise (no-layer-branches flags the layout, and no rule misjudges it), so reading only the leaf spelling turns a graded OWNER.5 mounting into a hard boundary breach on a tree that has not migrated yet.
+// The leaf layout spells it `x/services`, and the legacy layer-directory layout spells the same surface `x/services/index`. Both are the surface: the analyzers read the legacy layout correctly by promise (no rule misjudges it), so reading only the leaf spelling turns a graded OWNER.5 mounting into a hard boundary breach on a tree that has not migrated yet.
 export const isServicesSurface = (t) => t.layer === 'services'
   && (t.sub.length === 0 || (t.via === 'branch' && t.sub.length === 1 && t.sub[0] === 'index'));
 

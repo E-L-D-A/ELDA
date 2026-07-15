@@ -24,6 +24,9 @@ import { fileURLToPath } from "node:url";
 import { CODE_RE } from "./core/parse.js";
 import { buildGraph } from "./core/scan.js";
 import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.js";
+import { styles } from './domains/viz/viewer.entities.css.js';
+import { html } from './domains/viz/viewer.entities.html.js';
+import { template } from './domains/viz/viewer.entities.template.js';
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -58,7 +61,6 @@ if (!existsSync(join(srcDir, "domains"))) {
 // Output: a standalone snapshot, or a live server with rescans pushed over SSE.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const viewerPath = join(here, "domains/viz/viewer.html");
 const viewerDir = join(here, "domains/viz/viewer");
 
 // The viewer is a shell plus ES modules under viewer/, assembled into one page here.
@@ -74,11 +76,7 @@ function assemble(resolve) {
   const imports = Object.fromEntries(
     FRAGMENTS.map((name) => [specOf(name), resolve(name)]),
   );
-  const block = `    <script type="importmap">\n${JSON.stringify({ imports }, null, 2)}\n    </script>`;
-  return readFileSync(viewerPath, "utf8").replace(
-    "    <!--VIEWER SCRIPTS-->",
-    block,
-  );
+  return html(styles, imports, template);
 }
 
 // Live: the browser fetches each module from the server, so INLINE stays null and the page reads /data.json.

@@ -16,15 +16,14 @@ import { readdirSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import { parseSync } from 'oxc-parser';
 
-import plugin from './index.js';
 import { norm } from './core/model.js';
 import { buildGraph } from './core/scan.js';
+import plugin from './index.js';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = norm(join(HERE, 'fixture'));
+const HERE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const FIXTURE = norm(join(HERE, 'default'));
 const OPTIONS = { domainAlias: '#', appAlias: '@', compositionRoot: 'routes', core: 'core' };
 
 function* walk(dir) {
@@ -113,6 +112,33 @@ if (list) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// imports reads its classification from the resolved graph rather than the file tree, so the island-bag
+// fixture above cannot prove it: those violations sit on files no root reaches, which the graph reads as
+// lone domains, and a lone domain reaching another is a legal cross-domain reference. A boundary rule needs
+// connected apps.
+//
+// `fixture-app` is a green app placed conventionally: imports must stay silent, or graph-classification
+// over-fires. `fixture-broken` reaches a peer domain's entities past its surface from a reachable use-case:
+// imports must catch it, or graph-classification is wired to nothing.
+const importsRule = plugin.rules['imports'];
+const firesOn = (dir) =>
+  [...walk(dir)]
+    .filter((f) => /\.(tsx?|jsx?)$/.test(f))
+    .flatMap((f) => run(importsRule, f, readFileSync(f, 'utf8')).map((msg) => ({ file: f.slice(dir.length + 1), msg })));
+const overFired = firesOn(norm(join(HERE, 'fixture-app')));
+const brokeFired = firesOn(norm(join(HERE, 'fixture-broken')));
+console.log(`${(brokeFired.length ? 'fires' : 'SILENT').padStart(6)}  ${'imports (broken app)'.padEnd(26)} ${brokeFired.length}`);
+console.log(`${(overFired.length ? ' OVER' : 'clean').padStart(6)}  ${'imports (green app)'.padEnd(26)} ${overFired.length}`);
+
+if (overFired.length) {
+  console.error(`\nimports over-fired on the green fixture-app, so graph-classification is too eager:`);
+  for (const h of overFired) console.error(`  ${h.file}: ${h.msg.slice(0, 100)}`);
+}
+if (!brokeFired.length) {
+  console.error(`\nimports stayed silent on fixture-broken's reachable SURFACE.3, so graph-classification is firing on nothing.`);
+}
+
 if (threw.length) {
   console.error(`\n${threw.length} rule(s) THREW - a host would have swallowed this and reported a clean tree:`);
   for (const t of threw) console.error(`  ${t}`);
@@ -129,5 +155,5 @@ if (decidable.length) {
   console.error(`\nA per-file rule reports on the cycle, so it no longer proves the graph pass: ${decidable.join(', ')}`);
   console.error('The cycle must be legal edge by edge; give the rule its own fixture violation and restore this one.');
 }
-if (threw.length || silent.length || unseen.length || decidable.length) process.exit(1);
-console.log(`\nAll ${fired.size} rules fire on the fixture, and the graph pass holds its cycle.`);
+if (threw.length || silent.length || unseen.length || decidable.length || overFired.length || !brokeFired.length) process.exit(1);
+console.log(`\nAll ${fired.size} rules fire on the fixture, the graph pass holds its cycle, and imports reads the graph: silent on the green app, firing on the broken one.`);

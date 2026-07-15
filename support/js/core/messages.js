@@ -25,15 +25,6 @@ export const awaitExpr = () => 'ELDA LAYER.4: await is not permitted in entities
 export const forAwait = () => 'ELDA LAYER.4: for-await is not permitted in entities/use-cases.';
 export const tryCatch = () => 'ELDA LAYER.4 (Outcome model): try/catch is not permitted in entities/use-cases; outcomes flow as typed branch values.';
 
-export const layerNamedDir = (bucket) =>
-  `ELDA LAYER.7: '${bucket}/' is a layer-named directory, a horizontal bucket; layer membership rides file names (\`${bucket}.ts\`, \`<name>.${bucket}.ts\`) and directories express concerns.`;
-
-export const unitDirTwoReadings = (dir, leaf) =>
-  `ELDA LAYER.7: '${dir}/' is a unit directory - it groups the files of the unit '${dir}', carries no boundary, and its files are units of the enclosing subdomain. '${leaf}' is not part of that unit, so the directory declares a concern as well, and a directory that declares a concern is a subdomain. Take one reading: move '${leaf}' out to keep the grouping transparent, or drop the \`${dir}.\` prefix from the unit's files to declare the subdomain (and give it a surface).`;
-
-export const layerSuffixedDir = (unitDir) =>
-  `ELDA LAYER.7: '${unitDir}/' is a layer-suffixed directory - a branch wearing a file's name. One part's files share a name (\`back-nav.adapters.tsx\` + \`back-nav.adapters.css\`); a grouping directory is a subdomain (a plain name, layer-suffixed files inside).`;
-
 // --- CHANNEL ----------------------------------------------------------------
 
 export const mutableExportDecl = (kind) =>

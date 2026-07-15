@@ -13,7 +13,6 @@
     ],
     "elda/no-surface-declarations": "warn",
     "elda/no-self-surface": "warn",
-    "elda/no-layer-branches": "warn",
     "elda/no-diagonal-reach": [
       "warn",
       { "acrossDomains": "warn", "acrossSubdomains": "warn", "withinSubdomain": "warn" }

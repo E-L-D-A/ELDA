@@ -14,7 +14,7 @@
     "presets": "node presets.mjs",
     "selftest": "node selftest.mjs",
     "test": "node presets.mjs && node selftest.mjs",
-    "selftest-viz": "node ./visualize.js ./fixture",
+    "selftest-viz": "node ./visualize.js ./fixtures/default",
     "selflint": "oxlint .",
     "selfviz": "node ./visualize.js ."
   },
@@ -23,7 +23,7 @@
     "domains",
     "presets.mjs",
     "selftest.mjs",
-    "fixture",
+    "fixtures",
     "adopting.json",
     "aligned.json",
     "justified.json",

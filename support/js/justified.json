@@ -7,7 +7,6 @@
     "elda/imports": "error",
     "elda/no-surface-declarations": "error",
     "elda/no-self-surface": "error",
-    "elda/no-layer-branches": "error",
     "elda/no-async-inner": "error",
     "elda/no-mutable-surface": "error",
     "elda/ambient-ownership": "error",

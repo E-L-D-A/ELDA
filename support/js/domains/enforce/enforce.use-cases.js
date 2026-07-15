@@ -3,8 +3,6 @@
 // The plugin object oxlint mounts, and the grade presets, are assembled in index.js from the rules map this file exports.
 
 import {
-  LAYERS,
-  layerOf,
   norm,
   classify,
   fileRole,
@@ -13,7 +11,6 @@ import {
   targetOf,
   targetOfPath,
   diagonalScope,
-  belongsToUnitDir,
 } from '../../core/model.js';
 import {
   importVerdict,
@@ -25,7 +22,9 @@ import {
   selfSurfaceVerdict,
 } from '../../core/verdicts.js';
 import { createWalker } from '../../core/flow.js';
-import { dirEntries, srcDirOf } from '../../core/parse.js';
+import { srcDirOf } from '../../core/parse.js';
+import { buildGraph } from '../../core/scan.js';
+import { graphRoles } from '../../core/ownership.js';
 import * as msg from '../../core/messages.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
@@ -69,6 +68,45 @@ const walkerOf = (filename, domainAlias, appAlias) => {
   return srcDir ? walkerFor(srcDir, domainAlias, appAlias) : null;
 };
 
+// The whole resolved graph for the app a file belongs to, built once and shared across the per-file passes.
+// A rule resolves its own edges through the walker one file at a time and drops what it found; the classifier the remodel is moving toward reads a file's domain and boundary off its position in the graph instead of its path, and that needs the graph kept.
+// So the same scan the visualizer runs is memoized here, keyed by app root, and the enforcer and the informer read one graph. The app root is the directory the scan resolves against - the tree holding `domains/`, or its parent when that tree is a `src/`.
+const graphs = new Map();
+const appRootOf = (filename) => {
+  const srcDir = srcDirOf(filename);
+  if (!srcDir) return null;
+  return srcDir.endsWith('/src') ? srcDir.slice(0, -'/src'.length) : srcDir;
+};
+const graphFor = (filename) => {
+  const appRoot = appRootOf(filename);
+  if (!appRoot) return null;
+  if (!graphs.has(appRoot)) graphs.set(appRoot, buildGraph(appRoot));
+  return graphs.get(appRoot);
+};
+
+// The graph-inferred role for a file, and a lookup for any resolved target, taken from the app's one graph.
+// This is where placement stops carrying information: a file's domain and boundary come from its position in the resolved graph (ownership.js), and only a file the graph cannot reach at all falls back to the path classification.
+const roleMaps = new Map();
+const rolesByPath = (graph) => {
+  let byPath = roleMaps.get(graph);
+  if (!byPath) {
+    byPath = new Map();
+    const roles = graphRoles(graph);
+    for (const f of graph.files) byPath.set(`${graph.cwd}/${f.path}`, roles.get(f.id));
+    roleMaps.set(graph, byPath);
+  }
+  return byPath;
+};
+const graphClassify = (filename, compositionRoot, core) => {
+  const graph = graphFor(filename);
+  if (!graph) return { role: fileRole(filename, compositionRoot, core), roleAt: () => null };
+  const byPath = rolesByPath(graph);
+  return {
+    role: byPath.get(filename) ?? fileRole(filename, compositionRoot, core),
+    roleAt: (abs) => byPath.get(norm(abs)) ?? null,
+  };
+};
+
 // Resolve first, judge second.
 // A specifier's trailing plain segment does not say whether it names a surface of the chain or a nested subdomain's barrel, and reading the shape alone forces a rule to accept a reference whenever EITHER reading is legal - a tolerance that buys silence on the ambiguity by spending it on everything the ambiguity overlaps.
 // The filesystem knows which file the specifier means, so the target is read off the resolved path and judged once.
@@ -99,11 +137,17 @@ const imports = {
   create(context) {
     const { domainAlias, appAlias, compositionRoot, core } = options(context);
     const filename = filenameOf(context);
-    const role = fileRole(filename, compositionRoot, core);
+    const { role, roleAt } = graphClassify(filename, compositionRoot, core);
     if (role.kind === 'other') return {};
 
     const walker = walkerOf(filename, domainAlias, appAlias);
-    const targetFor = (spec) => resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+    // The target's role is read from the same graph as the importer's; a specifier resolving to a file outside the graph falls back to the path.
+    const targetFor = (spec) => {
+      const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
+      const gr = abs ? roleAt(abs) : null;
+      if (gr) return { t: gr.kind === 'domain' || gr.kind === 'surface' ? gr : null, resolved: true, found: true };
+      return resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+    };
 
     // In-tree code that names no file is undecidable, not innocent. Every role pays this, because a reach nobody can judge is a reach nobody is checking.
     const check = (node, spec) => {
@@ -254,52 +298,6 @@ const noSelfSurface = {
       ExportNamedDeclaration: (node) => node.source && flag(node, node.source.value),
       ExportAllDeclaration: (node) => node.source && flag(node, node.source.value),
     };
-  },
-};
-
-// elda/no-layer-branches - LAYER.7: a layer is a classification, never a container, and a grouping node expresses a concern - a subdomain or a unit.
-// A directory named for a layer is a horizontal bucket: it accumulates unrelated concerns behind one classification, and the tree stops encoding concerns at that node.
-// A layer-SUFFIXED directory (`layouts.services/`) is the same bucket wearing a file's name: it pretends to be one part while hiding a branch underneath - an undeclared subdomain dodging subdomain discipline.
-// A UNIT directory (`back-nav/` holding `back-nav.*`) is the legitimate third shape, and it is transparent: it groups one unit's files so a crowded subdomain reads at a glance, and it carries no boundary of its own.
-// The reading only holds while the directory holds nothing else. A surface, a bare layer file, a second unit or a nested directory each make the directory MEAN something, and a directory that means something is a concern, which is a subdomain - so the two readings would both apply and neither would be true. The mixture reports here, on whatever is not part of the unit.
-// The analyzers still recognize the two legacy layouts so a migrating codebase lints correctly; this rule is the migration's fix-list.
-const noLayerBranches = {
-  create(context) {
-    const filename = filenameOf(context);
-    const m = filename.match(/^(.*\/domains)\/(.+)$/);
-    if (!m) return {};
-    const [, domainsAbs, rel] = m;
-    const segs = rel.split('/').filter(Boolean);
-    const dirs = segs.slice(0, -1);
-    const bucket = dirs.find((s) => LAYERS.includes(s));
-    if (bucket) {
-      return {
-        Program: (node) => context.report({ node, message: msg.layerNamedDir(bucket) }),
-      };
-    }
-    // Walk the file's ancestors: a directory holding a file named for itself is a unit directory, and this file is intruding on it unless it sits directly inside and belongs to that same unit.
-    // The walk starts past the top-level domain, which names a concern by being one and is never a grouping node, so a domain holding a unit of its own name (`locale/locale.services.ts`) is redundant rather than mixed.
-    const leaf = segs[segs.length - 1];
-    for (let i = 1; i < dirs.length; i++) {
-      const dir = dirs[i];
-      const abs = `${domainsAbs}/${segs.slice(0, i + 1).join('/')}`;
-      const entries = dirEntries(abs);
-      if (!entries || !entries.some((e) => !e.dir && belongsToUnitDir(e.name, dir))) continue;
-      if (i === dirs.length - 1 && belongsToUnitDir(leaf, dir)) continue;
-      return {
-        Program: (node) => context.report({
-          node,
-          message: msg.unitDirTwoReadings(dir, leaf),
-        }),
-      };
-    }
-    const unitDir = dirs.find((s) => layerOf(s)?.name);
-    if (unitDir) {
-      return {
-        Program: (node) => context.report({ node, message: msg.layerSuffixedDir(unitDir) }),
-      };
-    }
-    return {};
   },
 };
 
@@ -598,7 +596,6 @@ export const rules = {
   'imports': imports,
   'no-surface-declarations': noSurfaceDeclarations,
   'no-self-surface': noSelfSurface,
-  'no-layer-branches': noLayerBranches,
   'no-diagonal-reach': noDiagonalReach,
   'no-diagonal-reach-gate': noDiagonalReachGate,
   'no-service-coupling': noServiceCoupling,

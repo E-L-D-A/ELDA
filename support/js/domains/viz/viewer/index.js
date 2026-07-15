@@ -118,7 +118,3 @@ if (!INLINE) {
 }
 // The entry module's body runs after every module it imports has evaluated, so by here every definition and every piece of state is in place; this starts the first load.
 await load();
-
-export function getEditorLink(path) {
-  return "vscode://file/" + data.cwd + "/" + path;
-}
