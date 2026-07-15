@@ -22,7 +22,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CODE_RE } from "../core/flow.js";
-import { STYLE_RE, buildGraph, isAsset, walk } from "../core/scan.js";
+import { STYLE_RE, buildGraph, isAsset, srcRootOf, walk } from "../core/scan.js";
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -45,10 +45,10 @@ for (let i = 0; i < args.length; i++) {
   } else appDir = resolve(a);
 }
 
-const srcDir = join(appDir, "src");
+const srcDir = srcRootOf(appDir);
 if (!existsSync(join(srcDir, "domains"))) {
   console.error(
-    `No src/domains under ${appDir}; pass the app workspace directory.`,
+    `No domains/ or src/domains/ under ${appDir}; pass the app workspace directory.`,
   );
   process.exit(1);
 }
@@ -62,9 +62,9 @@ const viewerDir = join(here, "viewer");
 
 // The viewer is a shell plus ES modules under viewer/, assembled into one page here.
 // The modules import each other by bare `@viewer/<name>` specifiers; the import map this builds resolves them - to the served files when live, to inlined data: URLs in a --out snapshot - and the module graph loads from one entry.
-const FRAGMENTS = readdirSync(viewerDir);
-const fragmentPath = (name) => join(viewerDir, name);
-const specOf = (name) => `@viewer/${name.replace(/\.js$/, "")}`;
+const FRAGMENTS = readdirSync(viewerDir, { withFileTypes: false }).map(f => f.replace(/\.js$/, ""));
+const fragmentPath = (name) => join(viewerDir, `${name}.js`);
+const specOf = (name) => `@viewer/${name}`;
 const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
 
 // The shell with the import map and the entry module dropped in; `resolve` maps a module name to the URL its specifier points at.

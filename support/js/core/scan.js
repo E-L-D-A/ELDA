@@ -60,8 +60,13 @@ export function* walk(dir) {
   }
 }
 
+// The domains root is either a top-level `domains/` or one nested under `src/`, the same two-step the plugin's srcDirOf follows, so an app laid out either way both lints and draws.
+export function srcRootOf(appDir) {
+  return existsSync(join(appDir, 'domains')) ? appDir : join(appDir, 'src');
+}
+
 export function buildGraph(appDir) {
-  const srcDir = join(appDir, 'src');
+  const srcDir = srcRootOf(appDir);
   const { domainAlias, appAlias, compositionRoot, core } = readOptions(appDir);
   const roots = areaTargets(appDir, srcDir, compositionRoot);
   // Domains scan by directory; each composition root scans its directory or its single module and stamps every file with its root key, so the diagram draws one bar per root; each declared core scans as its own dependency-free block.
