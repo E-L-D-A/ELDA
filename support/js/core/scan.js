@@ -5,7 +5,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
+import { createWalker } from './flow.js';
+import { CODE_RE, EXT_CANDIDATES, moduleInfo } from './parse.js';
 import { cycles } from './graph.js';
 import { deepSideEffect } from './messages.js';
 import { classify, fileRole, inTreeSpec, isDataPath, isRelative, norm, posixResolve, targetOf } from './model.js';
@@ -159,7 +160,7 @@ export function buildGraph(appDir) {
   const edges = [];
   for (const file of files) {
     if (file.kind !== 'code') continue;
-    // The mtime-cached analysis from flow.js: the same references and binding tables the lint rule walks.
+    // The mtime-cached analysis from parse.js: the same references and binding tables the lint rule walks.
     const info = moduleInfo(join(appDir, file.path));
     if (!info) {
       console.warn(`Parse failed for ${file.path}`);

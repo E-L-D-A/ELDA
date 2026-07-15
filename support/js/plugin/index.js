@@ -34,7 +34,8 @@ import {
   publishVerdict,
   selfSurfaceVerdict,
 } from '../core/verdicts.js';
-import { createWalker, dirEntries, srcDirOf } from '../core/flow.js';
+import { createWalker } from '../core/flow.js';
+import { dirEntries, srcDirOf } from '../core/parse.js';
 import * as msg from '../core/messages.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');

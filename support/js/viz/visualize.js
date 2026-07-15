@@ -21,7 +21,7 @@ import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CODE_RE } from "../core/flow.js";
+import { CODE_RE } from "../core/parse.js";
 import { STYLE_RE, buildGraph, isAsset, srcRootOf, walk } from "../core/scan.js";
 
 // ---------------------------------------------------------------------------

@@ -1,101 +1,12 @@
-// Filesystem-backed binding-flow analysis, shared by the lint rules (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one graph.
-// A module's binding table says which export names it owns, which pass through to another module, and which modules `export *` forwards to; a walk follows an import name by name to where it lands, so a barrel import fans out only to the bindings the consumer really takes.
+// The binding-flow walk, shared by the lint rules (index.js) and the visualizer (visualize.js) so the enforcer and the informer walk one graph.
+// A walk follows an import name by name to where it lands, reading each conduit's binding table from parse.js, so a barrel import fans out only to the bindings the consumer really takes.
 // Only surfaces are transparent to the walk: they hold no rank and curate for outsiders, so what a consumer takes through them is judged where it lands.
 // A rank-bearing file is a terminus - a named re-export there re-owns the binding at that file's rank (the seam is the declaration, and a body arrives when logic forms), and the re-owning file's own edges are judged per-file at its own rank.
-// Tables are cached by mtime, so a lint pass or a rescan parses each conduit at most once and an editor session stays correct across edits.
+// The parse and read primitives live in parse.js; this file resolves specifiers against the filesystem and traverses the tables they yield.
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { parseSync } from 'oxc-parser';
-import { norm, classify, isRelative } from './model.js';
-
-// A directory's entries, cached by mtime: the unit-directory guard has to know what else lives beside a file, and a lint pass asks that of the same directory once per file in it.
-const dirCache = new Map();
-export function dirEntries(absDir) {
-  const p = norm(absDir);
-  let st;
-  try { st = statSync(p); } catch { return null; }
-  const hit = dirCache.get(p);
-  if (hit && hit.mtimeMs === st.mtimeMs) return hit.entries;
-  let entries = null;
-  try {
-    entries = readdirSync(p, { withFileTypes: true }).map((e) => ({ name: e.name, dir: e.isDirectory() }));
-  } catch { entries = null; }
-  dirCache.set(p, { mtimeMs: st.mtimeMs, entries });
-  return entries;
-}
-
-export const CODE_RE = /\.(m|c)?[tj]sx?$/;
-export const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs', '.d.ts'];
-
-// Every reference a module makes - static imports (side-effect ones have no entries), re-exports carrying a module request, literal dynamic imports - with the value-binding names each one requests ('*' is the whole module: a namespace object, a dynamic import), plus the module's own binding table.
-// oxc resolves `import {a}; export {a as b}` back to its module request, so a pass-through entry is any export carrying one; a re-exported namespace binding passes '*'.
-export function analyzeModule(path, code) {
-  const parsed = parseSync(path, code);
-  const refs = [];
-  const table = { owned: new Set(), pass: new Map(), allFrom: [] };
-  const nsOf = new Map();
-  for (const si of parsed.module.staticImports) {
-    const spec = si.moduleRequest.value;
-    const names = [];
-    for (const e of si.entries) {
-      if (e.isType) continue;
-      if (e.importName.kind === 'NamespaceObject') { names.push('*'); nsOf.set(e.localName.value, spec); }
-      else names.push(e.importName.kind === 'Default' ? 'default' : e.importName.name);
-    }
-    refs.push({
-      spec,
-      kind: si.entries.length === 0 ? 'side-effect' : 'import',
-      typeOnly: si.entries.length > 0 && si.entries.every((e) => e.isType),
-      names: names.includes('*') ? '*' : names,
-    });
-  }
-  for (const se of parsed.module.staticExports) {
-    const names = [];
-    let spec = null;
-    for (const e of se.entries) {
-      if (e.moduleRequest) {
-        spec = e.moduleRequest.value;
-        if (e.importName.kind === 'AllButDefault') {
-          table.allFrom.push(spec);
-          if (!e.isType) names.push('*');
-        } else {
-          const imported = e.importName.kind === 'Default' ? 'default' : e.importName.name;
-          if (e.exportName.kind === 'Name') table.pass.set(e.exportName.name, { spec, imported });
-          if (!e.isType) names.push(imported);
-        }
-      } else if (e.exportName.kind === 'Name') {
-        const ns = e.localName.kind === 'Name' && nsOf.get(e.localName.name);
-        if (ns) table.pass.set(e.exportName.name, { spec: ns, imported: '*' });
-        else table.owned.add(e.exportName.name);
-      } else if (e.exportName.kind === 'Default') {
-        table.owned.add('default');
-      }
-    }
-    if (spec) refs.push({ spec, kind: 'reexport', typeOnly: names.length === 0, names: names.includes('*') ? '*' : names });
-  }
-  for (const di of parsed.module.dynamicImports) {
-    const text = code.slice(di.moduleRequest.start, di.moduleRequest.end);
-    const m = text.match(/^(['"`])((?:(?!\1)[^\\$])*)\1$/);
-    if (m) refs.push({ spec: m[2], kind: 'dynamic', typeOnly: false, names: '*' });
-  }
-  return { refs, table };
-}
-
-// Parsed module info, cached by mtime. Returns null for a file that is not parseable code (a stylesheet, an asset): such a file owns whatever reaches it.
-const cache = new Map();
-export function moduleInfo(absPath) {
-  const p = norm(absPath);
-  let st;
-  try { st = statSync(p); } catch { return null; }
-  const hit = cache.get(p);
-  if (hit && hit.mtimeMs === st.mtimeMs) return hit.info;
-  let info = null;
-  if (CODE_RE.test(p)) {
-    try { info = analyzeModule(p, readFileSync(p, 'utf8')); } catch { info = null; }
-  }
-  cache.set(p, { mtimeMs: st.mtimeMs, info });
-  return info;
-}
+import { existsSync, statSync } from 'node:fs';
+import { classify, isRelative, norm } from './model.js';
+import { EXT_CANDIDATES, moduleInfo } from './parse.js';
 
 // A surface is a plain-named file inside domains/ (a barrel, a named surface): rank-less curation, the walk's only conduit.
 const isSurface = (absPath) => {
@@ -106,28 +17,6 @@ const isSurface = (absPath) => {
 };
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
-
-// The src directory of the app a file belongs to: the one holding `domains/`, which is what an alias like `#/x` resolves against.
-// A file inside the tree names it outright. A file outside it - a route tree, a server shell, a build config at the app root - is found by walking up and testing each level for `domains/` and for a `src/domains/` child, so a root that sits beside src rather than under it still resolves.
-// Cached per starting directory; a null result is cached too, so a file in a tree with no domains costs one walk.
-const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } };
-const srcDirs = new Map();
-export function srcDirOf(filename) {
-  const f = norm(filename);
-  const inside = f.match(/^(.*)\/domains\//);
-  if (inside) return inside[1];
-  const start = dirOf(f);
-  if (srcDirs.has(start)) return srcDirs.get(start);
-  let found = null;
-  let dir = start;
-  while (dir && dir.includes('/')) {
-    if (isDir(dir + '/domains')) { found = dir; break; }
-    if (isDir(dir + '/src/domains')) { found = dir + '/src'; break; }
-    dir = dirOf(dir);
-  }
-  srcDirs.set(start, found);
-  return found;
-}
 
 const normalizePath = (p) => {
   const out = [];
