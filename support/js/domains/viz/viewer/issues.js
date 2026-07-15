@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
 
-import { getEditorLink } from "@viewer/boot";
-import { applyPin } from "@viewer/focus";
-import { place } from "@viewer/placement";
-import { chips, h, render } from "@viewer/render";
+import { getEditorLink } from "./lib.js";
+import { applyPin } from "./focus.js";
+import { place } from "./placement.js";
+import { chips, h, render } from "./render.js";
 import {
   $,
   collapsed,
@@ -16,7 +16,7 @@ import {
   setPin,
   setPinCycle,
   setSelected,
-} from "@viewer/state";
+} from "./state.js";
 
 // A header stat: the count and its label; the severity stats add a dot that takes the severity color while the count is nonzero.
 const stat = (n, label, sev) =>

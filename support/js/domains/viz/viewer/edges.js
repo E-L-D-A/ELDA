@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // Edges.
 
-import { compactRow, isBarFile, place } from "@viewer/placement";
-import { chips, compactRep, cycleClosers, drawn, h } from "@viewer/render";
-import { $, ROW_LABEL, collapsed, data, edgeKey, svg, wrap } from "@viewer/state";
+import { compactRow, isBarFile, place } from "./placement.js";
+import { chips, compactRep, cycleClosers, drawn, h } from "./render.js";
+import { $, ROW_LABEL, collapsed, data, edgeKey, svg, wrap } from "./state.js";
 
 // The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
 let stickyPaths = [];

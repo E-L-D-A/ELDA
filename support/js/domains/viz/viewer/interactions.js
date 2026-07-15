@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // Interactions: delegated hover and pinning, grab panning, the tooltip.
 
-import { getEditorLink } from "@viewer/boot";
-import { edgeTip, endLabel } from "@viewer/edges";
-import { applyPin, blur, focus } from "@viewer/focus";
-import { place } from "@viewer/placement";
-import { compactFiles, drawn, render } from "@viewer/render";
+import { getEditorLink } from "./lib.js";
+import { edgeTip, endLabel } from "./edges.js";
+import { applyPin, blur, focus } from "./focus.js";
+import { place } from "./placement.js";
+import { compactFiles, drawn, render } from "./render.js";
 import {
   data,
   hiddenFiles,
@@ -17,7 +17,7 @@ import {
   setSelected,
   tooltip,
   wrap,
-} from "@viewer/state";
+} from "./state.js";
 
 // Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
 // The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.

@@ -1,5 +1,5 @@
 // The viewer, as ES modules the server assembles into one page.
-// Each file under viewer/ is a real module: it imports what it needs by a bare `@viewer/<name>` specifier and exports what the others use, and the import map in the shell resolves those specifiers - to the served files when live, to inlined data: URLs in a --out snapshot.
+// Each file under viewer/ is a real module: it imports its siblings by plain `./<name>.js` specifiers, which the browser and node resolve natively when the files are served or run in place; a --out snapshot inlines each module as a data: URL and carries an import map that re-points the same references at those URLs.
 // A module may reassign its own exported bindings and every importer sees the new value (live bindings), but no module may reassign a binding it imported. So state a single module owns lives here as an exported `let`; state that two modules would both write is reassigned only through a setter this module exports.
 // This module owns the session state and the smallest shared helpers; INLINE is the snapshot's inlined graph, left null on a served page and replaced by the graph in a --out file.
 

@@ -1,3 +1,4 @@
 import { cartService } from '#/cart/services';
 import { ordersService } from '#/orders/services';
-export const boot = () => { cartService(); ordersService(); };
+import { note } from '#/cart/summary';
+export const boot = () => { cartService(); ordersService(); return note; };

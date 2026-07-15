@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Focus: hovering or pinning a chip raises its edges and its neighbors; raising a cycle raises the set of files it encloses.
 
-import { adjIn, adjOut, chips } from "@viewer/render";
+import { adjIn, adjOut, chips } from "./render.js";
 import {
   $,
   cycleId,
@@ -14,7 +14,7 @@ import {
   setPinCycle,
   setSelected,
   svg,
-} from "@viewer/state";
+} from "./state.js";
 
 // What a focus reaches, each direction carrying its hop distance: downstream is what this file pulls in, upstream is what breaks when it changes.
 // One hop answers "who does it touch"; the reach toggle walks the closure, which is the question a reader asks of a tree they did not write.

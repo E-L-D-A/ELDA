@@ -3,12 +3,12 @@
 // This is the entry module: it imports the others so their bodies evaluate, and its own body runs last, wiring the header and starting the first load once every definition is in place.
 // interactions registers its handlers as a side effect and nothing takes its exports, so it is imported for effect; issues loads through render, which uses it.
 
-import "@viewer/interactions";
+import "./interactions.js";
 
-import { drawEdges, updateStickyEdges } from "@viewer/edges";
-import { applyPin } from "@viewer/focus";
-import { render } from "@viewer/render";
-import { $, INLINE, TOGGLES, data, loadPrefs, savePrefs, setData } from "@viewer/state";
+import { drawEdges, updateStickyEdges } from "./edges.js";
+import { applyPin } from "./focus.js";
+import { render } from "./render.js";
+import { $, INLINE, TOGGLES, data, loadPrefs, savePrefs, setData } from "./state.js";
 
 for (const id of TOGGLES)
   $(id).addEventListener("change", () => {

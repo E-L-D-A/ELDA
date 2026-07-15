@@ -1,2 +1,9 @@
 import { openCart } from './cart.use-cases';
-export const cartService = () => openCart();
+import { badLanding } from './bad-landing.use-cases';
+import { badDiagonal } from './bad-diagonal.services';
+import { badSelf } from './bad-self.entities';
+import { badLateral } from './bad-lateral.services';
+import { deepEffects } from './bad-effects.use-cases';
+import { drift } from './bad-mutable.entities';
+import { go } from './bad-async.use-cases';
+export const cartService = () => { openCart(); badLanding(); badDiagonal(); badSelf(); badLateral(); deepEffects(); go(); return drift; };

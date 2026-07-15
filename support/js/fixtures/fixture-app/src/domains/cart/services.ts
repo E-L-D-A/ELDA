@@ -1,3 +1,3 @@
 import { openCart } from './cart.use-cases';
-import { checkout } from './checkout';
-export const cartService = () => { openCart(); checkout(); };
+import { checkoutService } from './checkout/services';
+export const cartService = () => { openCart(); checkoutService(); };

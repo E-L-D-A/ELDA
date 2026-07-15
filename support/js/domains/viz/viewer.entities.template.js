@@ -1,3 +1,6 @@
+// The entry specifier is the one name the page, the served module routes, and a snapshot's import map all share, so it is declared once here and referenced everywhere else.
+export const ENTRY = './viewer/index.js';
+
 export const template = /* html */`
   <header>
     <h1>
@@ -54,5 +57,5 @@ export const template = /* html */`
   </div>
   <div id="tooltip"></div>
 
-  <script type="module">import '@viewer/boot';</script>
+  <script type="module">import '${ENTRY}';</script>
 `;

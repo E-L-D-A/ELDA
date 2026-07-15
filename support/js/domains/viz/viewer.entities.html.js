@@ -1,3 +1,4 @@
+// The page shape. A live page carries no import map - its modules load from their real URLs - so the map block renders only when an assembly supplies one.
 export const html = (style, importmap, body) => /* html */`<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -7,7 +8,7 @@ export const html = (style, importmap, body) => /* html */`<!DOCTYPE html>
     <style>
       ${style}
     </style>
-    <script type="importmap">${JSON.stringify(importmap)}</script>
+    ${importmap ? `<script type="importmap">${JSON.stringify(importmap)}</script>` : ''}
   </head>
   <body>
     ${body}

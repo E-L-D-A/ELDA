@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // DOM building.
 
-import { bundleEdges, drawEdges, edgeVisible } from "@viewer/edges";
-import { applyPin, focus } from "@viewer/focus";
-import { renderIssues } from "@viewer/issues";
+import { bundleEdges, drawEdges, edgeVisible } from "./edges.js";
+import { applyPin, focus } from "./focus.js";
+import { renderIssues } from "./issues.js";
 import {
   blockOf,
   chipParts,
@@ -12,7 +12,7 @@ import {
   place,
   threadComposers,
   toggleCollapse,
-} from "@viewer/placement";
+} from "./placement.js";
 import {
   $,
   ROWS,
@@ -26,7 +26,7 @@ import {
   savePrefs,
   setCollapsed,
   wrap,
-} from "@viewer/state";
+} from "./state.js";
 
 // Render owns the derived state it rebuilds every pass: the chip map keyed by file id, the drawn edge list, the cycle-closing edge set, the reach adjacency both ways, and the folded-domain aggregates.
 // Every module reads these; only render reassigns them, so they stay exported `let`s here rather than moving through a setter.

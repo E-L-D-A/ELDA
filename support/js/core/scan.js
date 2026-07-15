@@ -1,15 +1,17 @@
-// The graph assembly: classify every file the tree reader gathered, resolve every reference, and judge each one with the shared model.
+// The graph assembly: gather the files, resolve every reference, infer each file's role from its position in the resolved graph, and judge every reference with the shared model.
 // A per-file rule reads one file and its specifiers, so everything a whole-graph question needs is assembled here: the classified nodes, the authored edges, the landed flows behind the conduits, the reachable set, and the reference cycles the flows close.
-// The tree walk lives in tree.js and the module parsing in parse.js, so this file touches no filesystem of its own; the CLI (visualize.js) serves what it returns and the selftest asserts on it, so the diagram and the checks read one and the same graph.
+// The roles come from ownership.js - surface ownership over the edges, the same classification the lint rules read - so the diagram and the linter judge every edge identically; only the declared composition roots are taken from the scan's own areas.
+// The tree walk lives in tree.js and the module parsing in parse.js, so this file touches no filesystem of its own; the CLI (visualize.js) serves what it returns and the selftest asserts on it.
 
 import { join } from 'node:path';
 
 import { createWalker } from './flow.js';
+import { graphRoles } from './ownership.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.js';
 import { gatherFiles, readOptions, srcRootOf } from './tree.js';
 import { cycles } from './graph.js';
 import { deepSideEffect } from './messages.js';
-import { classify, fileRole, inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.js';
+import { inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.js';
 import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.js';
 
 export function buildGraph(appDir) {
@@ -17,11 +19,12 @@ export function buildGraph(appDir) {
   const { domainAlias, appAlias, compositionRoot, core } = readOptions(appDir);
   const { found, roots } = gatherFiles(appDir, srcDir, { compositionRoot, core });
 
-  // The path a specifier names, or null for a bare package.
+  // The path a specifier names, or null for a bare package; the alias prefixes resolve against the source root, wherever the app keeps it.
+  const srcBase = norm(srcDir).length > norm(appDir).length ? norm(srcDir).slice(norm(appDir).length + 1) + '/' : '';
   const specPath = (relDir, spec) => {
     const bare = String(spec).split('?')[0];
-    if (bare.startsWith(domainAlias + '/')) return 'src/domains/' + bare.slice(domainAlias.length + 1);
-    if (bare.startsWith(appAlias + '/')) return 'src/' + bare.slice(appAlias.length + 1);
+    if (bare.startsWith(domainAlias + '/')) return srcBase + 'domains/' + bare.slice(domainAlias.length + 1);
+    if (bare.startsWith(appAlias + '/')) return srcBase + bare.slice(appAlias.length + 1);
     if (isRelative(bare)) return posixResolve(relDir, bare).slice(1);
     return null;
   };
@@ -53,19 +56,9 @@ export function buildGraph(appDir) {
   const byPath = new Map();
   for (const f of found) {
     if (f.kind === 'asset' && !imported.has(f.path)) continue;
-    let role = f.root ? { kind: 'composition-root', root: f.root } : fileRole('/' + f.path, compositionRoot, core);
-    // A pure-data asset carries no behaviour and classifies as vocabulary (SURFACE.6): entities of the subdomain its directory names.
-    if (f.kind === 'asset') {
-      const m = ('/' + f.path).match(/\/domains\/(.+)$/);
-      if (m) {
-        const c = classify(m[1].split('/').filter(Boolean));
-        role = c.chain.length > 0
-          ? { kind: 'domain', chain: c.chain, layer: c.layer ?? 'entities', via: 'asset', sub: c.sub, surface: null, name: c.surface ?? c.name }
-          : { kind: 'other' };
-      }
-    }
     const id = files.length;
-    files.push({ id, path: f.path, kind: f.kind, role });
+    // Only the declared roots carry a role up front; every other file's role is inferred from the resolved graph once the edges exist.
+    files.push({ id, path: f.path, kind: f.kind, role: f.root ? { kind: 'composition-root', root: f.root } : { kind: 'other' } });
     byPath.set(f.path, id);
   }
 
@@ -76,15 +69,7 @@ export function buildGraph(appDir) {
     return { external: false, node: hit == null ? null : byPath.get(hit) };
   };
 
-  // The reference target read off the file a specifier actually resolved to, which is the resolved-path reading the plugin gets from targetOfPath.
-  // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.
-  const targetOfNode = (node) => {
-    if (node == null) return null;
-    const f = files[node];
-    if (f.role.kind !== 'domain' && f.role.kind !== 'surface') return null;
-    return { ...f.role, asset: f.kind === 'asset' };
-  };
-
+  // Pass one: resolve every reference. The chains need the whole edge set before any file can be placed, so nothing is judged yet.
   const edges = [];
   for (const file of files) {
     if (file.kind !== 'code') continue;
@@ -94,41 +79,59 @@ export function buildGraph(appDir) {
       console.warn(`Parse failed for ${file.path}`);
       continue;
     }
-    const refs = info.refs;
-    const relPath = '/' + file.path;
     // A root config file sits at the app root with no directory segment, so an absent slash resolves relatives against the app root itself.
     const slash = file.path.lastIndexOf('/');
     const relDir = slash < 0 ? '' : file.path.slice(0, slash);
-    const importerDir = (relPath.match(/\/domains\/(.+)$/)?.[1] ?? '').split('/').slice(0, -1).join('/');
-    for (const ref of refs) {
+    for (const ref of info.refs) {
       const { external, node } = resolveNode(relDir, ref.spec);
       if (external) continue;
-      // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
-      const resolved = targetOfNode(node);
-      const t = resolved ?? targetOf(relPath, ref.spec, domainAlias, appAlias);
-      let verdict = null;
-      let tier = null;
-      // An in-tree specifier naming no file is undecidable, and the shape-only reading of one is the most permissive reading available: a dangling `./x` reads as a reference inside the importer's own subdomain, so a half-finished move would draw an all-grey diagram.
-      if (node == null && file.role.kind !== 'other' && inTreeSpec(ref.spec, domainAlias, appAlias)) {
-        verdict = unjudgedVerdict(file.role, ref.spec, 'is shaped like in-tree code yet resolves to no file');
-        tier = 'invariant';
-      } else if (t && file.role.kind !== 'other') {
-        verdict = importVerdict(file.role, t, domainAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
-        if (verdict) tier = 'invariant';
-        else if (!ref.typeOnly && file.role.kind === 'domain') {
-          verdict = diagonalVerdict(file.role, t);
-          if (verdict) tier = 'invariant';
-          else {
-            verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'adapters');
-            if (verdict) tier = 'smell';
-          }
-        }
-        if (!verdict && ref.kind === 'side-effect' && t.segs && t.segs.slice(0, -1).join('/') !== importerDir) {
-          verdict = deepSideEffect(ref.spec);
-          tier = 'smell';
+      edges.push({ from: file.id, to: node, spec: ref.spec, kind: ref.kind, typeOnly: ref.typeOnly, names: ref.names, verdict: null, tier: null });
+    }
+  }
+
+  // The roles, read off the resolved graph: surface ownership decides each file's domain and chain, and the name decides its layer (ownership.js).
+  const roles = graphRoles({ files, edges, options: { domainAlias, appAlias } });
+  for (const f of files) f.role = roles.get(f.id) ?? f.role;
+
+  // The reference target read off the file a specifier actually resolved to.
+  // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.
+  const targetOfNode = (node) => {
+    if (node == null) return null;
+    const f = files[node];
+    if (f.role.kind !== 'domain' && f.role.kind !== 'surface') return null;
+    return { ...f.role, asset: f.kind === 'asset' };
+  };
+  const dirOf = (p) => (p.lastIndexOf('/') < 0 ? '' : p.slice(0, p.lastIndexOf('/')));
+
+  // Pass two: judge every reference with the inferred roles - the same ladder the lint rules climb.
+  for (const e of edges) {
+    const file = files[e.from];
+    const relPath = '/' + file.path;
+    // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
+    const resolved = targetOfNode(e.to);
+    const t = resolved ?? targetOf(relPath, e.spec, domainAlias, appAlias);
+    // An in-tree specifier naming no file is undecidable, and the shape-only reading of one is the most permissive reading available: a dangling `./x` reads as a reference inside the importer's own subdomain, so a half-finished move would draw an all-grey diagram.
+    if (e.to == null && file.role.kind !== 'other' && inTreeSpec(e.spec, domainAlias, appAlias)) {
+      e.verdict = unjudgedVerdict(file.role, e.spec, 'is shaped like in-tree code yet resolves to no file');
+      e.tier = 'invariant';
+      continue;
+    }
+    if (t && file.role.kind !== 'other') {
+      e.verdict = importVerdict(file.role, t, domainAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
+      if (e.verdict) e.tier = 'invariant';
+      else if (!e.typeOnly && file.role.kind === 'domain') {
+        e.verdict = diagonalVerdict(file.role, t);
+        if (e.verdict) e.tier = 'invariant';
+        else {
+          e.verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'adapters');
+          if (e.verdict) e.tier = 'smell';
         }
       }
-      edges.push({ from: file.id, to: node, spec: ref.spec, kind: ref.kind, typeOnly: ref.typeOnly, names: ref.names, verdict, tier });
+    }
+    // A side-effect import reaching past its own directory hides an effect in the graph (SURFACE.5); co-location is the directory itself, wherever it lives.
+    if (!e.verdict && e.kind === 'side-effect' && e.to != null && file.role.kind !== 'other' && dirOf(files[e.to].path) !== dirOf(file.path)) {
+      e.verdict = deepSideEffect(e.spec);
+      e.tier = 'smell';
     }
   }
 

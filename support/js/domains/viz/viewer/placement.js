@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Placement: where a file renders, derived from the role the scanner assigned.
 
-import { render } from "@viewer/render";
-import { ROWS, collapsed, data, savePrefs } from "@viewer/state";
+import { render } from "./render.js";
+import { ROWS, collapsed, data, savePrefs } from "./state.js";
 
 // The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
 export function blockOf(f) {

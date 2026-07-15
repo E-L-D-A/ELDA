@@ -9,24 +9,21 @@
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  watch,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, watch, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { CODE_RE } from "./core/parse.js";
 import { buildGraph } from "./core/scan.js";
 import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.js";
-import { styles } from './domains/viz/viewer.entities.css.js';
-import { html } from './domains/viz/viewer.entities.html.js';
-import { template } from './domains/viz/viewer.entities.template.js';
+import {
+  moduleForUrl,
+  moduleSource,
+  viewerPage,
+  viewerSnapshot,
+  viewerStamp,
+  watchViewer,
+} from "./domains/viz/services.js";
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -59,49 +56,7 @@ if (!existsSync(join(srcDir, "domains"))) {
 
 // ---------------------------------------------------------------------------
 // Output: a standalone snapshot, or a live server with rescans pushed over SSE.
-
-const here = dirname(fileURLToPath(import.meta.url));
-const viewerDir = join(here, "domains/viz/viewer");
-
-// The viewer is a shell plus ES modules under viewer/, assembled into one page here.
-// The modules import each other by bare `@viewer/<name>` specifiers; the import map this builds resolves them - to the served files when live, to inlined data: URLs in a --out snapshot - and the module graph loads from one entry.
-const FRAGMENTS = readdirSync(viewerDir, { withFileTypes: false }).map(f => f.replace(/\.js$/, ""));
-const fragmentPath = (name) => join(viewerDir, `${name}.js`);
-const specOf = (name) => `@viewer/${name}`;
-const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
-
-// The shell with the import map and the entry module dropped in; `resolve` maps a module name to the URL its specifier points at.
-// The entry loads boot by URL rather than by specifier, because a script element's src is a URL and the import map only resolves the bare specifiers boot's own imports use; the map still carries @viewer/boot, since other modules import from it.
-function assemble(resolve) {
-  const imports = Object.fromEntries(
-    FRAGMENTS.map((name) => [specOf(name), resolve(name)]),
-  );
-  return html(styles, imports, template);
-}
-
-// Live: the browser fetches each module from the server, so INLINE stays null and the page reads /data.json.
-const viewerHtml = () => assemble((name) => `./viewer/${name}.js`);
-
-// Snapshot: every module is inlined as its own data: URL, with the scanned graph injected into state before it is encoded, so the file needs no server and no network.
-function snapshotHtml(graph) {
-  const dataUrl = (name) => {
-    let src = readFileSync(fragmentPath(name), "utf8");
-    if (name === "state") src = src.replace(DATA_RE, JSON.stringify(graph));
-    return `data:text/javascript;base64,${Buffer.from(src, "utf8").toString("base64")}`;
-  };
-  return assemble(dataUrl);
-}
-
-// Which viewer a page is running, sent alongside the graph.
-// A page reads its own stamp back on every load, and a stamp that moved is the one thing it cannot fix by redrawing: the markup and the modules it is running are the ones the server no longer holds.
-// The stamp is the newest mtime across the shell and every module, so editing any of them reaches an open page.
-const viewerStamp = () =>
-  String(
-    [viewerPath, ...FRAGMENTS.map(fragmentPath)].reduce(
-      (max, p) => Math.max(max, statSync(p).mtimeMs),
-      0,
-    ),
-  );
+// The pages come assembled from the viz domain's services surface: a live page loads the viewer modules from their served URLs, and a snapshot arrives with every module inlined as a data: URL and the graph injected.
 
 // What one scan found: the graph's size, then each class of finding the whole-graph pass can see.
 const summary = (g) =>
@@ -113,7 +68,7 @@ const summary = (g) =>
   ].join(", ");
 
 if (outFile) {
-  writeFileSync(resolve(outFile), snapshotHtml(buildGraph(appDir)));
+  writeFileSync(resolve(outFile), viewerSnapshot(buildGraph(appDir)));
   console.log(`Wrote ${resolve(outFile)}`);
   process.exit(0);
 }
@@ -123,22 +78,17 @@ const clients = new Set();
 
 const server = createServer((req, res) => {
   const url = req.url.split("?")[0];
+  // The services surface knows which URLs are viewer modules; everything the route serves is a real module, with a JavaScript MIME so the browser runs it as one.
+  const module = moduleForUrl(url);
   if (url === "/") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(viewerHtml());
+    res.end(viewerPage());
   } else if (url === "/data.json") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ...graph, viewer: viewerStamp() }));
-  } else if (url.startsWith("/viewer/")) {
-    // The viewer's own modules, served with a JavaScript MIME so the browser runs them as modules; the name is matched against the known list so the route reads no path the caller supplies.
-    const name = url.slice("/viewer/".length).replace(/\.js$/, "");
-    if (!FRAGMENTS.includes(name)) {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
+  } else if (module != null) {
     res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
-    res.end(readFileSync(fragmentPath(name), "utf8"));
+    res.end(moduleSource(module));
   } else if (url === "/events") {
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -164,9 +114,9 @@ const rescan = () => {
   }, 200);
 };
 
-// The viewer is assembled from disk on every request, so editing the shell or any fragment changes what a new page runs while an open one carries on with the old.
+// The viewer modules are read from disk on every request, so editing one changes what a new page runs while an open one carries on with the old.
 // Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer the server now holds.
-// Watching the fragment directory covers every fragment plus the shell beside it, so an edit to any of them reaches an open page.
+// The shell entities are code this process imported, so an edit to them takes a restart.
 let viewerDebounce = null;
 const viewerChanged = () => {
   clearTimeout(viewerDebounce);
@@ -179,8 +129,7 @@ const viewerChanged = () => {
   }, 100);
 };
 try {
-  watch(viewerPath, viewerChanged);
-  watch(viewerDir, viewerChanged);
+  watchViewer(viewerChanged);
 } catch {
   console.warn("Could not watch the viewer; edits to it need a page reload.");
 }

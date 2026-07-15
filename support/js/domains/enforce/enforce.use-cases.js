@@ -1,10 +1,9 @@
 // The ELDA lint rules: each reads a file's role and its references from the oxlint / ESTree host, judges every reference with the shared model and verdicts, and reports.
-// The path classification lives in model.js and the reference verdicts in verdicts.js, shared with the dependency visualizer so the linter and the diagram judge every edge identically.
+// The roles come from the resolved graph (ownership.js) through the same scan the visualizer runs, so the linter and the diagram judge every edge identically; the reference verdicts live in verdicts.js, and the path reading survives only as the fallback for a file no graph holds.
 // The plugin object oxlint mounts, and the grade presets, are assembled in index.js from the rules map this file exports.
 
 import {
   norm,
-  classify,
   fileRole,
   inArea,
   inTreeSpec,
@@ -92,7 +91,7 @@ const rolesByPath = (graph) => {
   if (!byPath) {
     byPath = new Map();
     const roles = graphRoles(graph);
-    for (const f of graph.files) byPath.set(`${graph.cwd}/${f.path}`, roles.get(f.id));
+    for (const f of graph.files) byPath.set(`${graph.cwd}/${f.path}`, { ...roles.get(f.id), asset: f.kind === 'asset' });
     roleMaps.set(graph, byPath);
   }
   return byPath;
@@ -119,6 +118,15 @@ const resolvedTargetFor = (walker, filename, spec, domainAlias, appAlias) => {
   return { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false, found: false };
 };
 
+// The target's role read from the same graph as the importer's: the resolved file's inferred role when the graph holds it, the path reading when it does not.
+// A resolved target of kind core, root, or other carries no boundary a reference rule can read, so it judges as no target at all rather than as a path guess about a file the graph already placed.
+const graphTargetFor = (roleAt, walker, filename, spec, domainAlias, appAlias) => {
+  const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
+  const gr = abs ? roleAt(abs) : null;
+  if (gr) return { t: gr.kind === 'domain' || gr.kind === 'surface' ? gr : null, resolved: true, found: true };
+  return resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+};
+
 // elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in verdicts.js for the per-constraint reading).
 // Targets are resolved against the filesystem before they are judged, so each reference is read as the one file it means.
 // The graded lateral smells are the separate warn-level rules (no-service-coupling, no-adapter-coupling).
@@ -141,13 +149,7 @@ const imports = {
     if (role.kind === 'other') return {};
 
     const walker = walkerOf(filename, domainAlias, appAlias);
-    // The target's role is read from the same graph as the importer's; a specifier resolving to a file outside the graph falls back to the path.
-    const targetFor = (spec) => {
-      const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
-      const gr = abs ? roleAt(abs) : null;
-      if (gr) return { t: gr.kind === 'domain' || gr.kind === 'surface' ? gr : null, resolved: true, found: true };
-      return resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
-    };
+    const targetFor = (spec) => graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
 
     // In-tree code that names no file is undecidable, not innocent. Every role pays this, because a reach nobody can judge is a reach nobody is checking.
     const check = (node, spec) => {
@@ -225,7 +227,7 @@ const imports = {
 const noSurfaceDeclarations = {
   create(context) {
     const { compositionRoot, core } = options(context);
-    const role = fileRole(filenameOf(context), compositionRoot, core);
+    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
     if (role.kind !== 'surface') return {};
     return {
       Program: (program) => {
@@ -282,13 +284,13 @@ const noSelfSurface = {
   create(context) {
     const { domainAlias, appAlias, compositionRoot, core } = options(context);
     const filename = filenameOf(context);
-    const role = fileRole(filename, compositionRoot, core);
+    const { role, roleAt } = graphClassify(filename, compositionRoot, core);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
     const walker = walkerOf(filename, domainAlias, appAlias);
     // Only a resolved target is judged. A specifier that names no file cannot be judged at all, and guessing from its shape would report a dangling `./x` as a self-surface import - a verdict about a file that does not exist.
     // The undecidability is not lost by the silence: `imports` reports every unresolvable in-tree specifier in its own right, so one rule owns that finding and this one stays quiet rather than doubling it with a guess.
     const flag = (node, spec) => {
-      const { t, found } = resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+      const { t, found } = graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
       const verdict = found && t && selfSurfaceVerdict(role, t);
       if (verdict) context.report({ node, message: verdict });
     };
@@ -316,14 +318,13 @@ function lateralCoupling(layer) {
       }],
     },
     create(context) {
-      const { domainAlias, appAlias } = options(context);
+      const { domainAlias, appAlias, compositionRoot, core } = options(context);
       const filename = filenameOf(context);
-      const m = filename.match(/\/domains\/(.+)$/);
-      if (!m) return {};
-      const role = classify(m[1].split('/').filter(Boolean));
-      if (role.layer !== layer || role.chain.length === 0) return {};
+      const { role, roleAt } = graphClassify(filename, compositionRoot, core);
+      if (role.kind !== 'domain' || role.layer !== layer || role.chain.length === 0) return {};
+      const walker = walkerOf(filename, domainAlias, appAlias);
       const flag = (node, spec) => {
-        const t = targetOf(filename, spec, domainAlias, appAlias);
+        const { t } = graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
         const verdict = lateralVerdict(role, t, layer);
         if (verdict) context.report({ node, message: verdict });
       };
@@ -396,7 +397,7 @@ function diagonalReach(tier) {
       );
       if (mine.size === 0) return {};
       const filename = filenameOf(context);
-      const role = fileRole(filename, compositionRoot, core);
+      const { role, roleAt } = graphClassify(filename, compositionRoot, core);
       if (role.kind !== 'domain') return {};
       const walker = walkerOf(filename, domainAlias, appAlias);
       const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
@@ -409,7 +410,7 @@ function diagonalReach(tier) {
         if (names !== '*' && names.length === 0) return;
         const found = walker && walker.landings(filename, spec, names);
         if (found == null) { judge(node, targetOf(filename, spec, domainAlias, appAlias)); return; }
-        for (const l of found) judge(node, targetOfPath(l.path), l.via);
+        for (const l of found) judge(node, roleAt(l.path) ?? targetOfPath(l.path), l.via);
       };
       return {
         ImportDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
@@ -446,9 +447,9 @@ const noPenetration = {
 };
 
 // elda/no-deep-side-effects - SURFACE.5: a side-effect-only import (`import './x'`, no binding) runs another module for effect with nothing named crossing the edge.
-// Inside a unit that is fine - a co-located stylesheet is part of the unit - and the composition root composes global effects without restriction (ROOT.2).
-// The smell is a side-effect import that reaches *past the unit* into another module: a deep effect that co-location would make honest, or a named value would make visible.
-// External packages (a polyfill, a vendor stylesheet) are not a reach into the domain tree and pass.
+// In the file's own directory that is fine - a co-located stylesheet is part of the unit, and co-location is the directory itself, wherever it lives - and the composition root composes global effects without restriction (ROOT.2).
+// The smell is a side-effect import that reaches past that directory into another module: a deep effect that co-location would make honest, or a named value would make visible.
+// External packages (a polyfill, a vendor stylesheet) resolve to no in-tree file and pass; an in-tree specifier that resolves nowhere is the imports rule's own finding.
 // Warn-level and separately togglable.
 const noDeepSideEffects = {
   meta: {
@@ -465,15 +466,14 @@ const noDeepSideEffects = {
   create(context) {
     const { domainAlias, appAlias, compositionRoot, core } = options(context);
     const filename = filenameOf(context);
-    const role = fileRole(filename, compositionRoot, core);
+    const { role } = graphClassify(filename, compositionRoot, core);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
-    const m = filename.match(/\/domains\/(.+)$/);
-    if (!m) return {};
-    const importerDir = m[1].split('/').filter(Boolean).slice(0, -1).join('/');
+    const walker = walkerOf(filename, domainAlias, appAlias);
+    const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
     const flag = (node, spec) => {
-      const t = targetOf(filename, spec, domainAlias, appAlias);
-      if (!t) return; // An external or bare package is not a reach into the domain tree.
-      if (t.segs && t.segs.slice(0, -1).join('/') === importerDir) return; // Same unit: co-located.
+      const abs = walker && walker.resolveSpec(filename, spec);
+      if (!abs) return;
+      if (dirOf(norm(abs)) === dirOf(filename)) return;
       context.report({ node, message: msg.deepSideEffect(spec) });
     };
     return {
@@ -487,10 +487,9 @@ const noDeepSideEffects = {
 // elda/no-async-inner - LAYER.4 and the Outcome model: async / await / try-catch stay out of the inner layers (wrapped at adapters into channel-conforming values; outcomes are typed branch values).
 const noAsyncInner = {
   create(context) {
-    const m = filenameOf(context).match(/\/domains\/(.+)$/);
-    if (!m) return {};
-    const c = classify(m[1].split('/').filter(Boolean));
-    if (c.layer !== 'entities' && c.layer !== 'use-cases') return {};
+    const { compositionRoot, core } = options(context);
+    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
+    if (role.kind !== 'domain' || (role.layer !== 'entities' && role.layer !== 'use-cases')) return {};
     const reportAsync = (node) => node.async && context.report({ node, message: msg.asyncFn() });
     return {
       AwaitExpression: (node) => context.report({ node, message: msg.awaitExpr() }),
@@ -519,7 +518,9 @@ function patternNames(id, out) {
 
 const noMutableSurface = {
   create(context) {
-    if (!/\/domains\//.test(filenameOf(context))) return {};
+    const { compositionRoot, core } = options(context);
+    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
+    if (role.kind !== 'domain' && role.kind !== 'surface') return {};
     return {
       Program(program) {
         const mutable = new Set();
