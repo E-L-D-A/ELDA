@@ -14,7 +14,9 @@
     "presets": "node plugin/presets.mjs",
     "selftest": "node selftest.mjs",
     "test": "node plugin/presets.mjs && node selftest.mjs",
-    "selftest-viz": "node ./viz/visualize.js ./fixture"
+    "selftest-viz": "node ./viz/visualize.js ./fixture",
+    "selflint": "oxlint .",
+    "selfviz": "node ./viz/visualize.js ."
   },
   "files": [
     "core",
