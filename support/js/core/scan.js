@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { CODE_RE, EXT_CANDIDATES, createWalker, moduleInfo } from './flow.js';
 import { cycles } from './graph.js';
 import { deepSideEffect } from './messages.js';
-import { classify, diagonalVerdict, fileRole, importVerdict, inTreeSpec, isDataPath, isRelative, landedVerdict, lateralVerdict, norm, posixResolve, rootLandedVerdict, selfSurfaceVerdict, targetOf, unjudgedVerdict } from './model.js';
+import { classify, fileRole, inTreeSpec, isDataPath, isRelative, norm, posixResolve, targetOf } from './model.js';
+import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.js';
 
 // ---------------------------------------------------------------------------
 // Project options, read from the app's .oxlintrc.json when it configures elda/imports; the config may carry // comments, so strip them before parsing.

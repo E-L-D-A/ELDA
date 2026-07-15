@@ -22,6 +22,10 @@ import {
   inTreeSpec,
   targetOf,
   targetOfPath,
+  diagonalScope,
+  belongsToUnitDir,
+} from '../core/model.js';
+import {
   importVerdict,
   unjudgedVerdict,
   lateralVerdict,
@@ -29,9 +33,7 @@ import {
   rootLandedVerdict,
   publishVerdict,
   selfSurfaceVerdict,
-  diagonalScope,
-  belongsToUnitDir,
-} from '../core/model.js';
+} from '../core/verdicts.js';
 import { createWalker, dirEntries, srcDirOf } from '../core/flow.js';
 import * as msg from '../core/messages.js';
 
@@ -88,7 +90,7 @@ const resolvedTargetFor = (walker, filename, spec, domainAlias, appAlias) => {
   return { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false, found: false };
 };
 
-// elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in model.js for the per-constraint reading).
+// elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in verdicts.js for the per-constraint reading).
 // Targets are resolved against the filesystem before they are judged, so each reference is read as the one file it means.
 // The graded lateral smells are the separate warn-level rules (no-service-coupling, no-adapter-coupling).
 const imports = {
@@ -229,7 +231,7 @@ const noSurfaceDeclarations = {
 // elda/no-self-surface - LAYER.1 / SURFACE.3: a domain's surface is what it shows its consumers, and a domain is not a consumer of itself.
 // This is the mirror of no-surface-declarations, and the two close the same hole from opposite sides: a surface holds no rank, so a binding DECLARED there has no layer to be judged at, and a binding TAKEN from there arrives with no layer either.
 // The taking side is the sharper of the two, because the consumable surface legally carries use-cases (SURFACE.2): a file at entities or use-cases rank that imports its own barrel can take an outer-layer binding through it, and LAYER.1 - a per-file rule reading the specifier - sees a rankless surface and passes. The landing walk does not cover the gap, since it grades flows landing below the consumer's rank and this inversion lands above.
-// The verdict is selfSurfaceVerdict in model.js; the target must be resolved for the rule to see anything, because a self-reference by alias (`#/shell/viewport` from inside `shell/viewport`) reads syntactically as a reach at the parent's surface and only the resolved path reveals it as the subdomain's own.
+// The verdict is selfSurfaceVerdict in verdicts.js; the target must be resolved for the rule to see anything, because a self-reference by alias (`#/shell/viewport` from inside `shell/viewport`) reads syntactically as a reach at the parent's surface and only the resolved path reveals it as the subdomain's own.
 const noSelfSurface = {
   meta: {
     schema: [{
@@ -310,7 +312,7 @@ const noLayerBranches = {
   },
 };
 
-// elda/no-service-coupling and elda/no-adapter-coupling - OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows); the verdict logic and the remedy texts are lateralVerdict / LATERAL in model.js.
+// elda/no-service-coupling and elda/no-adapter-coupling - OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows); the verdict logic and the remedy texts are lateralVerdict / LATERAL in verdicts.js.
 // Warn-level - smells, not hard breaches - and separately togglable.
 function lateralCoupling(layer) {
   return {
@@ -352,7 +354,7 @@ function lateralCoupling(layer) {
 const noServiceCoupling = lateralCoupling('services');
 const noAdapterCoupling = lateralCoupling('adapters');
 
-// elda/no-diagonal-reach - SURFACE.5's geometry, enforced on landings: every value reference is followed name by name through surfaces and re-export chains (flow.js) to the files that own the bindings, and each landing is judged by landedVerdict in model.js - the in-subdomain diagonal, and its cross-boundary generalization (the diagrams draw every cross-boundary arrow at equal rank, so a landed value flow below the consumer's own rank is a diagonal no row draws).
+// elda/no-diagonal-reach - SURFACE.5's geometry, enforced on landings: every value reference is followed name by name through surfaces and re-export chains (flow.js) to the files that own the bindings, and each landing is judged by landedVerdict in verdicts.js - the in-subdomain diagonal, and its cross-boundary generalization (the diagrams draw every cross-boundary arrow at equal rank, so a landed value flow below the consumer's own rank is a diagonal no row draws).
 // The direct reference is the walk's zero-hop case, so this subsumes the direct-only check; a specifier that resolves to no file keeps the spec-classified direct judgment, so a broken path never hides a finding.
 // Severity grows with the ownership regime the launder crossed and never with the distance it travelled (diagonalScope in model.js draws the line), and the rule's options map each class onto a lint level:
 //   withinSubdomain    no surface crossed at all - the mildest, a naming-honesty smell between sibling units (default 'warn');
