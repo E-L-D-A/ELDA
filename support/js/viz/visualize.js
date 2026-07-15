@@ -22,7 +22,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CODE_RE } from "../core/parse.js";
-import { STYLE_RE, buildGraph, isAsset, srcRootOf, walk } from "../core/scan.js";
+import { buildGraph } from "../core/scan.js";
+import { STYLE_RE, isAsset, srcRootOf, walk } from "../core/tree.js";
 
 // ---------------------------------------------------------------------------
 // CLI arguments.

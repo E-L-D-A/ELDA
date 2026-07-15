@@ -1,93 +1,21 @@
-// The scan: walk an app's declared areas, classify every file, resolve every reference, and judge each one with the shared model.
+// The graph assembly: classify every file the tree reader gathered, resolve every reference, and judge each one with the shared model.
 // A per-file rule reads one file and its specifiers, so everything a whole-graph question needs is assembled here: the classified nodes, the authored edges, the landed flows behind the conduits, the reachable set, and the reference cycles the flows close.
-// The CLI (visualize.js) serves this and the selftest asserts on it, so the diagram and the checks read one and the same graph.
+// The tree walk lives in tree.js and the module parsing in parse.js, so this file touches no filesystem of its own; the CLI (visualize.js) serves what it returns and the selftest asserts on it, so the diagram and the checks read one and the same graph.
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createWalker } from './flow.js';
-import { CODE_RE, EXT_CANDIDATES, moduleInfo } from './parse.js';
+import { EXT_CANDIDATES, moduleInfo } from './parse.js';
+import { gatherFiles, readOptions, srcRootOf } from './tree.js';
 import { cycles } from './graph.js';
 import { deepSideEffect } from './messages.js';
-import { classify, fileRole, inTreeSpec, isDataPath, isRelative, norm, posixResolve, targetOf } from './model.js';
+import { classify, fileRole, inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.js';
 import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.js';
-
-// ---------------------------------------------------------------------------
-// Project options, read from the app's .oxlintrc.json when it configures elda/imports; the config may carry // comments, so strip them before parsing.
-
-export function readOptions(appDir) {
-  const defaults = { domainAlias: '#', appAlias: '@', compositionRoot: 'routes', core: 'core' };
-  const rcPath = join(appDir, '.oxlintrc.json');
-  if (!existsSync(rcPath)) return defaults;
-  try {
-    const raw = readFileSync(rcPath, 'utf8').replace(/^\s*\/\/.*$/gm, '');
-    const rc = JSON.parse(raw);
-    const rule = rc.rules && rc.rules['elda/imports'];
-    const opts = Array.isArray(rule) && typeof rule[1] === 'object' ? rule[1] : {};
-    return { ...defaults, ...opts };
-  } catch {
-    console.warn(`Could not parse ${rcPath}; using default elda options.`);
-    return defaults;
-  }
-}
-
-// A declared area, resolved to the thing on disk that holds it: a directory, or a single module where the area names one, since a build config is a composition root that lives as one file.
-// An area sits under src/ (a route tree) or beside it at the app root (a server shell, that build config), so both are tried, and an entry resolving to nothing is omitted - an app with no server simply draws no server bar.
-// The areas are read from the app's config rather than guessed by name, so an app composing at a worker, a CLI, or three servers draws each of them without this tool knowing what any of them is called.
-// Roots communicate only by serialization (ROOT.5), so each scans as its own block feeding the shared domains.
-function areaTargets(appDir, srcDir, areas) {
-  const out = [];
-  for (const a of (Array.isArray(areas) ? areas : [areas]).filter(Boolean)) {
-    const hit = [join(srcDir, a), join(appDir, a)].find(existsSync);
-    if (!hit) continue;
-    const label = norm(hit).slice(norm(appDir).length + 1);
-    out.push(statSync(hit).isDirectory() ? { key: a, label, dir: hit } : { key: a, label, file: hit });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Scan: walk the ELDA-relevant roots and classify every file.
-
-// A stylesheet is code (SURFACE.6) and draws in its layer x subdomain cell; everything that is neither a module nor a stylesheet is pure data, read as the complement (isDataPath) so that no extension the tool has never met classifies as a rankless surface.
-export const STYLE_RE = /\.(css|scss|sass|less)$/i;
-export const isAsset = (p) => isDataPath(p);
-
-export function* walk(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) yield* walk(full);
-    else yield full;
-  }
-}
-
-// The domains root is either a top-level `domains/` or one nested under `src/`, the same two-step the plugin's srcDirOf follows, so an app laid out either way both lints and draws.
-export function srcRootOf(appDir) {
-  return existsSync(join(appDir, 'domains')) ? appDir : join(appDir, 'src');
-}
 
 export function buildGraph(appDir) {
   const srcDir = srcRootOf(appDir);
   const { domainAlias, appAlias, compositionRoot, core } = readOptions(appDir);
-  const roots = areaTargets(appDir, srcDir, compositionRoot);
-  // Domains scan by directory; each composition root scans its directory or its single module and stamps every file with its root key, so the diagram draws one bar per root; each declared core scans as its own dependency-free block.
-  const areas = [
-    { dir: join(srcDir, 'domains') },
-    ...roots.map((r) => ({ root: r.key, dir: r.dir, file: r.file })),
-    ...areaTargets(appDir, srcDir, core).map((c) => ({ dir: c.dir, file: c.file })),
-  ];
-  // Every file in the scanned areas, before anything is drawn.
-  const found = [];
-  for (const area of areas) {
-    const target = area.dir ?? area.file;
-    if (!target || !existsSync(target)) continue;
-    for (const abs of area.file ? [area.file] : walk(area.dir)) {
-      const path = norm(abs.slice(appDir.length + 1));
-      const kind = CODE_RE.test(path) ? 'code' : STYLE_RE.test(path) ? 'style' : isAsset(path) ? 'asset' : null;
-      if (kind) found.push({ path, kind, root: area.root });
-    }
-  }
+  const { found, roots } = gatherFiles(appDir, srcDir, { compositionRoot, core });
 
   // The path a specifier names, or null for a bare package.
   const specPath = (relDir, spec) => {
