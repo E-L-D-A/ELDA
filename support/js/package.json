@@ -3,25 +3,25 @@
   "version": "0.1.0",
   "description": "ELDA architecture rules as an oxlint / ESLint-v9-compatible plugin: layer boundaries, cross-domain surface discipline, immutable publication, the inner-layer async/outcome rule, the integration-surface vocabulary gate, and ambient-declaration ownership. Ships elda-viz, a CLI that draws an app's dependency graph as the ELDA-Layers diagram with the same verdicts on every edge.",
   "type": "module",
-  "main": "plugin/index.js",
+  "main": "index.js",
   "exports": {
-    ".": "./plugin/index.js"
+    ".": "./index.js"
   },
   "bin": {
-    "elda-viz": "./viz/visualize.js"
+    "elda-viz": "./visualize.js"
   },
   "scripts": {
-    "presets": "node plugin/presets.mjs",
+    "presets": "node presets.mjs",
     "selftest": "node selftest.mjs",
-    "test": "node plugin/presets.mjs && node selftest.mjs",
-    "selftest-viz": "node ./viz/visualize.js ./fixture",
+    "test": "node presets.mjs && node selftest.mjs",
+    "selftest-viz": "node ./visualize.js ./fixture",
     "selflint": "oxlint .",
-    "selfviz": "node ./viz/visualize.js ."
+    "selfviz": "node ./visualize.js ."
   },
   "files": [
     "core",
-    "plugin",
-    "viz",
+    "domains",
+    "presets.mjs",
     "selftest.mjs",
     "fixture",
     "adopting.json",

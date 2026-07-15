@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 import plugin from './index.js';
 
-// The preset JSONs ship at the package root, where a consumer's `extends` points; the generator lives one level down in plugin/.
-const here = join(dirname(fileURLToPath(import.meta.url)), '..');
+// The preset JSONs ship at the package root, where a consumer's `extends` points; this generator sits at that root.
+const here = dirname(fileURLToPath(import.meta.url));
 const SCHEMA = 'https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json';
 
 for (const [grade, config] of Object.entries(plugin.configs)) {

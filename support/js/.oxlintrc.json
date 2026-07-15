@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "jsPlugins": ["./index.js"],
+  "rules": {
+    "elda/imports": [
+      "warn",
+      {
+        "domainAlias": "#",
+        "appAlias": "@",
+        "compositionRoot": ["index.js", "visualize.js", "presets.mjs", "selftest.mjs"],
+        "core": "core"
+      }
+    ],
+    "elda/no-surface-declarations": "warn",
+    "elda/no-self-surface": "warn",
+    "elda/no-layer-branches": "warn",
+    "elda/no-diagonal-reach": [
+      "warn",
+      { "acrossDomains": "warn", "acrossSubdomains": "warn", "withinSubdomain": "warn" }
+    ],
+    "elda/no-diagonal-reach-gate": [
+      "error",
+      { "acrossDomains": "warn", "acrossSubdomains": "warn", "withinSubdomain": "warn" }
+    ],
+    "elda/no-service-coupling": "warn",
+    "elda/no-adapter-coupling": "warn",
+    "elda/no-penetration": "warn",
+    "elda/no-deep-side-effects": "warn",
+    "elda/no-async-inner": "warn",
+    "elda/no-mutable-surface": "warn",
+    "elda/vocab-gate": "warn",
+    "elda/ambient-ownership": "warn"
+  }
+}

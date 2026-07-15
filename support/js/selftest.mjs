@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 import { parseSync } from 'oxc-parser';
 
-import plugin from './plugin/index.js';
+import plugin from './index.js';
 import { norm } from './core/model.js';
 import { buildGraph } from './core/scan.js';
 

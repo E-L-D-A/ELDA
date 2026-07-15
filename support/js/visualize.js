@@ -21,9 +21,9 @@ import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { CODE_RE } from "../core/parse.js";
-import { buildGraph } from "../core/scan.js";
-import { STYLE_RE, isAsset, srcRootOf, walk } from "../core/tree.js";
+import { CODE_RE } from "./core/parse.js";
+import { buildGraph } from "./core/scan.js";
+import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.js";
 
 // ---------------------------------------------------------------------------
 // CLI arguments.
@@ -58,8 +58,8 @@ if (!existsSync(join(srcDir, "domains"))) {
 // Output: a standalone snapshot, or a live server with rescans pushed over SSE.
 
 const here = dirname(fileURLToPath(import.meta.url));
-const viewerPath = join(here, "viewer.html");
-const viewerDir = join(here, "viewer");
+const viewerPath = join(here, "domains/viz/viewer.html");
+const viewerDir = join(here, "domains/viz/viewer");
 
 // The viewer is a shell plus ES modules under viewer/, assembled into one page here.
 // The modules import each other by bare `@viewer/<name>` specifiers; the import map this builds resolves them - to the served files when live, to inlined data: URLs in a --out snapshot - and the module graph loads from one entry.
