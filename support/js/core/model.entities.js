@@ -20,9 +20,11 @@ export const isRelative = (spec) =>
   typeof spec === 'string' && (spec === '.' || spec === '..' || spec.startsWith('./') || spec.startsWith('../'));
 
 // A specifier shaped like in-tree code is ELDA's business; a bare package name sits outside its jurisdiction and stays exempt.
-export const inTreeSpec = (spec, domainAlias, appAlias) =>
+// Aliases arrive as the app's alias map or its entries; any alias prefix marks the specifier in-tree.
+export const inTreeSpec = (spec, aliases) =>
   isRelative(spec) ||
-  (typeof spec === 'string' && (spec.startsWith(domainAlias + '/') || spec.startsWith(appAlias + '/')));
+  (typeof spec === 'string' &&
+    (Array.isArray(aliases) ? aliases : Object.entries(aliases ?? {})).some(([a]) => spec.startsWith(a + '/')));
 
 // A file name reads RIGHT TO LEFT - `<name>.<layer>.<marker>...` - and the layer is the rightmost dot-segment that names a layer.
 // Everything left of it is the unit's name, and an empty name is the subdomain's own bare layer file; everything right of it is markers.
@@ -114,40 +116,43 @@ const areaHit = (filename, areas) => {
   return null;
 };
 
-// Naming a core buys no enforcement. ROOT.6 ("pure core is dependency-free; arrows point from domains into core, never back") is a property, not a place:
-// a module that references no domain satisfies it wherever it lives, and one that references a domain is either a domain, a declared root, or a conduit laundering the reach - which is what the unclassified-file reading reports.
-// The area's contents still classify: core is the bottom of the sharedness DAG, a set of domains everything may lean on, so a core file carries its chain, layer, and surface exactly as a domain file does, under the area's name.
-// A plain-named file directly in the area is a whole domain in one file - its own surface, with the contents not yet extracted into layer files - so its name lifts into the chain as the domain it is.
-export function fileRole(filename, compositionRoot, core = 'core') {
-  const m = filename.match(/\/domains\/(.+)$/);
-  if (m) {
-    const c = classify(m[1].split('/').filter(Boolean));
+// Where does the current file sit? The tree encodes a claim in exactly three places, all configured: the ownership directory (the one the ownership alias resolves to), the declared composition roots, and the declared cores.
+// Everywhere else placement is free organization and the claim is null; no directory name is special on its own.
+// Naming a core buys no enforcement by itself. ROOT.6 ("pure core is dependency-free; arrows point from domains into core, never back") is a property, and the declaration is a claim the graph adjudicates like any other placement.
+// A core area's contents classify as TOP-LEVEL shared domains - the bottom of the sharedness DAG stands beside the feature domains, never inside a domain named after the folder - so the chain never carries the area's name, and `area` rides along only so the diagram can group the shared blocks.
+// A loner file directly in the area is a whole domain in one file: a plain name is the domain's own surface (contents not yet extracted), and a layer-suffixed name is that domain's one layer file; either way the unit name lifts into the chain as the domain it is.
+export function fileRole(filename, { ownershipDir, compositionRoot, core } = {}) {
+  const own = areaHit(filename, ownershipDir ?? 'domains');
+  if (own && own.rest) {
+    const c = classify(own.rest.split('/').filter(Boolean));
     if (c.layer && c.chain.length > 0) return { kind: 'domain', ...c };
     if (c.surface && c.chain.length > 0) return { kind: 'surface', ...c };
     return { kind: 'other' };
   }
-  if (inArea(filename, compositionRoot)) return { kind: 'composition-root' };
-  const hit = areaHit(filename, core);
+  if (inArea(filename, compositionRoot ?? [])) return { kind: 'composition-root' };
+  const hit = areaHit(filename, core ?? []);
   if (hit) {
     const area = hit.area.split('/').pop();
     const segs = hit.rest.split('/').filter(Boolean);
-    if (!segs.length) return { kind: 'core', chain: [area], layer: null, via: null, sub: [], surface: stripExt(area) || area, name: null };
+    if (!segs.length) {
+      const name = stripExt(area) || area;
+      return { kind: 'core', area, chain: [name], layer: null, via: null, sub: [], surface: name, name: null };
+    }
     const c = classify(segs);
-    const lift = c.chain.length === 0 && c.surface && c.surface !== 'index';
-    return { kind: 'core', ...c, chain: lift ? [area, c.surface] : [area, ...c.chain] };
+    if (c.chain.length === 0 && c.surface && c.surface !== 'index') return { kind: 'core', area, ...c, chain: [c.surface] };
+    if (c.chain.length === 0 && c.layer && c.name) return { kind: 'core', area, ...c, chain: [c.name] };
+    return { kind: 'core', area, ...c };
   }
   return { kind: 'other' };
 }
 
-// Parse a `#/...` or `@/domains/...` import specifier, or null for anything else (bare packages, `@/core`, ...).
+// Parse an ownership-alias specifier (`#/...`), or null for anything else (bare packages, other aliases, relatives).
+// The ownership alias is the one specifier form that NAMES a domain: its path remainder is the chain, so writing it attributes ownership in one spelling, and every other form is anonymous travel.
 // A single-segment specifier is the domain's consumable barrel.
-export function parseSpec(spec, domainAlias, appAlias) {
-  if (typeof spec !== 'string') return null;
-  let rest = null;
-  if (spec.startsWith(domainAlias + '/')) rest = spec.slice(domainAlias.length + 1);
-  else if (spec.startsWith(appAlias + '/domains/')) rest = spec.slice((appAlias + '/domains/').length);
-  if (rest == null) return null;
-  const segs = rest.split('/').filter(Boolean);
+export function parseSpec(spec, ownershipAlias) {
+  if (typeof spec !== 'string' || !ownershipAlias) return null;
+  if (!spec.startsWith(ownershipAlias + '/')) return null;
+  const segs = spec.slice(ownershipAlias.length + 1).split('/').filter(Boolean);
   if (segs.length === 0) return null;
   return finishTarget(classify(segs));
 }
@@ -164,12 +169,12 @@ export function posixResolve(dir, spec) {
   return '/' + out.join('/');
 }
 
-export function relativeTarget(filename, spec) {
+export function relativeTarget(filename, spec, ownershipDir) {
   if (!isRelative(spec)) return null;
   const resolved = posixResolve(filename.slice(0, filename.lastIndexOf('/')), spec);
-  const m = resolved.match(/\/domains\/(.+)$/);
-  if (!m) return null;
-  const segs = m[1].split('/').filter(Boolean);
+  const hit = areaHit(resolved, ownershipDir ?? 'domains');
+  if (!hit || !hit.rest) return null;
+  const segs = hit.rest.split('/').filter(Boolean);
   if (segs.length === 0) return null;
   return finishTarget(classify(segs));
 }
@@ -194,19 +199,19 @@ export const DATA_RE = /\.(svg|png|jpe?g|gif|webp|avif|ico|woff2?|ttf|otf|eot|mp
 // Leaving `surface` set is what let a cross-domain asset reach pass, since every boundary rule reads a surface target as a legal way in.
 const asData = (t) => ({ ...t, layer: 'entities', via: 'leaf', surface: null, asset: true });
 
-export function targetOf(filename, spec, domainAlias, appAlias) {
-  const t = parseSpec(spec, domainAlias, appAlias) ?? relativeTarget(filename, spec);
+export function targetOf(filename, spec, ownershipAlias, ownershipDir) {
+  const t = parseSpec(spec, ownershipAlias) ?? relativeTarget(filename, spec, ownershipDir);
   if (t && typeof spec === 'string' && DATA_RE.test(spec)) return asData(t);
   return t;
 }
 
 // Classify a reference target from the path the specifier actually resolved to, rather than from the specifier's own shape.
 // A specifier's trailing plain segment is ambiguous - `#/checkout/payment` is either a named surface of `checkout` or the `payment` subdomain's barrel - and only the filesystem knows which, so a caller that can resolve reads the target here and judges it once.
-// The caller supplies the resolution (model.js touches no filesystem); a path that lands outside `domains/`, or directly in it with no domain to belong to, carries no target and returns null.
-export function targetOfPath(absPath) {
-  const m = norm(absPath).match(/\/domains\/(.+)$/);
-  if (!m) return null;
-  const t = classify(m[1].split('/').filter(Boolean));
+// The caller supplies the resolution (this module touches no filesystem); a path that lands outside the ownership directory, or directly in it with no domain to belong to, carries no target and returns null.
+export function targetOfPath(absPath, ownershipDir) {
+  const hit = areaHit(norm(absPath), ownershipDir ?? 'domains');
+  if (!hit || !hit.rest) return null;
+  const t = classify(hit.rest.split('/').filter(Boolean));
   if (t.chain.length === 0) return null;
   return isDataPath(absPath) ? asData(t) : t;
 }

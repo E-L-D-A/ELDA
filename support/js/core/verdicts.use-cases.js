@@ -24,12 +24,33 @@ export function unjudgedVerdict(role, spec, why) {
 //   SURFACE.3  a cross-boundary reference goes through a surface, never into a layer's internals, and a surface never re-bundles a peer or foreign domain's surface;
 //   SURFACE.7  a nested subdomain is internal to its parent: outside it, only the parent's published surfaces exist.
 // Returns a violation message for this reading of the target, or null when legal.
-export function judgeImport(role, t, domainAlias) {
-  if (role.kind === 'core') return msg.coreDependsOnDomain();
+// A core target is judged directionally: core modules are shared domains everything may lean on, so no surface ceremony gates the reach, and rank still governs it - leaning at or below one's own rank is the diagram's dashed lateral, while the upward reach is the inversion no row draws.
+// Only a resolved target can carry the core reading (a specifier's shape never names core), so the judgment stays fact-based.
+export function judgeImport(role, t, ownershipAlias) {
+  const intoCore = t != null && (t.kind === 'core' || t.area != null);
+
+  if (role.kind === 'core') {
+    if (t == null) return null;
+    if (intoCore) {
+      if (t.layer && role.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
+        return msg.innerImportsOuter(role.layer, t.layer);
+      }
+      return null;
+    }
+    return msg.coreDependsOnDomain();
+  }
 
   if (role.kind === 'composition-root') {
     if (t.chain.length > 1) return msg.rootComposesTopLevel(t.chain.join('/'), t.chain[0]);
     if (t.layer && t.layer !== 'services') return msg.rootConsumesSurfaces(t.layer);
+    return null;
+  }
+
+  if (intoCore) {
+    if (role.kind === 'surface' || !role.layer) return null;
+    if (t.layer && LAYER_RANK[t.layer] > LAYER_RANK[role.layer]) {
+      return msg.innerImportsOuter(role.layer, t.layer);
+    }
     return null;
   }
 
@@ -39,13 +60,13 @@ export function judgeImport(role, t, domainAlias) {
     // A surface curates its own subdomain and its owned children (SURFACE.7); republishing a peer or foreign domain re-bundles that domain's surface (SURFACE.3).
     // A consumable surface carries use-cases and vocabulary only; services and adapters belong to the runtime-composition surface, which the `services` file realizes and may reference freely.
     if (r.kind === 'peer' || r.kind === 'to-ancestor') {
-      return msg.surfaceRebundles(domainAlias, t.chain.join('/'));
+      return msg.surfaceRebundles(ownershipAlias, t.chain.join('/'));
     }
     if (r.kind === 'into-child' && t.chain.length > role.chain.length + 1) {
       return msg.surfaceCurateDirectChild(t.chain[role.chain.length], t.chain.join('/'));
     }
     if (role.surface !== 'services' && (t.layer === 'services' || t.layer === 'adapters')) {
-      return msg.surfaceCarriesUseCases(t.layer, domainAlias, role.chain.join('/'));
+      return msg.surfaceCarriesUseCases(t.layer, ownershipAlias, role.chain.join('/'));
     }
     return null;
   }
@@ -87,19 +108,19 @@ export function judgeImport(role, t, domainAlias) {
     // The graded OWNER.5 mounting, reported by no-service-coupling at warn instead of here.
     return null;
   }
-  return msg.referenceSibPublicSurface(sib, domainAlias, t.layer);
+  return msg.referenceSibPublicSurface(sib, ownershipAlias, t.layer);
 }
 
 // The full verdict for one reference.
 // A target read from a resolved path (targetOfPath) is a fact, so it is judged once and the verdict stands.
 // A target read from the specifier alone carries the trailing-segment ambiguity - a named surface of the chain, or a nested subdomain's barrel - so both readings are tried and the reference is accepted when either is legal, and the ambiguity never manufactures a finding.
 // The tolerant reading is the fallback a caller reaches when it cannot resolve at all, which happens for a specifier that names no file; a caller with a filesystem resolves first and never pays the tolerance.
-export function importVerdict(role, t, domainAlias, resolved = false) {
-  const verdictA = judgeImport(role, t, domainAlias);
+export function importVerdict(role, t, ownershipAlias, resolved = false) {
+  const verdictA = judgeImport(role, t, ownershipAlias);
   if (verdictA === null) return null;
   if (!resolved && t.surface && t.surface !== 'index' && !t.layer) {
     const b = { ...t, chain: [...t.chain, t.surface], surface: 'index' };
-    if (judgeImport(role, b, domainAlias) === null) return null;
+    if (judgeImport(role, b, ownershipAlias) === null) return null;
   }
   return verdictA;
 }

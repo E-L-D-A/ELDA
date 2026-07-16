@@ -3,7 +3,7 @@
 // The layer and the surface-ness ride the file's own name, wherever it sits on disk. The chain rides the edges.
 // Shared by the enforcer (index.js) and the informer (visualize.js) so the linter and the diagram infer one structure. Pure: a scanned graph in, a role per file out.
 
-import { fileRole, isRelative, layerOf, stripExt, targetOf } from './model.entities.js';
+import { fileRole, inArea, isRelative, layerOf, parseSpec, stripExt } from './model.entities.js';
 import { dishonestPlacement } from './messages.entities.js';
 
 // A file reached from domains that share no ancestor sits below all of them: pure core, the dependency-order's bottom (CHANNEL.6 sharedness).
@@ -48,10 +48,10 @@ const isEntry = (path) => {
 // The chain a relative reference hands its target: the importer's chain walked along the directory delta.
 // A step up leaves the current subdomain, so it pops; a step down names a child only when the reference enters through a surface, since a directory by itself carries no boundary and a reach past the surface stays classified by its other, owning reaches (the deeper side of the merge).
 // The child's name is the surface's own directory - one segment - because the directories travelled on the way are grouping, and the one the surface sits in is the one it names.
-// The delta describes positions in the domains tree, so a target outside it has no position to walk to: the reference carries no chain information and hands on the importer's chain, exactly as a chainless aliased specifier does.
-function relativeChain(importerChain, importerDir, targetPath) {
+// The delta describes positions in the ownership tree, so a target outside it has no position to walk to: the reference carries no chain information and hands on the importer's chain, exactly as a chainless aliased specifier does.
+function relativeChain(importerChain, importerDir, targetPath, ownershipDir) {
   if (importerChain === CORE) return CORE;
-  if (!/(^|\/)domains\//.test(targetPath)) return importerChain;
+  if (!inArea(targetPath, ownershipDir ?? 'domains')) return importerChain;
   const from = importerDir ? importerDir.split('/') : [];
   const to = dirOf(targetPath) ? dirOf(targetPath).split('/') : [];
   const shared = commonPrefix(from, to).length;
@@ -89,9 +89,9 @@ function inferChains(graph) {
     for (const e of out.get(id) ?? []) {
       let child;
       if (isRelative(e.spec)) {
-        child = relativeChain(chain, dirOf(files[id].path), files[e.to].path);
+        child = relativeChain(chain, dirOf(files[id].path), files[e.to].path, options.ownershipDir);
       } else {
-        const t = targetOf('', e.spec, options.domainAlias, options.appAlias);
+        const t = parseSpec(e.spec, options.ownershipAlias ?? '#');
         child = t ? t.chain : chain;
       }
       const prev = chainOf.get(e.to);
@@ -112,7 +112,7 @@ function inferChains(graph) {
 // The tree claims a domain, a surface, or a core only where it encodes one; everywhere else placement is free organization, the claim is null, and a scattered app never meets this judge.
 function pathClaim(file, options) {
   if (file.kind === 'asset') return null;
-  const claim = fileRole('/' + file.path, options.compositionRoot ?? [], options.core ?? []);
+  const claim = fileRole('/' + file.path, options);
   return claim.kind === 'domain' || claim.kind === 'surface' || claim.kind === 'core' ? claim : null;
 }
 
@@ -133,7 +133,7 @@ const describeClaim = (c) =>
 
 // The dispute verdict, phrased per mismatch: what the tree says, what the imports say, and the remedy that fits, in words that stand without the documentation.
 function disputeVerdict(claim, g, options) {
-  const alias = options.domainAlias ?? '#';
+  const alias = options.ownershipAlias ?? '#';
   const claimed = describeClaim(claim);
   const claimChain = (claim.chain ?? []).join('/');
   const gChain = (g.chain ?? []).join('/');

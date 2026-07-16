@@ -8,23 +8,24 @@ import { join } from 'node:path';
 import { createWalker } from './flow.use-cases.js';
 import { graphRoles } from './ownership.use-cases.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
-import { gatherFiles, readOptions, srcRootOf } from './tree.adapters.js';
+import { gatherFiles, readOptions } from './tree.adapters.js';
 import { cycles } from './graph.use-cases.js';
 import { deepSideEffect } from './messages.entities.js';
 import { inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.entities.js';
 import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.use-cases.js';
 
 export function buildGraph(appDir) {
-  const srcDir = srcRootOf(appDir);
-  const { domainAlias, appAlias, compositionRoot, core } = readOptions(appDir);
-  const { found, roots } = gatherFiles(appDir, srcDir, { compositionRoot, core });
+  const options = readOptions(appDir);
+  const { aliases, ownershipAlias, ownershipDir, core } = options;
+  const { found, roots } = gatherFiles(appDir, options);
 
-  // The path a specifier names, or null for a bare package; the alias prefixes resolve against the source root, wherever the app keeps it.
-  const srcBase = norm(srcDir).length > norm(appDir).length ? norm(srcDir).slice(norm(appDir).length + 1) + '/' : '';
+  // The path a specifier names, or null for a bare package; every configured alias resolves against its declared app-root-relative directory.
+  const aliasEntries = Object.entries(aliases ?? {}).sort((a, b) => b[0].length - a[0].length);
   const specPath = (relDir, spec) => {
     const bare = String(spec).split('?')[0];
-    if (bare.startsWith(domainAlias + '/')) return srcBase + 'domains/' + bare.slice(domainAlias.length + 1);
-    if (bare.startsWith(appAlias + '/')) return srcBase + bare.slice(appAlias.length + 1);
+    for (const [alias, dir] of aliasEntries) {
+      if (bare.startsWith(alias + '/')) return dir + '/' + bare.slice(alias.length + 1);
+    }
     if (isRelative(bare)) return posixResolve(relDir, bare).slice(1);
     return null;
   };
@@ -89,8 +90,8 @@ export function buildGraph(appDir) {
     }
   }
 
-  // The roles, reconciled from the two judges (ownership.js): the graph reading and the tree's claim, with a dispute where they disagree and an unreached reason where the graph is silent.
-  const roles = graphRoles({ files, edges, options: { domainAlias, appAlias, compositionRoot, core } });
+  // The roles, reconciled from the two judges (ownership): the graph reading and the tree's claim, with a dispute where they disagree and an unreached reason where the graph is silent.
+  const roles = graphRoles({ files, edges, options });
   for (const f of files) {
     const r = roles.get(f.id);
     if (!r) continue;
@@ -110,11 +111,11 @@ export function buildGraph(appDir) {
   }
 
   // The reference target read off the file a specifier actually resolved to.
-  // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.
+  // A domain, surface, or core file carries a target the reference rules read - core targets are judged directionally, since a reach into core is legal at or below the consumer's own rank and an upward reach is the inversion no row draws; a root or an unscanned path carries none, and the caller falls back to the specifier's own shape.
   const targetOfNode = (node) => {
     if (node == null) return null;
     const f = files[node];
-    if (f.role.kind !== 'domain' && f.role.kind !== 'surface') return null;
+    if (f.role.kind !== 'domain' && f.role.kind !== 'surface' && f.role.kind !== 'core') return null;
     return { ...f.role, asset: f.kind === 'asset' };
   };
   const dirOf = (p) => (p.lastIndexOf('/') < 0 ? '' : p.slice(0, p.lastIndexOf('/')));
@@ -125,15 +126,15 @@ export function buildGraph(appDir) {
     const relPath = '/' + file.path;
     // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
     const resolved = targetOfNode(e.to);
-    const t = resolved ?? targetOf(relPath, e.spec, domainAlias, appAlias);
+    const t = resolved ?? targetOf(relPath, e.spec, ownershipAlias, ownershipDir);
     // An in-tree specifier naming no file is undecidable, and the shape-only reading of one is the most permissive reading available: a dangling `./x` reads as a reference inside the importer's own subdomain, so a half-finished move would draw an all-grey diagram.
-    if (e.to == null && file.role.kind !== 'other' && inTreeSpec(e.spec, domainAlias, appAlias)) {
+    if (e.to == null && file.role.kind !== 'other' && inTreeSpec(e.spec, aliasEntries)) {
       e.verdict = unjudgedVerdict(file.role, e.spec, 'is shaped like in-tree code yet resolves to no file');
       e.tier = 'invariant';
       continue;
     }
     if (t && file.role.kind !== 'other') {
-      e.verdict = importVerdict(file.role, t, domainAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
+      e.verdict = importVerdict(file.role, t, ownershipAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
       if (e.verdict) e.tier = 'invariant';
       else if (!e.typeOnly && file.role.kind === 'domain') {
         e.verdict = diagonalVerdict(file.role, t);
@@ -170,7 +171,7 @@ export function buildGraph(appDir) {
   }
   for (const f of files) f.reachable = reachable.has(f.id);
 
-  const walker = createWalker({ srcDir, domainAlias, appAlias });
+  const walker = createWalker({ appRoot: appDir, aliases, ownershipDir, core });
   const flows = expandFlows(files, edges, walker, appDir, byPath);
   // Root glue draws in the bar of the root that reached it, and glue shared between roots gets a bar of its own, so every composition-root file has a place on the board.
   const rootBars = roots.map((r) => ({ key: r.key, label: r.label }));
@@ -180,7 +181,7 @@ export function buildGraph(appDir) {
   }
   return {
     app: norm(appDir).split('/').pop(),
-    options: { domainAlias, appAlias, compositionRoot, core, roots: rootBars },
+    options: { ...options, roots: rootBars },
     files,
     edges,
     flows,
@@ -239,14 +240,14 @@ function expandFlows(files, edges, walker, appDir, byPath) {
     // Side-effect imports execute the target rather than take bindings, and type-only edges are vocabulary; both draw as authored and do not expand.
     if (e.kind === 'side-effect' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
     const judge = (toId) => {
-      // A landing in core is legal from anywhere: arrows point from domains into core at any rank, and ROOT.6 constrains core's own imports on the authored edges.
-      if (files[toId].role.kind === 'core') return null;
       const t = { ...files[toId].role, asset: files[toId].kind === 'asset' };
-      // The root's landings answer ROOT.1: a binding it takes that lands off the services row is a service smashed into the root.
+      // The root's landings answer ROOT.1 in core exactly as in a domain: a binding it takes that lands off the services row is a service smashed into the root.
       if (src.role.kind === 'composition-root') {
         const rv = rootLandedVerdict(src.role, t);
         return rv ? { verdict: rv, tier: 'invariant' } : null;
       }
+      // A domain's landing in core is legal at or below its own rank - the geometry verdicts only grade below-rank landings, and those are the leans the diagram blesses - while the upward reach is judged on the authored edge.
+      if (t.kind === 'core') return null;
       if (src.role.kind !== 'domain') return null;
       const dv = landedVerdict(src.role, t);
       if (dv) return { verdict: dv, tier: 'invariant' };

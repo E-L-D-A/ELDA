@@ -5,16 +5,8 @@
 // The parse and read primitives live in parse.js; this file resolves specifiers against the filesystem and traverses the tables they yield.
 
 import { existsSync, statSync } from 'node:fs';
-import { classify, isRelative, norm } from './model.entities.js';
+import { fileRole, isRelative, norm } from './model.entities.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
-
-// A surface is a plain-named file inside domains/ (a barrel, a named surface): rank-less curation, the walk's only conduit.
-const isSurface = (absPath) => {
-  const m = norm(absPath).match(/\/domains\/(.+)$/);
-  if (!m) return false;
-  const c = classify(m[1].split('/').filter(Boolean));
-  return !c.layer && !!c.surface && c.chain.length > 0;
-};
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
 
@@ -30,16 +22,27 @@ const normalizePath = (p) => {
 };
 
 // A walker bound to one app: resolves specifiers against the filesystem the way the bundler would, and follows value names to their landings.
-export function createWalker({ srcDir, domainAlias, appAlias }) {
-  const root = norm(srcDir);
+// Every alias in the app's map resolves (the graph needs every edge), while attribution stays the ownership alias's alone - resolution and attribution are separate concerns.
+export function createWalker({ appRoot, aliases = {}, ownershipDir, core }) {
+  const root = norm(appRoot);
   const tryFile = (f) => (existsSync(f) && statSync(f).isFile() ? f : null);
+  // Longest alias first, so an alias that prefixes another never shadows it.
+  const aliasEntries = Object.entries(aliases).sort((a, b) => b[0].length - a[0].length);
+
+  // A surface is a plain-named file inside the ownership tree or a declared core (a barrel, a named surface): rank-less curation, the walk's only conduit.
+  // Owned bindings terminate on it regardless, so transparency only lets its re-exports carry the walk onward.
+  const isSurface = (absPath) => {
+    const r = fileRole(norm(absPath), { ownershipDir, core });
+    return (r.kind === 'surface' || r.kind === 'core') && !r.layer && !!r.surface;
+  };
 
   const resolveSpec = (fromAbs, spec) => {
     const bare = String(spec).split('?')[0];
     let p = null;
-    if (bare.startsWith(domainAlias + '/')) p = root + '/domains/' + bare.slice(domainAlias.length + 1);
-    else if (bare.startsWith(appAlias + '/')) p = root + '/' + bare.slice(appAlias.length + 1);
-    else if (isRelative(bare)) p = dirOf(norm(fromAbs)) + '/' + bare;
+    for (const [alias, dir] of aliasEntries) {
+      if (bare.startsWith(alias + '/')) { p = root + '/' + dir + '/' + bare.slice(alias.length + 1); break; }
+    }
+    if (p == null && isRelative(bare)) p = dirOf(norm(fromAbs)) + '/' + bare;
     if (p == null) return null;
     p = normalizePath(p);
     const exact = tryFile(p);

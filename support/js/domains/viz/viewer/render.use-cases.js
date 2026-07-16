@@ -2,7 +2,7 @@
 // DOM building.
 
 import { bundleEdges, drawEdges, edgeVisible } from "./edges.use-cases.js";
-import { applyPin, focus } from "./focus.use-cases.js";
+import { applyPin } from "./focus.use-cases.js";
 import { renderIssues } from "./issues.use-cases.js";
 import {
   blockOf,

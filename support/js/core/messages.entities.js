@@ -40,6 +40,9 @@ export const mutableExportDecl = (kind) =>
 export const mutableExportNamed = (name) =>
   `ELDA CHANNEL.4: exporting the mutable binding '${name}' shares it live by reference; publish a constant, an accessor, or a channel instead.`;
 
+export const entityState = (name) =>
+  `ELDA LAYER.4: an entities file holds pure domain invariants and owns no state, and the module-level mutable binding '${name}' is state at the pure rank. Give the state an owner at an outer rank and keep the invariants and pure functions here.`;
+
 // --- SURFACE ----------------------------------------------------------------
 
 export const surfaceRebundles = (domainAlias, chain) =>
@@ -110,7 +113,7 @@ export const vocabDataset = () =>
   'ELDA OWNER.2 / ROOT.2: dataset write at the integration surface; identity vocabulary belongs to its owner.';
 
 export const ambientDecl = () =>
-  'ELDA OWNER.2: ambient declarations belong co-located in the owning domain (src/domains/<x>/), not a root or shared .d.ts catch-all.';
+  'ELDA OWNER.2: ambient declarations belong co-located in the owning domain, inside the ownership tree, not a root or shared .d.ts catch-all.';
 
 // --- ROOT -------------------------------------------------------------------
 

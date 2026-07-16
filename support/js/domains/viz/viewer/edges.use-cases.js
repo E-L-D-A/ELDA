@@ -3,7 +3,7 @@
 
 import { compactRow, isBarFile, place } from "./placement.use-cases.js";
 import { chips, compactRep, cycleClosers, drawn, h } from "./render.use-cases.js";
-import { $, ROW_LABEL, collapsed, data, edgeKey, svg, wrap } from "./entities.js";
+import { $, ROW_LABEL, data, edgeKey, svg, wrap } from "./entities.js";
 
 // The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
 let stickyPaths = [];

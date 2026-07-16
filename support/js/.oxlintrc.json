@@ -5,8 +5,8 @@
     "elda/imports": [
       "warn",
       {
-        "domainAlias": "#",
-        "appAlias": "@",
+        "aliases": { "#": "domains" },
+        "ownershipAlias": "#",
         "compositionRoot": ["index.js", "visualize.js", "presets.mjs", "selftest.mjs"],
         "core": "core"
       }
@@ -28,6 +28,7 @@
     "elda/no-deep-side-effects": "warn",
     "elda/no-async-inner": "warn",
     "elda/no-mutable-surface": "warn",
+    "elda/no-entity-state": "warn",
     "elda/vocab-gate": "warn",
     "elda/ambient-ownership": "warn"
   }

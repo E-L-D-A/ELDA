@@ -6,4 +6,6 @@ import { badLateral } from './bad-lateral.services';
 import { deepEffects } from './bad-effects.use-cases';
 import { drift } from './bad-mutable.entities';
 import { go } from './bad-async.use-cases';
-export const cartService = () => { openCart(); badLanding(); badDiagonal(); badSelf(); badLateral(); deepEffects(); go(); return drift; };
+import { badCoreReach } from './bad-core-reach.use-cases';
+export const cartService = () => { openCart(); badLanding(); badDiagonal(); badSelf(); badLateral(); deepEffects(); go(); badCoreReach(); return drift; };
+export const openCartService = openCart;

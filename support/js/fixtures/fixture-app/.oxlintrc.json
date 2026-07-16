@@ -1,0 +1,14 @@
+{
+  "jsPlugins": ["../../index.js"],
+  "rules": {
+    "elda/imports": [
+      "warn",
+      {
+        "aliases": { "#": "src/domains", "@": "src" },
+        "ownershipAlias": "#",
+        "compositionRoot": "src/routes",
+        "core": "src/core"
+      }
+    ]
+  }
+}

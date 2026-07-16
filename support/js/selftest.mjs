@@ -24,15 +24,17 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 
-import { norm } from './core/model.entities.js';
-import { buildGraph } from './core/scan.use-cases.js';
+import { scanApp } from './domains/viz/services.js';
 import plugin from './index.js';
+
+// Path normalization is this root's own glue, kept here so the test consumes the tool only through its published services.
+const norm = (p) => String(p ?? '').replace(/\\/g, '/');
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const BAG = norm(join(HERE, 'default'));
 const BROKEN = norm(join(HERE, 'fixture-broken'));
 const GREEN = norm(join(HERE, 'fixture-app'));
-const OPTIONS = { domainAlias: '#', appAlias: '@', compositionRoot: 'routes', core: 'core' };
+const OPTIONS = { aliases: { '#': 'src/domains', '@': 'src' }, ownershipAlias: '#', compositionRoot: 'src/routes', core: 'src/core' };
 
 // The rules that classify through the resolved graph: each needs a reachable breach, so each is held to the connected fixture.
 const GRAPH_RULES = [
@@ -131,7 +133,7 @@ const overFired = Object.keys(plugin.rules).flatMap((id) => green.get(id).map((h
 // after all, leaving the pass unproven on its own fixture.
 const CYCLE = ['src/domains/cart/cycle.use-cases.ts', 'src/domains/orders/cycle.use-cases.ts'];
 
-const graph = buildGraph(BAG);
+const graph = scanApp(BAG);
 const gated = graph.cycles.filter((c) => c.gate);
 const inCycle = new Set(gated.flatMap((c) => c.files.map((id) => graph.files[id].path)));
 const unseen = CYCLE.filter((p) => !inCycle.has(p));

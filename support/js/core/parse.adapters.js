@@ -102,24 +102,20 @@ export function moduleInfo(absPath) {
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
 
-// The src directory of the app a file belongs to: the one holding `domains/`, which is what an alias like `#/x` resolves against.
-// A file inside the tree names it outright. A file outside it - a route tree, a server shell, a build config at the app root - is found by walking up and testing each level for `domains/` and for a `src/domains/` child, so a root that sits beside src rather than under it still resolves.
-// Cached per starting directory; a null result is cached too, so a file in a tree with no domains costs one walk.
-const isDir = (p) => { try { return statSync(p).isDirectory(); } catch { return false; } };
-const srcDirs = new Map();
-export function srcDirOf(filename) {
-  const f = norm(filename);
-  const inside = f.match(/^(.*)\/domains\//);
-  if (inside) return inside[1];
-  const start = dirOf(f);
-  if (srcDirs.has(start)) return srcDirs.get(start);
+// The app root a file belongs to: the nearest directory up the tree carrying an .oxlintrc.json, which is where the app declares its aliases, its ownership tree, its roots, and its cores.
+// The config is the one placement the tool anchors on, so no directory name is special: an app lays its tree out however it likes and the options say what everything is.
+// Cached per starting directory; a null result is cached too, so a file outside any configured app costs one walk.
+const isFile = (p) => { try { return statSync(p).isFile(); } catch { return false; } };
+const appRoots = new Map();
+export function appRootOf(filename) {
+  const start = dirOf(norm(filename));
+  if (appRoots.has(start)) return appRoots.get(start);
   let found = null;
   let dir = start;
   while (dir && dir.includes('/')) {
-    if (isDir(dir + '/domains')) { found = dir; break; }
-    if (isDir(dir + '/src/domains')) { found = dir + '/src'; break; }
+    if (isFile(dir + '/.oxlintrc.json')) { found = dir; break; }
     dir = dirOf(dir);
   }
-  srcDirs.set(start, found);
+  appRoots.set(start, found);
   return found;
 }

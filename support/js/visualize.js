@@ -5,23 +5,23 @@
 //
 //   elda-viz [appDir] [--port N] [--out file.html] [--no-open]
 //
-// appDir is the app workspace holding src/ (defaults to the working directory); its .oxlintrc.json supplies the elda/imports options when present.
+// appDir is the app workspace (defaults to the working directory); its .oxlintrc.json supplies the elda options - the aliases, the ownership tree, the roots, and the cores.
 // Default mode serves a live page and rescans on file changes; --out writes a standalone HTML snapshot instead.
 
 import { spawn } from "node:child_process";
-import { existsSync, watch, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 
-import { CODE_RE } from "./core/parse.adapters.js";
-import { buildGraph } from "./core/scan.use-cases.js";
-import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.adapters.js";
 import {
+  hasTree,
   moduleForUrl,
   moduleSource,
+  scanApp,
   viewerPage,
   viewerSnapshot,
   viewerStamp,
+  watchApp,
   watchViewer,
 } from "./domains/viz/services.js";
 
@@ -46,10 +46,9 @@ for (let i = 0; i < args.length; i++) {
   } else appDir = resolve(a);
 }
 
-const srcDir = srcRootOf(appDir);
-if (!existsSync(join(srcDir, "domains"))) {
+if (!hasTree(appDir)) {
   console.error(
-    `No domains/ or src/domains/ under ${appDir}; pass the app workspace directory.`,
+    `No ownership tree under ${appDir} (its .oxlintrc.json names the directory, 'domains' by default); pass the app workspace directory.`,
   );
   process.exit(1);
 }
@@ -68,12 +67,12 @@ const summary = (g) =>
   ].join(", ");
 
 if (outFile) {
-  writeFileSync(resolve(outFile), viewerSnapshot(buildGraph(appDir)));
+  writeFileSync(resolve(outFile), viewerSnapshot(scanApp(appDir)));
   console.log(`Wrote ${resolve(outFile)}`);
   process.exit(0);
 }
 
-let graph = buildGraph(appDir);
+let graph = scanApp(appDir);
 const clients = new Set();
 
 const server = createServer((req, res) => {
@@ -108,7 +107,7 @@ let debounce = null;
 const rescan = () => {
   clearTimeout(debounce);
   debounce = setTimeout(() => {
-    graph = buildGraph(appDir);
+    graph = scanApp(appDir);
     for (const c of clients) c.write("data: reload\n\n");
     console.log(`Rescanned: ${summary(graph)}.`);
   }, 200);
@@ -134,20 +133,8 @@ try {
   console.warn("Could not watch the viewer; edits to it need a page reload.");
 }
 
-// Recursive watch covers the whole src tree on Windows and macOS; where a runtime lacks it, fall back to one watcher per directory.
-try {
-  watch(srcDir, { recursive: true }, (_e, name) => {
-    if (name && (CODE_RE.test(name) || STYLE_RE.test(name) || isAsset(name)))
-      rescan();
-  });
-} catch {
-  const dirs = [srcDir];
-  for (const abs of walk(srcDir)) {
-    const d = dirname(abs);
-    if (!dirs.includes(d)) dirs.push(d);
-  }
-  for (const d of dirs) watch(d, rescan);
-}
+// The service watches every configured area and says when a rescan is due.
+watchApp(appDir, rescan);
 
 server.listen(port, () => {
   const url = `http://localhost:${port}`;

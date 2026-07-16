@@ -32,13 +32,14 @@ function unitCol(r) {
 }
 
 // Which cell a file renders into: the composition-root bar, or a domain's (subdomain group x unit sub-column x row) cell.
-// A core role is domain-shaped under its area's name - core modules are domains at the bottom of the sharedness DAG - so it takes the same cells; a graph-attributed core file with no declared area draws under '(shared)'.
+// A core role is a top-level shared domain; the declared area only GROUPS the shared blocks on the board, so the area name heads the block and the module's own chain draws inside it as a subdomain column.
+// A graph-attributed core file with no declared area draws under '(shared)'.
 export function place(f) {
   const r = f.role;
   if (r.kind === "composition-root") return { area: "root", root: r.root };
   if (r.kind === "surface" || r.kind === "domain" || r.kind === "core") {
     const core = r.kind === "core";
-    const chain = core && !(r.chain && r.chain.length) ? ["(shared)"] : r.chain;
+    const chain = core ? [r.area ?? "(shared)", ...(r.chain ?? [])] : r.chain;
     const isSurface = r.surface != null;
     const domain = chain[0];
     const row = isSurface ? "surface" : (r.layer ?? "surface");

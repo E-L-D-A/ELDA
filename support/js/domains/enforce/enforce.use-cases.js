@@ -21,10 +21,16 @@ import {
   selfSurfaceVerdict,
 } from '../../core/verdicts.use-cases.js';
 import { createWalker } from '../../core/flow.use-cases.js';
-import { srcDirOf } from '../../core/parse.adapters.js';
 import { buildGraph } from '../../core/scan.use-cases.js';
 import { graphRoles } from '../../core/ownership.use-cases.js';
 import * as msg from '../../core/messages.entities.js';
+
+// The app-root resolution is an adapter concern the composer supplies (LAYER.2): the rules declare the need here, enforce's services file injects the implementation, and this module touches no filesystem of its own.
+let resolveAppRoot = () => null;
+export const supplyAppRoot = (fn) => {
+  resolveAppRoot = fn;
+};
+const appRootOf = (filename) => resolveAppRoot(filename);
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 
@@ -46,9 +52,12 @@ const AREA = { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'stri
 
 function options(context) {
   const o = (context.options && context.options[0]) || {};
+  const aliases = o.aliases ?? { '#': 'domains' };
+  const ownershipAlias = o.ownershipAlias ?? '#';
   return {
-    domainAlias: o.domainAlias ?? '#',
-    appAlias: o.appAlias ?? '@',
+    aliases,
+    ownershipAlias,
+    ownershipDir: aliases[ownershipAlias] ?? 'domains',
     compositionRoot: o.compositionRoot ?? 'routes',
     core: o.core ?? 'core',
   };
@@ -57,25 +66,20 @@ function options(context) {
 // The walker for the app a file belongs to: it resolves specifiers the way the bundler would, and follows value names to their landings.
 // Memoized per src directory, so a lint pass builds one per app and every rule shares its parse cache.
 const walkers = new Map();
-const walkerFor = (srcDir, domainAlias, appAlias) => {
-  const key = `${srcDir}|${domainAlias}|${appAlias}`;
-  if (!walkers.has(key)) walkers.set(key, createWalker({ srcDir, domainAlias, appAlias }));
+const walkerFor = (appRoot, { aliases, ownershipDir, core }) => {
+  const key = `${appRoot}|${JSON.stringify(aliases)}|${ownershipDir}`;
+  if (!walkers.has(key)) walkers.set(key, createWalker({ appRoot, aliases, ownershipDir, core }));
   return walkers.get(key);
 };
-const walkerOf = (filename, domainAlias, appAlias) => {
-  const srcDir = srcDirOf(filename);
-  return srcDir ? walkerFor(srcDir, domainAlias, appAlias) : null;
+const walkerOf = (filename, opts) => {
+  const appRoot = appRootOf(filename);
+  return appRoot ? walkerFor(appRoot, opts) : null;
 };
 
 // The whole resolved graph for the app a file belongs to, built once and shared across the per-file passes.
-// A rule resolves its own edges through the walker one file at a time and drops what it found; the classifier the remodel is moving toward reads a file's domain and boundary off its position in the graph instead of its path, and that needs the graph kept.
-// So the same scan the visualizer runs is memoized here, keyed by app root, and the enforcer and the informer read one graph. The app root is the directory the scan resolves against - the tree holding `domains/`, or its parent when that tree is a `src/`.
+// A rule resolves its own edges through the walker one file at a time and drops what it found; the classifier reads a file's domain and boundary off its position in the graph instead of its path, and that needs the graph kept.
+// So the same scan the visualizer runs is memoized here, keyed by app root, and the enforcer and the informer read one graph. The app root is the directory carrying the app's .oxlintrc.json, which is what the scan resolves against.
 const graphs = new Map();
-const appRootOf = (filename) => {
-  const srcDir = srcDirOf(filename);
-  if (!srcDir) return null;
-  return srcDir.endsWith('/src') ? srcDir.slice(0, -'/src'.length) : srcDir;
-};
 const graphFor = (filename) => {
   const appRoot = appRootOf(filename);
   if (!appRoot) return null;
@@ -99,12 +103,12 @@ const rolesByPath = (graph) => {
   }
   return byPath;
 };
-const graphClassify = (filename, compositionRoot, core) => {
+const graphClassify = (filename, opts) => {
   const graph = graphFor(filename);
-  if (!graph) return { role: fileRole(filename, compositionRoot, core), roleAt: () => null, dispute: null };
+  if (!graph) return { role: fileRole(filename, opts), roleAt: () => null, dispute: null };
   const byPath = rolesByPath(graph);
   return {
-    role: byPath.get(filename)?.role ?? fileRole(filename, compositionRoot, core),
+    role: byPath.get(filename)?.role ?? fileRole(filename, opts),
     roleAt: (abs) => byPath.get(norm(abs))?.role ?? null,
     dispute: byPath.get(filename)?.dispute ?? null,
   };
@@ -116,19 +120,22 @@ const graphClassify = (filename, compositionRoot, core) => {
 // Where resolution finds no file the tolerant reading stands, which keeps a broken path from manufacturing a finding; a root's landing walk reports that same unresolvable path separately, so the silence here is covered.
 // `found` says the specifier named a real file; `resolved` says the target was read off that file rather than guessed from the specifier's shape.
 // The two come apart, and conflating them reports every legal reach into pure core or a root's own module as undecidable: those resolve perfectly well and simply carry no domain target, which is a fact about the file and not a failure to find it.
-const resolvedTargetFor = (walker, filename, spec, domainAlias, appAlias) => {
+const resolvedTargetFor = (walker, filename, spec, { ownershipAlias, ownershipDir }) => {
   const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
-  if (abs) return { t: targetOfPath(abs), resolved: true, found: true };
-  return { t: targetOf(filename, spec, domainAlias, appAlias), resolved: false, found: false };
+  if (abs) return { t: targetOfPath(abs, ownershipDir), resolved: true, found: true };
+  return { t: targetOf(filename, spec, ownershipAlias, ownershipDir), resolved: false, found: false };
 };
 
 // The target's role read from the same graph as the importer's: the resolved file's inferred role when the graph holds it, the path reading when it does not.
-// A resolved target of kind core, root, or other carries no boundary a reference rule can read, so it judges as no target at all rather than as a path guess about a file the graph already placed.
-const graphTargetFor = (roleAt, walker, filename, spec, domainAlias, appAlias) => {
+// A domain, surface, or core role carries a boundary the reference rules read - core directionally, per judgeImport - while a root or unclassified target judges as no target at all rather than as a path guess about a file the graph already placed.
+const graphTargetFor = (roleAt, walker, filename, spec, opts) => {
   const abs = walker && typeof spec === 'string' ? walker.resolveSpec(filename, spec) : null;
   const gr = abs ? roleAt(abs) : null;
-  if (gr) return { t: gr.kind === 'domain' || gr.kind === 'surface' ? gr : null, resolved: true, found: true };
-  return resolvedTargetFor(walker, filename, spec, domainAlias, appAlias);
+  if (gr) {
+    const readable = gr.kind === 'domain' || gr.kind === 'surface' || gr.kind === 'core';
+    return { t: readable ? gr : null, resolved: true, found: true };
+  }
+  return resolvedTargetFor(walker, filename, spec, opts);
 };
 
 // elda/imports - the hard, decidable layer + boundary invariants (Tier 1): LAYER.1, ROOT.6, ROOT.1, ROOT.7, SURFACE.2, SURFACE.3, SURFACE.7 (see judgeImport in verdicts.js for the per-constraint reading).
@@ -139,55 +146,61 @@ const imports = {
     schema: [{
       type: 'object',
       properties: {
-        domainAlias: { type: 'string' },
-        appAlias: { type: 'string' },
+        aliases: { type: 'object', additionalProperties: { type: 'string' } },
+        ownershipAlias: { type: 'string' },
         compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias, compositionRoot, core } = options(context);
+    const opts = options(context);
+    const { aliases, ownershipAlias, ownershipDir, compositionRoot, core } = opts;
     const filename = filenameOf(context);
-    const { role, roleAt } = graphClassify(filename, compositionRoot, core);
+    const { role, roleAt } = graphClassify(filename, opts);
     if (role.kind === 'other') return {};
 
-    const walker = walkerOf(filename, domainAlias, appAlias);
-    const targetFor = (spec) => graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
+    const walker = walkerOf(filename, opts);
+    const targetFor = (spec) => graphTargetFor(roleAt, walker, filename, spec, opts);
 
     // In-tree code that names no file is undecidable, not innocent. Every role pays this, because a reach nobody can judge is a reach nobody is checking.
     const check = (node, spec) => {
       const { t, resolved, found } = targetFor(spec);
-      if (walker && !found && inTreeSpec(spec, domainAlias, appAlias)) {
+      if (walker && !found && inTreeSpec(spec, aliases)) {
         context.report({ node, message: unjudgedVerdict(role, spec, 'is shaped like in-tree code yet resolves to no file') });
         return;
       }
       if (!t) return;
-      const verdict = importVerdict(role, t, domainAlias, resolved);
+      const verdict = importVerdict(role, t, ownershipAlias, resolved);
       if (verdict) context.report({ node, message: verdict });
     };
 
     // On the root's row ROOT.1 is a landing question: a barrel carries no layer of its own, so the per-specifier reading above passes a binding that in fact lands on a use-case.
     // The walk follows each value name to the file that owns it and judges it there, the way the diagonal rule already reads domain files.
     const isRoot = role.kind === 'composition-root';
-    const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
+    const relOf = (p) => {
+      const h = norm(p);
+      const i = h.indexOf('/' + ownershipDir + '/');
+      return i >= 0 ? h.slice(i + ownershipDir.length + 2) : h.split('/').pop();
+    };
     const landed = (node, spec, names) => {
       if (!walker || (names !== '*' && names.length === 0)) return;
       const found = walker.landings(filename, spec, names);
       // An unresolvable specifier is reported by check(), for every role rather than this one alone.
       if (found == null) return;
       for (const l of found) {
-        const m = norm(l.path).match(/\/domains\/(.+)$/);
-        if (!m) {
+        const gr = roleAt(l.path);
+        const readable = gr && (gr.kind === 'domain' || gr.kind === 'surface' || gr.kind === 'core');
+        const t = readable ? gr : targetOfPath(l.path, ownershipDir);
+        if (!t) {
           // A landing outside every domain carries no layer and no owner, so ROOT.1 cannot be read on it at all, and an un-owned module is where a domain's logic goes to hide.
-          // Two landings sit outside a domain by right. Pure core depends on nothing in any domain (ROOT.6), so consuming it re-owns nothing. A declared root's own modules ARE the root, and a root composes its glue at itself (ROOT.2), so a root reaching a sibling module of its own area has crossed no boundary.
+          // A declared root's own modules ARE the root, and a root composes its glue at itself (ROOT.2), so a root reaching a sibling module of its own area has crossed no boundary.
           if (!inArea(norm(l.path), core) && !inArea(norm(l.path), compositionRoot)) {
             context.report({ node, message: msg.rootLandsOutside(relOf(l.path)) });
           }
           continue;
         }
-        const t = targetOfPath(l.path);
-        const verdict = t && rootLandedVerdict(role, t);
+        const verdict = rootLandedVerdict(role, t);
         if (verdict) context.report({ node, message: l.via && l.via.length ? `${verdict} (landed via ${l.via.map(relOf).join(' -> ')})` : verdict });
       }
     };
@@ -208,9 +221,33 @@ const imports = {
       published(node, spec);
     };
 
+    // Publication in disguise: on a services file, `export const x = importedBinding` forwards the import exactly as a re-export would, while contributing nothing of its own - the aliasing declaration adopts the binding in the walk's eyes and dodges the re-export check.
+    // The import that fed the alias is tracked by local name, so the declaration is judged as the publication it is.
+    const importedFrom = new Map();
+    const trackImports = (node) => {
+      if (!node.source || node.importKind === 'type') return;
+      for (const s of node.specifiers ?? []) {
+        if (s.importKind !== 'type' && s.local?.name) importedFrom.set(s.local.name, node.source.value);
+      }
+    };
+    const publishedAlias = (node) => {
+      if (role.layer !== 'services' || node.exportKind === 'type' || node.source || !node.declaration) return;
+      if (node.declaration.type !== 'VariableDeclaration') return;
+      for (const d of node.declaration.declarations ?? []) {
+        const spec = d.init?.type === 'Identifier' ? importedFrom.get(d.init.name) : null;
+        if (spec != null) published(node, spec);
+      }
+    };
+
     return {
-      ImportDeclaration: (node) => node.source && judge(node, node.source.value, valueNames(node)),
-      ExportNamedDeclaration: (node) => node.source && judgeExport(node, node.source.value, valueNames(node)),
+      ImportDeclaration: (node) => {
+        trackImports(node);
+        if (node.source) judge(node, node.source.value, valueNames(node));
+      },
+      ExportNamedDeclaration: (node) => {
+        publishedAlias(node);
+        if (node.source) judgeExport(node, node.source.value, valueNames(node));
+      },
       ExportAllDeclaration: (node) => node.source && judgeExport(node, node.source.value, node.exportKind === 'type' ? [] : '*'),
       // A computed specifier resolves nowhere the analyzers can follow. The resolution is undecidable; the silence is not.
       ImportExpression: (node) => {
@@ -231,8 +268,8 @@ const imports = {
 // A core file that carries a surface is judged the same way: core modules are domains (the bottom of the sharedness DAG), and a plain-named loner file is a whole domain doubling as its own surface, so its declarations report with the remedy that fits - a layer suffix, or extraction.
 const noSurfaceDeclarations = {
   create(context) {
-    const { compositionRoot, core } = options(context);
-    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
+    const opts = options(context);
+    const { role } = graphClassify(filenameOf(context), opts);
     const coreSurface = role.kind === 'core' && role.surface != null;
     if (role.kind !== 'surface' && !coreSurface) return {};
     const loner = coreSurface && (role.chain ?? [])[Math.max(0, (role.chain ?? []).length - 1)] === role.surface;
@@ -281,23 +318,23 @@ const noSelfSurface = {
     schema: [{
       type: 'object',
       properties: {
-        domainAlias: { type: 'string' },
-        appAlias: { type: 'string' },
+        aliases: { type: 'object', additionalProperties: { type: 'string' } },
+        ownershipAlias: { type: 'string' },
         compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias, compositionRoot, core } = options(context);
+    const opts = options(context);
     const filename = filenameOf(context);
-    const { role, roleAt } = graphClassify(filename, compositionRoot, core);
+    const { role, roleAt } = graphClassify(filename, opts);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
-    const walker = walkerOf(filename, domainAlias, appAlias);
+    const walker = walkerOf(filename, opts);
     // Only a resolved target is judged. A specifier that names no file cannot be judged at all, and guessing from its shape would report a dangling `./x` as a self-surface import - a verdict about a file that does not exist.
     // The undecidability is not lost by the silence: `imports` reports every unresolvable in-tree specifier in its own right, so one rule owns that finding and this one stays quiet rather than doubling it with a guess.
     const flag = (node, spec) => {
-      const { t, found } = graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
+      const { t, found } = graphTargetFor(roleAt, walker, filename, spec, opts);
       const verdict = found && t && selfSurfaceVerdict(role, t);
       if (verdict) context.report({ node, message: verdict });
     };
@@ -318,20 +355,20 @@ function lateralCoupling(layer) {
       schema: [{
         type: 'object',
         properties: {
-          domainAlias: { type: 'string' },
-          appAlias: { type: 'string' },
+          aliases: { type: 'object', additionalProperties: { type: 'string' } },
+          ownershipAlias: { type: 'string' },
         },
         additionalProperties: false,
       }],
     },
     create(context) {
-      const { domainAlias, appAlias, compositionRoot, core } = options(context);
+      const opts = options(context);
       const filename = filenameOf(context);
-      const { role, roleAt } = graphClassify(filename, compositionRoot, core);
+      const { role, roleAt } = graphClassify(filename, opts);
       if (role.kind !== 'domain' || role.layer !== layer || role.chain.length === 0) return {};
-      const walker = walkerOf(filename, domainAlias, appAlias);
+      const walker = walkerOf(filename, opts);
       const flag = (node, spec) => {
-        const { t } = graphTargetFor(roleAt, walker, filename, spec, domainAlias, appAlias);
+        const { t } = graphTargetFor(roleAt, walker, filename, spec, opts);
         const verdict = lateralVerdict(role, t, layer);
         if (verdict) context.report({ node, message: verdict });
       };
@@ -383,8 +420,8 @@ function diagonalReach(tier) {
       schema: [{
         type: 'object',
         properties: {
-          domainAlias: { type: 'string' },
-          appAlias: { type: 'string' },
+          aliases: { type: 'object', additionalProperties: { type: 'string' } },
+          ownershipAlias: { type: 'string' },
           compositionRoot: AREA, core: AREA,
           acrossDomains: LEVEL_ENUM,
           acrossSubdomains: LEVEL_ENUM,
@@ -394,7 +431,8 @@ function diagonalReach(tier) {
       }],
     },
     create(context) {
-      const { domainAlias, appAlias, compositionRoot, core } = options(context);
+      const opts = options(context);
+      const { ownershipAlias, ownershipDir } = opts;
       const o = (context.options && context.options[0]) || {};
       // This instance reports the classes whose mapped level matches its tier; the twin covers the other half.
       const mine = new Set(
@@ -404,10 +442,14 @@ function diagonalReach(tier) {
       );
       if (mine.size === 0) return {};
       const filename = filenameOf(context);
-      const { role, roleAt } = graphClassify(filename, compositionRoot, core);
+      const { role, roleAt } = graphClassify(filename, opts);
       if (role.kind !== 'domain') return {};
-      const walker = walkerOf(filename, domainAlias, appAlias);
-      const relOf = (p) => norm(p).match(/\/domains\/(.+)$/)?.[1] ?? norm(p).split('/').pop();
+      const walker = walkerOf(filename, opts);
+      const relOf = (p) => {
+      const h = norm(p);
+      const i = h.indexOf('/' + ownershipDir + '/');
+      return i >= 0 ? h.slice(i + ownershipDir.length + 2) : h.split('/').pop();
+    };
       const judge = (node, t, via) => {
         if (!t || !mine.has(diagonalScope(role, t))) return;
         const verdict = landedVerdict(role, t);
@@ -416,11 +458,11 @@ function diagonalReach(tier) {
       const flag = (node, spec, names) => {
         if (names !== '*' && names.length === 0) return;
         const found = walker && walker.landings(filename, spec, names);
-        if (found == null) { judge(node, targetOf(filename, spec, domainAlias, appAlias)); return; }
-        // A landing in core is legal from any rank - arrows point from domains into core - so a core-classified landing carries no target to grade, exactly as graphTargetFor reads direct references.
+        if (found == null) { judge(node, targetOf(filename, spec, ownershipAlias, ownershipDir)); return; }
+        // A landing in core is legal at or below the consumer's own rank - the geometry here only grades below-rank landings, which are the leans the diagram blesses - so a core-classified landing carries no target to grade, and the upward reach is judged on the authored edge.
         for (const l of found) {
           const gr = roleAt(l.path);
-          judge(node, gr ? (gr.kind === 'domain' || gr.kind === 'surface' ? gr : null) : targetOfPath(l.path), l.via);
+          judge(node, gr ? (gr.kind === 'domain' || gr.kind === 'surface' ? gr : null) : targetOfPath(l.path, ownershipDir), l.via);
         }
       };
       return {
@@ -467,19 +509,19 @@ const noDeepSideEffects = {
     schema: [{
       type: 'object',
       properties: {
-        domainAlias: { type: 'string' },
-        appAlias: { type: 'string' },
+        aliases: { type: 'object', additionalProperties: { type: 'string' } },
+        ownershipAlias: { type: 'string' },
         compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { domainAlias, appAlias, compositionRoot, core } = options(context);
+    const opts = options(context);
     const filename = filenameOf(context);
-    const { role } = graphClassify(filename, compositionRoot, core);
+    const { role } = graphClassify(filename, opts);
     if (role.kind !== 'domain' && role.kind !== 'surface') return {};
-    const walker = walkerOf(filename, domainAlias, appAlias);
+    const walker = walkerOf(filename, opts);
     const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
     const flag = (node, spec) => {
       const abs = walker && walker.resolveSpec(filename, spec);
@@ -498,8 +540,8 @@ const noDeepSideEffects = {
 // elda/no-async-inner - LAYER.4 and the Outcome model: async / await / try-catch stay out of the inner layers (wrapped at adapters into channel-conforming values; outcomes are typed branch values).
 const noAsyncInner = {
   create(context) {
-    const { compositionRoot, core } = options(context);
-    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
+    const opts = options(context);
+    const { role } = graphClassify(filenameOf(context), opts);
     if (role.kind !== 'domain' || (role.layer !== 'entities' && role.layer !== 'use-cases')) return {};
     const reportAsync = (node) => node.async && context.report({ node, message: msg.asyncFn() });
     return {
@@ -529,8 +571,8 @@ function patternNames(id, out) {
 
 const noMutableSurface = {
   create(context) {
-    const { compositionRoot, core } = options(context);
-    const { role } = graphClassify(filenameOf(context), compositionRoot, core);
+    const opts = options(context);
+    const { role } = graphClassify(filenameOf(context), opts);
     if (role.kind !== 'domain' && role.kind !== 'surface' && role.kind !== 'core') return {};
     return {
       Program(program) {
@@ -566,16 +608,16 @@ const noDishonestPlacement = {
     schema: [{
       type: 'object',
       properties: {
-        domainAlias: { type: 'string' },
-        appAlias: { type: 'string' },
+        aliases: { type: 'object', additionalProperties: { type: 'string' } },
+        ownershipAlias: { type: 'string' },
         compositionRoot: AREA, core: AREA,
       },
       additionalProperties: false,
     }],
   },
   create(context) {
-    const { compositionRoot, core } = options(context);
-    const { dispute } = graphClassify(filenameOf(context), compositionRoot, core);
+    const opts = options(context);
+    const { dispute } = graphClassify(filenameOf(context), opts);
     if (!dispute) return {};
     return {
       Program: (node) => context.report({ node, message: dispute }),
@@ -616,12 +658,49 @@ const vocabGate = {
   },
 };
 
-// elda/ambient-ownership - OWNER.2: ambient declarations are vocabulary, owned by a domain.
-// A .d.ts outside src/domains/ is an un-owned catch-all (the type-layer `shared/` column).
-const ambientOwnership = {
+// elda/no-entity-state - LAYER.4: entities hold pure domain invariants and own no state.
+// A module-level `let`/`var` in an entities file is state at the pure rank, whether exported or private behind an accessor; the decidable slice is the mutable binding itself, and whether a const collection is mutated stays with review, the same split no-mutable-surface declares for CHANNEL.4.
+const noEntityState = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        aliases: { type: 'object', additionalProperties: { type: 'string' } },
+        ownershipAlias: { type: 'string' },
+        compositionRoot: AREA, core: AREA,
+      },
+      additionalProperties: false,
+    }],
+  },
   create(context) {
+    const opts = options(context);
+    const { role } = graphClassify(filenameOf(context), opts);
+    if (role.layer !== 'entities' || role.asset) return {};
+    return {
+      Program: (program) => {
+        for (const n of program.body ?? []) {
+          const decl =
+            n.type === 'VariableDeclaration' ? n
+            : n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'VariableDeclaration' ? n.declaration
+            : null;
+          if (!decl || decl.kind === 'const') continue;
+          for (const d of decl.declarations ?? []) {
+            context.report({ node: decl, message: msg.entityState(d.id?.name ?? 'it') });
+          }
+        }
+      },
+    };
+  },
+};
+
+// elda/ambient-ownership - OWNER.2: ambient declarations are vocabulary, owned by a domain.
+// A .d.ts outside the ownership tree and every declared core is an un-owned catch-all (the type-layer `shared/` column).
+const ambientOwnership = {
+  meta: { schema: [{ type: 'object', properties: { aliases: { type: 'object', additionalProperties: { type: 'string' } }, ownershipAlias: { type: 'string' }, compositionRoot: AREA, core: AREA }, additionalProperties: false }] },
+  create(context) {
+    const { ownershipDir, core } = options(context);
     const f = filenameOf(context);
-    if (!(f.endsWith('.d.ts') && !f.includes('/domains/'))) return {};
+    if (!(f.endsWith('.d.ts') && !inArea(f, ownershipDir) && !inArea(f, core))) return {};
     return {
       Program: (node) => context.report({ node, message: msg.ambientDecl() }),
     };
@@ -642,6 +721,7 @@ export const rules = {
   'no-deep-side-effects': noDeepSideEffects,
   'no-async-inner': noAsyncInner,
   'no-mutable-surface': noMutableSurface,
+  'no-entity-state': noEntityState,
   'vocab-gate': vocabGate,
   'ambient-ownership': ambientOwnership,
 };
