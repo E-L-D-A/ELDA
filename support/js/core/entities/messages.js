@@ -137,6 +137,11 @@ export const subReferencesParent = (parent) =>
 export const rootLanded = (chain, targetLayer) =>
   `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${chain}' at ${targetLayer}. Consuming ${targetLayer} is a service's own work, so the reach marks a service smashed into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
 
+// The slicing-pressure reading (the spec's Slicing direction): a cluster of rank-climbing reaches between sibling pieces is a partition fighting its dataflow.
+// The pass gathers the cluster and the reviewer decides the new slice, so the verdict suggests and never gates.
+export const slicingPressure = (scope, count, pairs) =>
+  `ELDA slicing: ${count} imports climb the rank order between sibling pieces of '${scope}' (${pairs.join('; ')}). A cluster like this is the pressure of a partition fighting its dataflow. Consider re-slicing: merge the fighting siblings into one piece whose rank rows carry the structure, or re-rank the pieces so every import points down.`;
+
 // A reference cycle over the landed value graph (the graph pass, graph.js); `domains` and `chains` are the distinct domains and subdomain chains it encloses, and a single-file component is a self-reference.
 export const cycle = ({ domains, chains, componentLength, firstPath }) => {
   const where = domains.length > 1

@@ -5,13 +5,13 @@
 
 import { join } from 'node:path';
 
+import { deepSideEffect, slicingPressure } from './entities/messages.js';
+import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from './entities/model.js';
 import { createWalker } from './flow.use-cases.js';
+import { cycles } from './graph.use-cases.js';
 import { graphRoles } from './ownership.use-cases.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
 import { gatherFiles, readOptions } from './tree.adapters.js';
-import { cycles } from './graph.use-cases.js';
-import { deepSideEffect } from './messages.entities.js';
-import { inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.entities.js';
 import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.use-cases.js';
 
 export function buildGraph(appDir) {
@@ -171,6 +171,53 @@ export function buildGraph(appDir) {
   }
   for (const f of files) f.reachable = reachable.has(f.id);
 
+  // The slicing-pressure pass (the spec's Slicing direction): rank-climbing imports whose two ends have a piece boundary between them, grouped by the nearest scope containing both.
+  // Every climb is a violation on its own; this is the second-order reading over those findings - a cluster between sibling pieces is a partition fighting its dataflow - so the pass gathers and the reviewer decides the new slice.
+  // A boundary sits between two units of one subdomain, two subdomains or domains, two core pieces, and a domain-and-core pair; a within-unit climb has no boundary a re-slice could move, so it stays the local finding its own verdict already remedies.
+  const pressureGroups = new Map();
+  for (const e of edges) {
+    if (e.to == null || e.typeOnly) continue;
+    const a = files[e.from].role;
+    const b = files[e.to].role;
+    if (!a.layer || !b.layer) continue;
+    if (a.kind !== 'domain' && a.kind !== 'core') continue;
+    if (b.kind !== 'domain' && b.kind !== 'core') continue;
+    if (LAYER_RANK[b.layer] <= LAYER_RANK[a.layer]) continue;
+    const ca = a.chain ?? [];
+    const cb = b.chain ?? [];
+    if (!ca.length || !cb.length) continue;
+    let p = 0;
+    while (p < ca.length && p < cb.length && ca[p] === cb[p]) p++;
+    const sameChain = p === ca.length && p === cb.length;
+    let scope;
+    let pair;
+    if (a.kind !== b.kind) {
+      scope = '(app)';
+      pair = `${ca.join('/')} -> ${cb.join('/')}`;
+    } else if (sameChain) {
+      const ua = a.name ?? '';
+      const ub = b.name ?? '';
+      if (ua === ub) continue;
+      scope = ca.join('/');
+      pair = `${ua || '(base)'} -> ${ub || '(base)'}`;
+    } else if (a.kind === 'core') {
+      scope = a.area != null && a.area === b.area ? a.area : '(app)';
+      pair = `${ca.join('/')} -> ${cb.join('/')}`;
+    } else {
+      scope = p > 0 ? ca.slice(0, p).join('/') : '(app)';
+      pair = `${ca.join('/')} -> ${cb.join('/')}`;
+    }
+    if (!pressureGroups.has(scope)) pressureGroups.set(scope, []);
+    pressureGroups.get(scope).push({ from: e.from, to: e.to, pair });
+  }
+  const pressure = [...pressureGroups.entries()]
+    .filter(([, list]) => list.length >= 2)
+    .map(([scope, list]) => ({
+      scope,
+      edges: list.map(({ from, to }) => ({ from, to })),
+      verdict: slicingPressure(scope, list.length, [...new Set(list.map((x) => x.pair))]),
+    }));
+
   const walker = createWalker({ appRoot: appDir, aliases, ownershipDir, core });
   const flows = expandFlows(files, edges, walker, appDir, byPath);
   // Root glue draws in the bar of the root that reached it, and glue shared between roots gets a bar of its own, so every composition-root file has a place on the board.
@@ -185,6 +232,7 @@ export function buildGraph(appDir) {
     files,
     edges,
     flows,
+    pressure,
     cycles: cycles(files, cycleEdges(edges, flows)),
     cwd: norm(appDir)
   };

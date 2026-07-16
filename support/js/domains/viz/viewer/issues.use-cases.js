@@ -208,6 +208,29 @@ export function renderIssues() {
       ),
     cycleId,
   );
+  // Slicing pressure is the spec's re-slice indicator: rank-climbing imports clustered between sibling pieces of one scope.
+  // The pass gathers the cluster; choosing the new slice is the reviewer's decision, so this lists and never scores.
+  section(
+    "Slicing pressure (partition vs dataflow)",
+    data().pressure ?? [],
+    (g) =>
+      h(
+        "div",
+        { class: "item pressure", onclick: pinFrom(g.edges[0]) },
+        h(
+          "div",
+          { class: "files" },
+          ...g.edges.flatMap((e, i) => [
+            i ? " · " : "",
+            pathLink(data().files[e.from].path),
+            " ↗ ",
+            pathLink(data().files[e.to].path),
+          ]),
+        ),
+        h("div", { class: "msg" }, g.verdict),
+      ),
+    (g) => g.scope,
+  );
   section(
     "Unresolved specifiers",
     data().edges.filter((e) => e.to == null),
@@ -282,6 +305,7 @@ export function renderIssues() {
     stat(contested, "contested", contested ? "sev-smell" : "sev-zero"),
     stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
     stat(owning.length, "unextracted", owning.length ? "sev-dead" : "sev-zero"),
+    stat((data().pressure ?? []).length, "slicing", (data().pressure ?? []).length ? "sev-smell" : "sev-zero"),
     stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
   );
 }

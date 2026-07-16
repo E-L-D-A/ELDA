@@ -3,8 +3,8 @@
 // The layer and the surface-ness ride the file's own name, wherever it sits on disk. The chain rides the edges.
 // Shared by the enforcer (index.js) and the informer (visualize.js) so the linter and the diagram infer one structure. Pure: a scanned graph in, a role per file out.
 
-import { fileRole, inArea, isRelative, layerOf, parseSpec, stripExt } from './model.entities.js';
-import { dishonestPlacement } from './messages.entities.js';
+import { dishonestPlacement } from './entities/messages.js';
+import { fileRole, inArea, isRelative, layerOf, parseSpec, stripExt } from './entities/model.js';
 
 // A file reached from domains that share no ancestor sits below all of them: pure core, the dependency-order's bottom (CHANNEL.6 sharedness).
 // The sentinel is sticky - one more reach from one more domain never lifts a core file back into that domain - where an empty chain array could not be, since an empty array is a prefix of everything.

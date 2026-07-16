@@ -136,7 +136,7 @@ export function threadComposers(list) {
   return out;
 }
 
-// A chip's label is the file's own name; everything the name carries beyond that (runtime markers, style compound, a legacy directory) becomes a small badge.
+// A chip's label is the file's own name; everything the name carries beyond that (runtime markers, a style compound) becomes a small badge.
 // The file's real extension strips generically rather than off a list: a list omits whatever it has not met, which then survives into the name and shows up as a badge beside the one the extension already earned.
 export function chipParts(f) {
   const file = f.path.split("/").pop();
@@ -148,6 +148,5 @@ export function chipParts(f) {
   const badges = segs.slice(1).filter((s) => !ROWS.includes(s));
   if (f.kind === "style") badges.push("css");
   if (f.kind === "asset") badges.push(file.split(".").pop().toLowerCase());
-  if (f.role.via === "branch" || f.role.via === "unit-dir") badges.push("dir!");
   return { label, badges };
 }

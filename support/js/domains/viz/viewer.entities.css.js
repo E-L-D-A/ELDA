@@ -1074,7 +1074,7 @@ body.panning, body.panning .chip {
 #issues .item.violation {
   background: linear-gradient(110deg, var(--bad), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
 }
-#issues .item.smell {
+#issues .item.smell, #issues .item.pressure {
   background: linear-gradient(110deg, var(--smell), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
 }
 #issues .item.laundered {

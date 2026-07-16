@@ -40,7 +40,7 @@ export const layerOf = (stripped) => {
 };
 
 // Classify a path inside domains/ into its subdomain chain and its layer.
-// Directories express concerns: a plain-named directory is a nested subdomain (SURFACE.7); a layer-suffixed directory (`back-nav.adapters/`) and a bare layer-named directory are the two legacy layouts, recognized here so a migrating tree still classifies.
+// Directories express concerns: a plain-named directory is a nested subdomain (SURFACE.7); a bare layer-named directory is the horizontal slicing (the spec's Slicing direction), rank-first rows of plain concern-named files carrying the same classification; a layer-suffixed directory (`back-nav.adapters/`) is its per-unit variant.
 // Layer membership otherwise rides the file name: the bare reserved names, or a `<name>.<layer>` suffix.
 // A trailing plain name is a surface: `index` the consumable barrel, `services` (a layer name, caught above) the runtime-composition surface, any other name a named surface.
 export function classify(segs) {
@@ -73,7 +73,7 @@ export function classify(segs) {
     if (hit) {
       layer = hit.layer;
       if (hit.name === '') {
-        // A bare reserved name, markers and all (`services.ts`, `services.server.ts`): the subdomain's own layer aggregate, or - as a directory - the legacy layer bucket.
+        // A bare reserved name, markers and all (`services.ts`, `services.server.ts`): the subdomain's own layer aggregate, or - as a directory - the horizontal slicing's rank row.
         via = last ? 'leaf' : 'branch';
         if (!last) branchDir = true;
       } else {
@@ -227,12 +227,12 @@ export function rel(a, b) {
 }
 
 // A services target in surface form is the runtime-composition surface itself, the thing a composer reaches; anything past it is internals.
-// The leaf layout spells it `x/services`, and the legacy layer-directory layout spells the same surface `x/services/index`. Both are the surface: the analyzers read the legacy layout correctly by promise (no rule misjudges it), so reading only the leaf spelling turns a graded OWNER.5 mounting into a hard boundary breach on a tree that has not migrated yet.
+// The vertical slicing spells it `x/services`, and the horizontal slicing spells the same surface `x/services/index`. Both are the surface: the analyzers read both spellings correctly by promise (no rule misjudges either), so reading only one spelling would turn a graded OWNER.5 mounting into a hard boundary breach on a tree sliced the other way.
 export const isServicesSurface = (t) => t.layer === 'services'
   && (t.sub.length === 0 || (t.via === 'branch' && t.sub.length === 1 && t.sub[0] === 'index'));
 
 // OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
-// A unit is one concern-part (SURFACE.5, the spec's "Units"): the files sharing one name at a subdomain's root, or the contents of one legacy unit directory.
+// A unit is one concern-part (SURFACE.5, the spec's "Units"): the files sharing one name at a subdomain's root, or the contents of one unit directory.
 // Same name or same directory means one unit and co-located imports are free; the label is the file's own name, or the directory path.
 export const unitOf = (c) => {
   if (c.via === 'branch') return [c.layer, ...c.sub.slice(0, -1)].join('/');
@@ -242,7 +242,7 @@ export const unitOf = (c) => {
   return '';
 };
 
-// The subdomain's own composer is exempt from the in-subdomain cross-unit smell: the bare `services` file (and the legacy `services/index` barrel) realizes the runtime-composition surface, and composing owned parts re-owns nothing.
+// The subdomain's own composer is exempt from the in-subdomain cross-unit smell: the bare `services` file (and the horizontal slicing's `services/index` barrel) realizes the runtime-composition surface, and composing owned parts re-owns nothing.
 // Its peer mountings still grade.
 export const isComposer = (role) => role.via === 'leaf'
   || (role.via === 'branch' && role.sub.length === 1 && role.sub[0] === 'index');

@@ -4,8 +4,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { isDataPath, norm } from './entities/model.js';
 import { CODE_RE } from './parse.adapters.js';
-import { isDataPath, norm } from './model.entities.js';
 
 // A stylesheet is code (SURFACE.6) and draws in its layer x subdomain cell; everything that is neither a module nor a stylesheet is pure data, read as the complement (isDataPath) so that no extension the tool has never met classifies as a rankless surface.
 export const STYLE_RE = /\.(css|scss|sass|less)$/i;

@@ -2,28 +2,28 @@
 // The roles come from the resolved graph (ownership.js) through the same scan the visualizer runs, so the linter and the diagram judge every edge identically; the reference verdicts live in verdicts.js, and the path reading survives only as the fallback for a file no graph holds.
 // The plugin object oxlint mounts, and the grade presets, are assembled in index.js from the rules map this file exports.
 
+import * as msg from '../../core/entities/messages.js';
 import {
-  norm,
+  diagonalScope,
   fileRole,
   inArea,
   inTreeSpec,
+  norm,
   targetOf,
   targetOfPath,
-  diagonalScope,
-} from '../../core/model.entities.js';
+} from '../../core/entities/model.js';
+import { createWalker } from '../../core/flow.use-cases.js';
+import { graphRoles } from '../../core/ownership.use-cases.js';
+import { buildGraph } from '../../core/scan.use-cases.js';
 import {
   importVerdict,
-  unjudgedVerdict,
-  lateralVerdict,
   landedVerdict,
-  rootLandedVerdict,
+  lateralVerdict,
   publishVerdict,
+  rootLandedVerdict,
   selfSurfaceVerdict,
+  unjudgedVerdict,
 } from '../../core/verdicts.use-cases.js';
-import { createWalker } from '../../core/flow.use-cases.js';
-import { buildGraph } from '../../core/scan.use-cases.js';
-import { graphRoles } from '../../core/ownership.use-cases.js';
-import * as msg from '../../core/messages.entities.js';
 
 // The app-root resolution is an adapter concern the composer supplies (LAYER.2): the rules declare the need here, enforce's services file injects the implementation, and this module touches no filesystem of its own.
 let resolveAppRoot = () => null;

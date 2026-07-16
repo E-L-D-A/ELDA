@@ -5,7 +5,8 @@
 // The parse and read primitives live in parse.js; this file resolves specifiers against the filesystem and traverses the tables they yield.
 
 import { existsSync, statSync } from 'node:fs';
-import { fileRole, isRelative, norm } from './model.entities.js';
+
+import { fileRole, isRelative, norm } from './entities/model.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
