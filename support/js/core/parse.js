@@ -1,5 +1,6 @@
 // The filesystem and oxc read boundary for the binding-flow analysis, shared by the lint rules (index.js) and the visualizer (visualize.js): it reads directories and modules off disk and parses each module into its binding table, so the walk (flow.js) traverses tables and resolved paths without holding the parser itself.
 // A module's binding table says which export names it owns, which pass through to another module, and which modules `export *` forwards to.
+// `owned` carries every owned export name for the walk's termination reading; `ownedValues` carries only the value bindings among them (type-only exports are vocabulary), which is what the surface-declaration observation reads.
 // Tables and directory listings are cached by mtime, so a lint pass or a rescan parses each conduit at most once and an editor session stays correct across edits.
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -30,7 +31,7 @@ export const EXT_CANDIDATES = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.c
 export function analyzeModule(path, code) {
   const parsed = parseSync(path, code);
   const refs = [];
-  const table = { owned: new Set(), pass: new Map(), allFrom: [] };
+  const table = { owned: new Set(), ownedValues: new Set(), pass: new Map(), allFrom: [] };
   const nsOf = new Map();
   for (const si of parsed.module.staticImports) {
     const spec = si.moduleRequest.value;
@@ -64,9 +65,13 @@ export function analyzeModule(path, code) {
       } else if (e.exportName.kind === 'Name') {
         const ns = e.localName.kind === 'Name' && nsOf.get(e.localName.name);
         if (ns) table.pass.set(e.exportName.name, { spec: ns, imported: '*' });
-        else table.owned.add(e.exportName.name);
+        else {
+          table.owned.add(e.exportName.name);
+          if (!e.isType) table.ownedValues.add(e.exportName.name);
+        }
       } else if (e.exportName.kind === 'Default') {
         table.owned.add('default');
+        if (!e.isType) table.ownedValues.add('default');
       }
     }
     if (spec) refs.push({ spec, kind: 'reexport', typeOnly: names.length === 0, names: names.includes('*') ? '*' : names });

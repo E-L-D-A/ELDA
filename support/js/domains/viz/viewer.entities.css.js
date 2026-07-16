@@ -878,15 +878,18 @@ body.panning, body.panning .chip {
 .cell:empty {
   background: none;
 }
-/* A loner core module's unextracted cake: the layers exist inside the surface file, so the span draws hatched instead of empty, and in the dataflow view the file itself sits inside it. */
-.cell.obscured {
+/* A loner core module's cake cell spans the layer rows its one file stands for; in the dataflow view the file itself sits inside it. */
+.cell.cake {
+  border: 1px dashed var(--line);
+  justify-content: center;
+}
+/* The hatch marks unextracted contents: the surface file owns value bindings no layer file carries yet. A loner that only re-exports keeps a plain cake. */
+.cell.cake.obscured {
   background: repeating-linear-gradient(
     -45deg,
     rgb(128 128 128 / 0.09) 0 6px,
     transparent 6px 13px
   );
-  border: 1px dashed var(--line);
-  justify-content: center;
 }
 
 .chip {
@@ -1088,6 +1091,10 @@ body.panning, body.panning .chip {
 }
 /* An unreachable file is not a breach, so it carries no severity stripe; only its path is actionable. */
 #issues .unreachable.item {
+  color: var(--muted);
+}
+/* An owning surface is an observation, so it carries no stripe either; the lint rule holds the severity and the counts. */
+#issues .unextracted.item {
   color: var(--muted);
 }
 /* The path inside a finding is the way into the file: it underlines on hover so it reads as the link it is, while the item around it keeps its own click. */

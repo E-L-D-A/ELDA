@@ -221,6 +221,28 @@ export function renderIssues() {
       ),
     edgeItemKey,
   );
+  // A surface that owns exported value bindings holds contents no layer file carries yet, read off the shared binding tables.
+  // The lint rule reports each declaration with its remedy and keeps the authoritative counts; this list is the per-file fact, so the two never claim one number.
+  const owning = data.files.filter((f) => f.owns?.length);
+  section(
+    "Unextracted declarations (surfaces owning bindings)",
+    owning,
+    (f) =>
+      h(
+        "div",
+        { class: "item unextracted", onclick: pinId(f.id) },
+        h("div", {}, pathLink(f.path)),
+        h(
+          "div",
+          { class: "msg" },
+          `owns ${f.owns.join(", ")}. ` +
+            (place(f).loner
+              ? "A whole domain in one file: rename it with the layer suffix its contents hold, or extract them into layer files behind this surface."
+              : "A surface curates what the layers own: declare these in layer files and re-export them here."),
+        ),
+      ),
+    (f) => f.path,
+  );
   // A file no composition root can reach ships to nobody. SURFACE.4 reads that as a review signal - a domain may expose more than its consumers currently require - so it is listed, never scored as a breach.
   const unreached = data.files.filter((f) => f.reachable === false);
   section(
@@ -259,6 +281,7 @@ export function renderIssues() {
     stat(cycles, "cycles", cycles ? "sev-cycle" : "sev-zero"),
     stat(contested, "contested", contested ? "sev-smell" : "sev-zero"),
     stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
+    stat(owning.length, "unextracted", owning.length ? "sev-dead" : "sev-zero"),
     stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
   );
 }

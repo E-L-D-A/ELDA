@@ -46,8 +46,12 @@ wrap.addEventListener("pointerover", (e) => {
         .filter(Boolean)
         .join("\n")
     : f.path;
-  // A contested or unreached file carries its condition on the hover, so the chip's paint explains itself where the pointer already is.
-  const notes = [f.dispute, f.unreached ? `unreached - ${f.unreached}` : null].filter(Boolean);
+  // A contested, unreached, or binding-owning file carries its condition on the hover, so the chip's paint explains itself where the pointer already is.
+  const notes = [
+    f.dispute,
+    f.unreached ? `unreached - ${f.unreached}` : null,
+    f.owns?.length ? `owns ${f.owns.join(", ")} - contents no layer file carries yet` : null,
+  ].filter(Boolean);
   const body = notes.length ? `${head}\n${notes.join("\n")}` : head;
   showTip(e, deep ? `${body}\ndepends on ${out.size} · depended on by ${inc.size}` : body);
 });

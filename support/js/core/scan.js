@@ -99,6 +99,16 @@ export function buildGraph(appDir) {
     if (r.unreached) f.unreached = r.unreached;
   }
 
+  // The informer's own reading of the surface-declaration fact: a surface that owns exported value bindings holds contents no layer file carries yet.
+  // It is read off the shared binding tables (parse.js ownedValues), never a second AST pass, so this observation and the lint rule cannot fork; the rule keeps the per-declaration reports, this carries the per-file fact.
+  // Ambient .d.ts modules are vocabulary throughout, so they never count as contents.
+  for (const f of files) {
+    if (f.kind !== 'code' || /\.d\.ts$/i.test(f.path)) continue;
+    if ((f.role.kind !== 'surface' && f.role.kind !== 'core') || f.role.surface == null) continue;
+    const table = moduleInfo(join(appDir, f.path))?.table;
+    if (table?.ownedValues?.size) f.owns = [...table.ownedValues];
+  }
+
   // The reference target read off the file a specifier actually resolved to.
   // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.
   const targetOfNode = (node) => {

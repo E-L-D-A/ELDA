@@ -469,9 +469,10 @@ function renderDomains(visible, ghost, rowList, expunge) {
     };
     emit("", 0);
 
-    // A loner core module is a whole domain in one file: the file draws as its surface, and the layer cake beneath it is real yet unextracted, so the cake draws obscured instead of empty.
-    // The dataflow view drops the surface row, and there the file draws inside the obscured cake itself, since the binding walk terminates on its declarations.
-    const obscured = (col) => {
+    // A loner core module is a whole domain in one file: the file draws as its surface, and the cake cell beneath it spans the layer rows it has no files for.
+    // The cake draws hatched (obscured) exactly when the file owns exported value bindings - contents no layer file carries yet - so a loner that only re-exports keeps a plain cake and claims nothing.
+    // The dataflow view drops the surface row, and there the file draws inside its cake cell, since the binding walk terminates on its declarations.
+    const lonerCake = (col) => {
       if (col.unit !== "" || col.sub === "") return false;
       const files = col.rows.get("surface") ?? [];
       if (!files.length || !files.every((f) => place(f).loner)) return false;
@@ -482,7 +483,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
         return false;
       return true;
     };
-    const obscuredCols = new Set(columns.filter(obscured).map((c) => c.track));
+    const cakeCols = new Set(columns.filter(lonerCake).map((c) => c.track));
 
     const grid = h("div", {
       class: "grid",
@@ -589,7 +590,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
         ),
       );
       columns.forEach((col) => {
-        if (obscuredCols.has(col.track) && row !== "surface") return;
+        if (cakeCols.has(col.track) && row !== "surface") return;
         grid.append(
           h(
             "div",
@@ -605,18 +606,16 @@ function renderDomains(visible, ghost, rowList, expunge) {
     const cakeStart = rowList[0] === "surface" ? 1 : 0;
     if (rowList.length > cakeStart)
       for (const col of columns) {
-        if (!obscuredCols.has(col.track)) continue;
-        grid.append(
-          h(
-            "div",
-            {
-              class: "cell obscured",
-              title: "contents not extracted: the layer declarations live inside the surface file",
-              style: `grid-column: ${col.track}; grid-row: ${layerRow(cakeStart)} / ${layerRow(rowList.length - 1) + 1}`,
-            },
-            expunge ? (col.rows.get("surface") ?? []).sort(byDeg).map((f) => makeChip(f)) : null,
-          ),
-        );
+        if (!cakeCols.has(col.track)) continue;
+        const files = (col.rows.get("surface") ?? []).sort(byDeg);
+        const owned = [...new Set(files.flatMap((f) => f.owns ?? []))];
+        const props = {
+          class: "cell cake" + (owned.length ? " obscured" : ""),
+          style: `grid-column: ${col.track}; grid-row: ${layerRow(cakeStart)} / ${layerRow(rowList.length - 1) + 1}`,
+        };
+        if (owned.length)
+          props.title = `contents not extracted: the surface file owns ${owned.join(", ")}`;
+        grid.append(h("div", props, expunge ? files.map((f) => makeChip(f)) : null));
       }
     domainsEl.append(domainBox(name, grid));
   }
