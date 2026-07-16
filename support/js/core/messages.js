@@ -15,6 +15,13 @@ export const rootLandsOutside = (landed) =>
 export const rootDynamicComputed = () =>
   `ELDA ROOT.1 (unjudged): a dynamic import with a computed specifier resolves nowhere the analyzers can follow, so the layer and owner it lands on cannot be judged. Give the import a statically-known specifier.`;
 
+// --- The placement weld -------------------------------------------------------
+
+// The two judges disagree: the tree places the file as one thing, the imports consume it as another.
+// Placement is a claim the graph adjudicates (the thesis), so the disagreement itself is the finding; the caller supplies what the tree says, what the imports say, and the remedy that fits the specific mismatch, each as plain prose that stands without the documentation.
+export const dishonestPlacement = (claimed, actual, remedy) =>
+  `ELDA placement: the tree places this file as ${claimed}, yet ${actual}. ${remedy}`;
+
 // --- LAYER ------------------------------------------------------------------
 
 export const innerImportsOuter = (roleLayer, targetLayer) =>

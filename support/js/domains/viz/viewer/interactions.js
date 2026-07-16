@@ -46,7 +46,10 @@ wrap.addEventListener("pointerover", (e) => {
         .filter(Boolean)
         .join("\n")
     : f.path;
-  showTip(e, deep ? `${head}\ndepends on ${out.size} · depended on by ${inc.size}` : head);
+  // A contested or unreached file carries its condition on the hover, so the chip's paint explains itself where the pointer already is.
+  const notes = [f.dispute, f.unreached ? `unreached - ${f.unreached}` : null].filter(Boolean);
+  const body = notes.length ? `${head}\n${notes.join("\n")}` : head;
+  showTip(e, deep ? `${body}\ndepends on ${out.size} · depended on by ${inc.size}` : body);
 });
 wrap.addEventListener("pointerout", (e) => {
   if (e.target.classList.contains("hit")) {

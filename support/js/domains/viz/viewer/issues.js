@@ -177,6 +177,20 @@ export function renderIssues() {
       ),
     (f) => `${data.files[f.from].path}=>${data.files[f.to].path}`,
   );
+  // The two judges disagree: the tree places the file as one thing, the graph consumes it as another (the thesis's own finding).
+  // The file draws where the tree claims it and its other findings are judged by that claim, so this list is where the contest itself surfaces.
+  section(
+    "Contested placement (tree vs graph)",
+    data.files.filter((f) => f.dispute),
+    (f) =>
+      h(
+        "div",
+        { class: "item smell", onclick: pinId(f.id) },
+        h("div", {}, pathLink(f.path)),
+        h("div", { class: "msg" }, f.dispute),
+      ),
+    (f) => f.path,
+  );
   // A cycle of legal references is invisible to every per-file rule, because no file in it is at fault (CHANNEL.5): every file in a cycle reaches every other, so the cycle is what a reviewer adjudicates, naming the settling element that encloses it or breaking the cycle.
   section(
     "Reference cycles (graph-only)",
@@ -212,7 +226,13 @@ export function renderIssues() {
   section(
     "Unreachable from any root",
     unreached,
-    (f) => h("div", { class: "unreachable item", onclick: pinId(f.id) }, pathLink(f.path)),
+    (f) =>
+      h(
+        "div",
+        { class: "unreachable item", onclick: pinId(f.id) },
+        pathLink(f.path),
+        f.unreached ? h("div", { class: "msg" }, f.unreached) : null,
+      ),
     (f) => f.path,
   );
   section(
@@ -227,7 +247,8 @@ export function renderIssues() {
   const smell = data.edges.filter((e) => e.tier === "smell").length;
   const laundered = data.flows.filter((f) => f.laundered).length;
   const cycles = data.cycles.length;
-  const found = bad + smell + laundered + cycles;
+  const contested = data.files.filter((f) => f.dispute).length;
+  const found = bad + smell + laundered + cycles + contested;
   $("issue-count").textContent = `${found}`;
   $("issue-count").classList.toggle("hot", found > 0);
   $("counts").replaceChildren(
@@ -236,6 +257,7 @@ export function renderIssues() {
     stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
     stat(laundered, "laundered", laundered ? "sev-laundered" : "sev-zero"),
     stat(cycles, "cycles", cycles ? "sev-cycle" : "sev-zero"),
+    stat(contested, "contested", contested ? "sev-smell" : "sev-zero"),
     stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
     stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
   );

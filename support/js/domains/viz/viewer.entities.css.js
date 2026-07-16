@@ -145,6 +145,15 @@ header h1 .brand {
 .counts .sev-smell .dot {
   background: var(--smell);
 }
+/* The two judges disagree on the file: it draws where the tree claims it, and the dashed paint says the graph reads it elsewhere. */
+.chip.disputed {
+  outline: 2px dashed var(--smell) !important;
+  outline-offset: -5px;
+}
+/* Nothing reaches the file, so it ghosts in its claimed place rather than vanishing into a box. */
+.chip.unreached {
+  opacity: 0.45;
+}
 .counts .sev-smell b {
   color: var(--smell);
 }
@@ -874,6 +883,7 @@ body.panning, body.panning .chip {
   cursor: pointer;
   white-space: nowrap;
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.35);
+  transition: outline-offset ease 100ms;
 }
 .chip:hover {
   filter: brightness(1.12);

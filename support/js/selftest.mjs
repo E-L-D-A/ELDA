@@ -43,6 +43,7 @@ const GRAPH_RULES = [
   'no-diagonal-reach-gate',
   'no-service-coupling',
   'no-adapter-coupling',
+  'no-dishonest-placement',
   'no-deep-side-effects',
   'no-async-inner',
   'no-mutable-surface',

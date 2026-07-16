@@ -91,18 +91,22 @@ const rolesByPath = (graph) => {
   if (!byPath) {
     byPath = new Map();
     const roles = graphRoles(graph);
-    for (const f of graph.files) byPath.set(`${graph.cwd}/${f.path}`, { ...roles.get(f.id), asset: f.kind === 'asset' });
+    for (const f of graph.files) {
+      const rec = roles.get(f.id);
+      byPath.set(`${graph.cwd}/${f.path}`, { role: { ...rec.role, asset: f.kind === 'asset' }, dispute: rec.dispute ?? null });
+    }
     roleMaps.set(graph, byPath);
   }
   return byPath;
 };
 const graphClassify = (filename, compositionRoot, core) => {
   const graph = graphFor(filename);
-  if (!graph) return { role: fileRole(filename, compositionRoot, core), roleAt: () => null };
+  if (!graph) return { role: fileRole(filename, compositionRoot, core), roleAt: () => null, dispute: null };
   const byPath = rolesByPath(graph);
   return {
-    role: byPath.get(filename) ?? fileRole(filename, compositionRoot, core),
-    roleAt: (abs) => byPath.get(norm(abs)) ?? null,
+    role: byPath.get(filename)?.role ?? fileRole(filename, compositionRoot, core),
+    roleAt: (abs) => byPath.get(norm(abs))?.role ?? null,
+    dispute: byPath.get(filename)?.dispute ?? null,
   };
 };
 
@@ -547,6 +551,31 @@ const noMutableSurface = {
   },
 };
 
+// elda/no-dishonest-placement - the thesis's own rule: placement is a claim the graph adjudicates, and a claim the graph contradicts is the finding.
+// The two judges are computed in ownership.js: the tree's claim and the graph's surface-ownership reading. Where they disagree, this rule reports the contest once, on the file itself, and every other rule judges the file by its claim - so the tree behaves the way its author reads it, and one honest finding replaces a cascade of re-homed neighbours.
+// Warn-level: the contest is mechanically decidable, and the remedy - attribute the consumption, publish a surface, or move the file - is the reviewer's call.
+const noDishonestPlacement = {
+  meta: {
+    schema: [{
+      type: 'object',
+      properties: {
+        domainAlias: { type: 'string' },
+        appAlias: { type: 'string' },
+        compositionRoot: AREA, core: AREA,
+      },
+      additionalProperties: false,
+    }],
+  },
+  create(context) {
+    const { compositionRoot, core } = options(context);
+    const { dispute } = graphClassify(filenameOf(context), compositionRoot, core);
+    if (!dispute) return {};
+    return {
+      Program: (node) => context.report({ node, message: dispute }),
+    };
+  },
+};
+
 // elda/vocab-gate - OWNER.2 / ROOT.2: shared-namespace writes with literal keys at the integration surface (the composition root) introduce out-of-band vocabulary the owner should hold.
 const vocabGate = {
   meta: {
@@ -602,6 +631,7 @@ export const rules = {
   'no-service-coupling': noServiceCoupling,
   'no-adapter-coupling': noAdapterCoupling,
   'no-penetration': noPenetration,
+  'no-dishonest-placement': noDishonestPlacement,
   'no-deep-side-effects': noDeepSideEffects,
   'no-async-inner': noAsyncInner,
   'no-mutable-surface': noMutableSurface,

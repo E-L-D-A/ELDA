@@ -85,7 +85,9 @@ function makeChip(f, ghost) {
       class:
         "chip " +
         (p.row && p.row !== "surface" ? p.row : p.area === "root" ? "services" : "") +
-        (ghost ? " ghost" : ""),
+        (ghost ? " ghost" : "") +
+        (f.dispute ? " disputed" : "") +
+        (f.unreached ? " unreached" : ""),
       "data-id": f.id,
     },
     ghost && p.sub ? h("span", { class: "gsub" }, p.sub + " / ") : null,
@@ -188,7 +190,7 @@ function renderCoreBox(visible) {
   const otherFiles = data.files.filter((f) => place(f).area === "other" && visible(f)).sort(byDeg);
   otherBox.hidden = otherFiles.length === 0;
   otherBox.replaceChildren(
-    "unclassified ",
+    "unreached ",
     hideBtn("@other"),
     ...otherFiles.map((f) => makeChip(f)),
   );

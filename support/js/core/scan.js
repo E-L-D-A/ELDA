@@ -89,9 +89,15 @@ export function buildGraph(appDir) {
     }
   }
 
-  // The roles, read off the resolved graph: surface ownership decides each file's domain and chain, and the name decides its layer (ownership.js).
-  const roles = graphRoles({ files, edges, options: { domainAlias, appAlias } });
-  for (const f of files) f.role = roles.get(f.id) ?? f.role;
+  // The roles, reconciled from the two judges (ownership.js): the graph reading and the tree's claim, with a dispute where they disagree and an unreached reason where the graph is silent.
+  const roles = graphRoles({ files, edges, options: { domainAlias, appAlias, compositionRoot, core } });
+  for (const f of files) {
+    const r = roles.get(f.id);
+    if (!r) continue;
+    f.role = r.role;
+    if (r.dispute) f.dispute = r.dispute;
+    if (r.unreached) f.unreached = r.unreached;
+  }
 
   // The reference target read off the file a specifier actually resolved to.
   // Only a domain or surface file carries a target the reference rules can read; a root, a core module, or an unscanned path carries none, and the caller falls back to the specifier's own shape.

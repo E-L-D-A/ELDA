@@ -13,6 +13,7 @@
     "elda/no-service-coupling": "error",
     "elda/no-adapter-coupling": "error",
     "elda/no-penetration": "error",
+    "elda/no-dishonest-placement": "error",
     "elda/no-deep-side-effects": "error",
     "elda/vocab-gate": "error",
     "elda/no-diagonal-reach": [

@@ -27,7 +27,7 @@ const plugin = {
 // A preset supplies the gate; the grade is read off the tree under it.
 // ESLint flat-config consumers spread `plugin.configs.<name>`; oxlint's `extends` is file-based and does not read a plugin's `configs`, so oxlint users extend the shipped `<name>.json` by path instead (see README).
 const INVARIANTS = ['imports', 'no-surface-declarations', 'no-self-surface', 'no-async-inner', 'no-mutable-surface', 'ambient-ownership'];
-const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-deep-side-effects', 'vocab-gate'];
+const SMELLS = ['no-service-coupling', 'no-adapter-coupling', 'no-penetration', 'no-dishonest-placement', 'no-deep-side-effects', 'vocab-gate'];
 // The diagonal pair rides every preset with one class-to-level map per grade; the two entries project the map's halves (see the rule's comment).
 const DIAGONAL_MAPS = {
   adopting: { acrossDomains: 'warn', acrossSubdomains: 'warn', withinSubdomain: 'warn' },

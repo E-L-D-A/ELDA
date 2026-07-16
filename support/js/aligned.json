@@ -13,6 +13,7 @@
     "elda/no-service-coupling": "warn",
     "elda/no-adapter-coupling": "warn",
     "elda/no-penetration": "warn",
+    "elda/no-dishonest-placement": "warn",
     "elda/no-deep-side-effects": "warn",
     "elda/vocab-gate": "warn",
     "elda/no-diagonal-reach": [
