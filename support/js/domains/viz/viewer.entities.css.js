@@ -591,11 +591,11 @@ body.panning, body.panning .chip {
   margin-right: 24px;
   border-right: 1px dashed var(--line);
 }
-/* The column's own "display" outranks the "hidden" attribute, so restore the hide when core and the roots leave nothing to show, dropping the empty gutter. */
+/* The column's own "display" outranks the "hidden" attribute, so restore the hide when nothing unclassified is left to show, dropping the empty gutter. */
 #nondomains[hidden] {
   display: none;
 }
-#core-box, #other-box {
+#other-box {
   position: relative;
   border: 1px solid var(--line-strong);
   background: var(--box);
@@ -719,6 +719,18 @@ body.panning, body.panning .chip {
     rgb(255 255 255 / 0.035),
     transparent
   );
+}
+/* A core block is the sharedness DAG's bottom, reached from every feature block, and its header says so. */
+.domain.core > h2 {
+  color: var(--entities-bd);
+}
+.domain.core > h2::after {
+  content: "shared";
+  margin-left: 7px;
+  font: 400 9px var(--sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
 /* The caret says which way the title goes: down for a box holding its columns, right for one folded into a single one. */
 .domain > h2::before {
@@ -866,6 +878,16 @@ body.panning, body.panning .chip {
 .cell:empty {
   background: none;
 }
+/* A loner core module's unextracted cake: the layers exist inside the surface file, so the span draws hatched instead of empty, and in the dataflow view the file itself sits inside it. */
+.cell.obscured {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgb(128 128 128 / 0.09) 0 6px,
+    transparent 6px 13px
+  );
+  border: 1px dashed var(--line);
+  justify-content: center;
+}
 
 .chip {
   position: relative;
@@ -937,7 +959,7 @@ body.panning, body.panning .chip {
   outline: 2px solid var(--cycle);
   outline-offset: 1px;
 }
-.root-block .chip, #core-box .chip, #other-box .chip {
+.root-block .chip, #other-box .chip {
   margin: 2px 3px;
 }
 

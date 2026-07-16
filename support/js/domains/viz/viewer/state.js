@@ -48,9 +48,9 @@ export const cycleId = (c) =>
 // The edges that close a cycle, keyed the way a drawn path carries its endpoints.
 export const edgeKey = (e) => `${e.from}>${e.to}`;
 
-// On a fresh session every composition root and the pure-core box start hidden; the domains carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
+// On a fresh session every composition root starts hidden; the domains, core blocks among them, carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
 const defaultHidden = () =>
-  new Set(["@core", ...(data ? data.options.roots.map((r) => "@root:" + r.key) : [])]);
+  new Set(data ? data.options.roots.map((r) => "@root:" + r.key) : []);
 export let hiddenBlocks = new Set();
 // Domains drawn compact: the columns fold away, the rows stay, and one aggregate chip stands for every file of a rank. Click a domain's title to fold it, and again to open it.
 // loadPrefs here reassigns it directly; the fold-all control in another module reassigns it through setCollapsed, and folding one domain only mutates the set in place.

@@ -229,6 +229,8 @@ function expandFlows(files, edges, walker, appDir, byPath) {
     // Side-effect imports execute the target rather than take bindings, and type-only edges are vocabulary; both draw as authored and do not expand.
     if (e.kind === 'side-effect' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
     const judge = (toId) => {
+      // A landing in core is legal from anywhere: arrows point from domains into core at any rank, and ROOT.6 constrains core's own imports on the authored edges.
+      if (files[toId].role.kind === 'core') return null;
       const t = { ...files[toId].role, asset: files[toId].kind === 'asset' };
       // The root's landings answer ROOT.1: a binding it takes that lands off the services row is a service smashed into the root.
       if (src.role.kind === 'composition-root') {

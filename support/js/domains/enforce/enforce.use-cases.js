@@ -228,11 +228,14 @@ const imports = {
 // A binding DECLARED on a surface holds no rank, so it has no layer and no owner: the binding walk terminates on a rankless file and every geometry verdict bails on it (the `!t.layer || t.surface` guard).
 // That makes the barrel the cheapest laundering path in the system - wrap a use-case in a locally-declared function and every reach through it goes silent - so a surface re-exports, and only re-exports.
 // A name bound by an import and then exported keeps its module request, so `export { foo }` over an import stays curation; only a genuine local declaration reports.
+// A core file that carries a surface is judged the same way: core modules are domains (the bottom of the sharedness DAG), and a plain-named loner file is a whole domain doubling as its own surface, so its declarations report with the remedy that fits - a layer suffix, or extraction.
 const noSurfaceDeclarations = {
   create(context) {
     const { compositionRoot, core } = options(context);
     const { role } = graphClassify(filenameOf(context), compositionRoot, core);
-    if (role.kind !== 'surface') return {};
+    const coreSurface = role.kind === 'core' && role.surface != null;
+    if (role.kind !== 'surface' && !coreSurface) return {};
+    const loner = coreSurface && (role.chain ?? [])[Math.max(0, (role.chain ?? []).length - 1)] === role.surface;
     return {
       Program: (program) => {
         const body = program.body ?? [];
@@ -245,7 +248,7 @@ const noSurfaceDeclarations = {
         }
         const report = (node, what) => context.report({
           node,
-          message: msg.surfaceDeclaration(what),
+          message: loner ? msg.surfaceDeclarationLoner(what) : msg.surfaceDeclaration(what),
         });
         for (const n of body) {
           if (n.type === 'ExportDefaultDeclaration') { report(n, 'a default export'); continue; }
@@ -414,7 +417,11 @@ function diagonalReach(tier) {
         if (names !== '*' && names.length === 0) return;
         const found = walker && walker.landings(filename, spec, names);
         if (found == null) { judge(node, targetOf(filename, spec, domainAlias, appAlias)); return; }
-        for (const l of found) judge(node, roleAt(l.path) ?? targetOfPath(l.path), l.via);
+        // A landing in core is legal from any rank - arrows point from domains into core - so a core-classified landing carries no target to grade, exactly as graphTargetFor reads direct references.
+        for (const l of found) {
+          const gr = roleAt(l.path);
+          judge(node, gr ? (gr.kind === 'domain' || gr.kind === 'surface' ? gr : null) : targetOfPath(l.path), l.via);
+        }
       };
       return {
         ImportDeclaration: (node) => node.source && flag(node, node.source.value, valueNames(node)),
@@ -524,7 +531,7 @@ const noMutableSurface = {
   create(context) {
     const { compositionRoot, core } = options(context);
     const { role } = graphClassify(filenameOf(context), compositionRoot, core);
-    if (role.kind !== 'domain' && role.kind !== 'surface') return {};
+    if (role.kind !== 'domain' && role.kind !== 'surface' && role.kind !== 'core') return {};
     return {
       Program(program) {
         const mutable = new Set();

@@ -69,6 +69,10 @@ export const selfSurface = (own, face) =>
 export const surfaceDeclaration = (what) =>
   `ELDA SURFACE.2 / OWNER.2: a surface curates what the layers own and holds no rank of its own, so ${what} has no layer and no owner here, and no rule can judge where it sits. Declare it in the layer file that owns it, and re-export it from this surface.`;
 
+// The single-file domain: the file is its own surface and its declarations are the domain's contents, so no layer file exists yet to own them.
+export const surfaceDeclarationLoner = (what) =>
+  `ELDA SURFACE.2 / OWNER.2: this file is a whole domain in one module, so it doubles as the domain's surface, and ${what} declared on a surface has no layer to be judged at. Rename the file with the layer suffix its contents hold, or extract the contents into layer files and keep this one as the surface that re-exports them.`;
+
 export const diagonal = (from, targetUnit, targetLayer) =>
   `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${targetLayer} - a diagonal reach across both name and rank. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${targetLayer} file if the subdomain shares it, or cross at equal rank through this unit's own ${targetLayer} row.`;
 

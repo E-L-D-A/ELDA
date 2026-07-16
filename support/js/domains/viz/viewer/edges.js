@@ -75,12 +75,13 @@ export function edgeVisible(e) {
 }
 
 // The logical orientation of an edge from its grid placement, not its pixels: a reference within one unit column is vertical, an equal-rank reference across columns is horizontal, a reference crossing both a column and a rank is a diagonal (the shape no ELDA row draws), and two files sharing one cell arc beside it.
-// The composition root drops vertically into the column it wires; core sits to the side, reached laterally; a domain-wide band spans its own subdomain's stack, so within that subdomain its edges are vertical, and two bands of the same kind on one shelf read horizontally across subdomains.
+// The composition root drops vertically into the column it wires; a core block is reached laterally from the feature blocks; a domain-wide band spans its own subdomain's stack, so within that subdomain its edges are vertical, and two bands of the same kind on one shelf read horizontally across subdomains.
 function edgeMode(e) {
   const pf = place(data.files[e.from]),
     pt = place(data.files[e.to]);
   if (pf.area === "root" || pt.area === "root") return "v";
-  if (pf.area === "core" || pt.area === "core") return "h";
+  // A reach into a core block is legal from any rank - the diagram's dashed laterals into Shared - so a cross-block core edge reads horizontally; inside the block the normal geometry holds.
+  if ((pf.core || pt.core) && pf.domain !== pt.domain) return "h";
   const fromBar = isBarFile(data.files[e.from]),
     toBar = isBarFile(data.files[e.to]);
   if (fromBar || toBar) {

@@ -115,11 +115,14 @@ function pathClaim(file, options) {
 }
 
 const sameChain = (a, b) => a.length === b.length && a.every((s, i) => s === b[i]);
+// A core claim is compared at kind level only: the graph's core reading is the absorbing sentinel and carries no module chain, while the tree's names the module, and the two say the same thing.
 const claimAgrees = (claim, graphRole) =>
-  claim.kind === graphRole.kind &&
-  sameChain(claim.chain ?? [], graphRole.chain ?? []) &&
-  (claim.layer ?? null) === (graphRole.layer ?? null) &&
-  (claim.surface ?? null) === (graphRole.surface ?? null);
+  claim.kind === 'core' || graphRole.kind === 'core'
+    ? claim.kind === graphRole.kind
+    : claim.kind === graphRole.kind &&
+      sameChain(claim.chain ?? [], graphRole.chain ?? []) &&
+      (claim.layer ?? null) === (graphRole.layer ?? null) &&
+      (claim.surface ?? null) === (graphRole.surface ?? null);
 
 const describeClaim = (c) =>
   c.kind === 'core' ? 'pure core'
@@ -200,7 +203,7 @@ export function graphRoles(graph) {
     const claim = claims.get(f.id);
     const chain = chainOf.get(f.id);
     let graphRole = null;
-    if (chain === CORE) graphRole = { kind: 'core', chain: [], layer: null, surface: null, sub: [] };
+    if (chain === CORE) graphRole = { kind: 'core', chain: [], ...nameRole(f.path) };
     else if (chain !== undefined && chain.length === 0) graphRole = { kind: 'composition-root', chain: [], layer: null, surface: null, sub: [], root: rootKeyOf.get(f.id) ?? '(glue)' };
     else if (chain !== undefined && f.kind === 'asset') graphRole = { kind: 'domain', chain, layer: 'entities', via: 'asset', surface: null, name: String(f.path).split('/').pop(), sub: [], asset: true };
     else if (chain !== undefined) {
@@ -212,7 +215,8 @@ export function graphRoles(graph) {
       out.set(f.id, { role: claim ?? { kind: 'other', chain: [], ...nameRole(f.path) }, dispute: null, unreached: why });
       continue;
     }
-    if (claim == null || claimAgrees(claim, graphRole)) { out.set(f.id, { role: graphRole, dispute: null, unreached: null }); continue; }
+    // An agreed core file keeps the claim as its role, since only the tree names which core module it belongs to; everywhere else the graph reading is the richer of the two.
+    if (claim == null || claimAgrees(claim, graphRole)) { out.set(f.id, { role: claim?.kind === 'core' ? claim : graphRole, dispute: null, unreached: null }); continue; }
     if (claim.kind === 'core' && graphRole.kind !== 'composition-root' && graphRole.kind !== 'core') {
       out.set(f.id, { role: claim, dispute: coreVerdict(f), unreached: null });
       continue;

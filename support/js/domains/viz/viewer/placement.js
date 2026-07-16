@@ -4,15 +4,23 @@
 import { render } from "./render.js";
 import { ROWS, collapsed, data, savePrefs } from "./state.js";
 
-// The top-level block a file belongs to: the composition root, a non-domain root like core, or its domain.
+// The top-level block a file belongs to: the composition root, or its domain - a core area draws as a domain block like any other.
 export function blockOf(f) {
   const p = place(f);
   if (p.area === "root") return "@root:" + p.root;
-  if (p.area === "core") return "@core";
   if (p.area === "other") return "@other";
   if (p.area === "domain") return p.domain;
   return null;
 }
+
+// A whole domain in one file: a core file whose plain name lifted into its chain, so the file is the domain's own surface and the layer contents sit unextracted inside it.
+export const isLonerCore = (r) =>
+  r != null &&
+  r.kind === "core" &&
+  r.surface != null &&
+  Array.isArray(r.chain) &&
+  r.chain.length > 0 &&
+  r.chain[r.chain.length - 1] === r.surface;
 
 // A layer file belongs to the unit its own name declares; that name is its sub-column, so units line up as concerns the way the diagram draws UI / Network / Data - at the domain root and inside every subdomain alike.
 // Bare reserved-name files (the layer aggregates, the composer) and surfaces are subdomain-wide and stay in the unnamed sub-column.
@@ -23,36 +31,42 @@ function unitCol(r) {
   return "";
 }
 
-// Which cell a file renders into: the composition-root bar, the core box, or a domain's (subdomain group x unit sub-column x row) cell.
+// Which cell a file renders into: the composition-root bar, or a domain's (subdomain group x unit sub-column x row) cell.
+// A core role is domain-shaped under its area's name - core modules are domains at the bottom of the sharedness DAG - so it takes the same cells; a graph-attributed core file with no declared area draws under '(shared)'.
 export function place(f) {
   const r = f.role;
   if (r.kind === "composition-root") return { area: "root", root: r.root };
-  if (r.kind === "core") return { area: "core" };
-  if (r.kind === "surface" || r.kind === "domain") {
-    const domain = r.chain[0];
-    const row = r.kind === "surface" ? "surface" : r.layer;
+  if (r.kind === "surface" || r.kind === "domain" || r.kind === "core") {
+    const core = r.kind === "core";
+    const chain = core && !(r.chain && r.chain.length) ? ["(shared)"] : r.chain;
+    const isSurface = r.surface != null;
+    const domain = chain[0];
+    const row = isSurface ? "surface" : (r.layer ?? "surface");
     // A collapsed domain gives up its columns and keeps its rows: every file at one rank draws as that rank's aggregate, so an arrow into the domain still lands on the row it belongs to and a diagonal still reads as one.
     // Dropping the rows would collapse the one thing the diagram is for, since a reference's meaning is the rank it crosses.
     // The bands keep their own places above and below the cake: a composer is a composition surface and a bare entities file is the shared base, and each anchors its edges as a band rather than as a cell.
     if (collapsed.has(domain))
       return {
         area: "domain",
+        core,
         domain,
         sub: "",
         unit: "",
         row,
         collapsed: true,
         band:
-          r.kind === "domain" &&
+          !isSurface &&
           unitCol(r) === "" &&
           (r.layer === "services" || r.layer === "entities"),
       };
     return {
       area: "domain",
+      core,
       domain,
-      sub: r.chain.slice(1).join("/"),
-      unit: r.kind === "surface" ? "" : unitCol(r),
+      sub: chain.slice(1).join("/"),
+      unit: isSurface ? "" : unitCol(r),
       row,
+      loner: isLonerCore(r),
     };
   }
   return { area: "other" };

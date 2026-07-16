@@ -104,9 +104,20 @@ const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 export const inArea = (filename, areas) =>
   (Array.isArray(areas) ? areas : [areas]).some((a) => a && new RegExp(`(^|/)${escapeRe(a)}(/|$)`).test(filename));
 
+// The same segment-anchored test, keeping which area matched and the path remainder inside it, so the area's contents can classify like any domain tree.
+const areaHit = (filename, areas) => {
+  for (const a of Array.isArray(areas) ? areas : [areas]) {
+    if (!a) continue;
+    const m = norm(filename).match(new RegExp(`(^|/)${escapeRe(a)}(?:/(.*))?$`));
+    if (m) return { area: a, rest: m[2] ?? '' };
+  }
+  return null;
+};
+
 // Naming a core buys no enforcement. ROOT.6 ("pure core is dependency-free; arrows point from domains into core, never back") is a property, not a place:
 // a module that references no domain satisfies it wherever it lives, and one that references a domain is either a domain, a declared root, or a conduit laundering the reach - which is what the unclassified-file reading reports.
-// So the area is declared only to tell the informer which box to draw, and an app may hold any number of cores, or none.
+// The area's contents still classify: core is the bottom of the sharedness DAG, a set of domains everything may lean on, so a core file carries its chain, layer, and surface exactly as a domain file does, under the area's name.
+// A plain-named file directly in the area is a whole domain in one file - its own surface, with the contents not yet extracted into layer files - so its name lifts into the chain as the domain it is.
 export function fileRole(filename, compositionRoot, core = 'core') {
   const m = filename.match(/\/domains\/(.+)$/);
   if (m) {
@@ -116,7 +127,15 @@ export function fileRole(filename, compositionRoot, core = 'core') {
     return { kind: 'other' };
   }
   if (inArea(filename, compositionRoot)) return { kind: 'composition-root' };
-  if (inArea(filename, core)) return { kind: 'core' };
+  const hit = areaHit(filename, core);
+  if (hit) {
+    const area = hit.area.split('/').pop();
+    const segs = hit.rest.split('/').filter(Boolean);
+    if (!segs.length) return { kind: 'core', chain: [area], layer: null, via: null, sub: [], surface: stripExt(area) || area, name: null };
+    const c = classify(segs);
+    const lift = c.chain.length === 0 && c.surface && c.surface !== 'index';
+    return { kind: 'core', ...c, chain: lift ? [area, c.surface] : [area, ...c.chain] };
+  }
   return { kind: 'other' };
 }
 

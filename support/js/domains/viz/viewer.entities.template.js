@@ -30,7 +30,6 @@ export const template = /* html */`
     <div id="root-bar"></div>
     <div id="main">
       <div id="nondomains" hidden>
-        <div id="core-box" hidden></div>
         <div id="other-box" hidden></div>
       </div>
       <div id="domains"></div>

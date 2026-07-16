@@ -9,6 +9,7 @@ import {
   chipParts,
   compactRow,
   isComposerFile,
+  isLonerCore,
   place,
   threadComposers,
   toggleCollapse,
@@ -113,17 +114,20 @@ export function render() {
   const hideAsset = !$("t-assets").checked;
   const expunge = !$("t-surfaces").checked;
   const threadC = !$("t-services").checked;
+  // A core surface expunges like any other conduit, except the loner: that file IS its domain, the binding walk terminates on its declarations, so the dataflow view keeps it and draws it inside its obscured cake.
+  const isConduit = (f) =>
+    f.role.kind === "surface" || (f.role.kind === "core" && f.role.surface != null && !isLonerCore(f.role));
   const passes = (f) =>
     !(hideAsset && f.kind !== "code") &&
-    !(expunge && f.role.kind === "surface") &&
+    !(expunge && isConduit(f)) &&
     !(threadC && isComposerFile(f)) &&
     !hiddenBlocks.has(blockOf(f));
   const visible = (f) => passes(f) && !hiddenFiles.has(f.path);
   // A ghost renders on its domain's hidden shelf: banished by middle-click yet passing every other filter.
   const ghost = (f) => passes(f) && hiddenFiles.has(f.path);
   renderRootBar(visible);
-  renderCoreBox(visible);
-  renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS);
+  renderOtherBox(visible);
+  renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS, expunge);
   // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
   // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
   // The closers are keyed before the edges are drawn, because a bundle takes its paint from the worst reference it carries and a cycle closer is one of the paints it can take.
@@ -179,13 +183,8 @@ function renderRootBar(visible) {
   container.replaceChildren(...blocks);
 }
 
-// Non-domain roots render to the left of the domains, past the faint separator.
-// A file the classifier could not place gets a box of its own beside core. Leaving it undrawn was the worse silence of the two: it is a file in the tree that no rule reads, and the diagram was the one place that could say so.
-function renderCoreBox(visible) {
-  const box = $("core-box");
-  const coreFiles = data.files.filter((f) => place(f).area === "core" && visible(f)).sort(byDeg);
-  box.hidden = coreFiles.length === 0;
-  box.replaceChildren("src/core ", hideBtn("@core"), ...coreFiles.map((f) => makeChip(f)));
+// A file the classifier could not place gets a box of its own beside the domains. Leaving it undrawn was the worse silence of the two: it is a file in the tree that no rule reads, and the diagram was the one place that could say so.
+function renderOtherBox(visible) {
   const otherBox = $("other-box");
   const otherFiles = data.files.filter((f) => place(f).area === "other" && visible(f)).sort(byDeg);
   otherBox.hidden = otherFiles.length === 0;
@@ -194,12 +193,14 @@ function renderCoreBox(visible) {
     hideBtn("@other"),
     ...otherFiles.map((f) => makeChip(f)),
   );
-  $("nondomains").hidden = box.hidden && otherBox.hidden;
+  $("nondomains").hidden = otherBox.hidden;
 }
 
 // Domain boxes: one grid per top-level domain, subdomain columns sorted by name, the fixed layer rows.
-function renderDomains(visible, ghost, rowList) {
+// A core area is one of the blocks, drawn first the way the diagram draws Shared to the left of the features, and marked so its box reads as the sharedness DAG's bottom.
+function renderDomains(visible, ghost, rowList, expunge) {
   const domains = new Map();
+  const coreBlocks = new Set();
   const shelves = new Map();
   // A folded domain's files, bucketed by the row each draws in: the two bands keep their own keys, so the composer cap and the shared base stay outside the cake exactly as they do in an open box.
   const compact = new Map();
@@ -218,6 +219,7 @@ function renderDomains(visible, ghost, rowList) {
   for (const f of data.files) {
     const p = place(f);
     if (p.area !== "domain") continue;
+    if (p.core) coreBlocks.add(p.domain);
     if (ghost(f)) {
       if (!shelves.has(p.domain)) shelves.set(p.domain, []);
       shelves.get(p.domain).push(f);
@@ -347,7 +349,11 @@ function renderDomains(visible, ghost, rowList) {
     return h(
       "section",
       {
-        class: "domain" + (shelf ? " has-hidden" : "") + (collapsed.has(name) ? " folded" : ""),
+        class:
+          "domain" +
+          (coreBlocks.has(name) ? " core" : "") +
+          (shelf ? " has-hidden" : "") +
+          (collapsed.has(name) ? " folded" : ""),
       },
       h(
         "h2",
@@ -388,8 +394,12 @@ function renderDomains(visible, ghost, rowList) {
     );
   };
 
+  // Core blocks lead, the way the diagram draws Shared to the left of the feature columns; within each group the heaviest block still bubbles left.
   const sortedDomains = [...domains.entries()].sort(
-    (a, b) => at(domDeg, b[0]) - at(domDeg, a[0]) || a[0].localeCompare(b[0]),
+    (a, b) =>
+      (coreBlocks.has(b[0]) ? 1 : 0) - (coreBlocks.has(a[0]) ? 1 : 0) ||
+      at(domDeg, b[0]) - at(domDeg, a[0]) ||
+      a[0].localeCompare(b[0]),
   );
 
   for (const [name, subsOf] of sortedDomains) {
@@ -458,6 +468,21 @@ function renderDomains(visible, ghost, rowList) {
         });
     };
     emit("", 0);
+
+    // A loner core module is a whole domain in one file: the file draws as its surface, and the layer cake beneath it is real yet unextracted, so the cake draws obscured instead of empty.
+    // The dataflow view drops the surface row, and there the file draws inside the obscured cake itself, since the binding walk terminates on its declarations.
+    const obscured = (col) => {
+      if (col.unit !== "" || col.sub === "") return false;
+      const files = col.rows.get("surface") ?? [];
+      if (!files.length || !files.every((f) => place(f).loner)) return false;
+      if ([...col.rows.keys()].some((r) => r !== "surface")) return false;
+      if ((kids.get(col.sub) ?? []).length) return false;
+      if ((subsOf.get(col.sub)?.size ?? 0) > 1) return false;
+      if (subRoots.get(name)?.get(col.sub)?.length || subBases.get(name)?.get(col.sub)?.length)
+        return false;
+      return true;
+    };
+    const obscuredCols = new Set(columns.filter(obscured).map((c) => c.track));
 
     const grid = h("div", {
       class: "grid",
@@ -564,6 +589,7 @@ function renderDomains(visible, ghost, rowList) {
         ),
       );
       columns.forEach((col) => {
+        if (obscuredCols.has(col.track) && row !== "surface") return;
         grid.append(
           h(
             "div",
@@ -576,15 +602,30 @@ function renderDomains(visible, ghost, rowList) {
         );
       });
     });
+    const cakeStart = rowList[0] === "surface" ? 1 : 0;
+    if (rowList.length > cakeStart)
+      for (const col of columns) {
+        if (!obscuredCols.has(col.track)) continue;
+        grid.append(
+          h(
+            "div",
+            {
+              class: "cell obscured",
+              title: "contents not extracted: the layer declarations live inside the surface file",
+              style: `grid-column: ${col.track}; grid-row: ${layerRow(cakeStart)} / ${layerRow(rowList.length - 1) + 1}`,
+            },
+            expunge ? (col.rows.get("surface") ?? []).sort(byDeg).map((f) => makeChip(f)) : null,
+          ),
+        );
+      }
     domainsEl.append(domainBox(name, grid));
   }
 }
 
 // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
-// The composition roots and the pure-core box share the first row as the non-domain modules; the domains take the second.
+// The composition roots share the first row as the non-domain modules; the domains, core blocks among them, take the second.
 function renderBlockBar() {
   const rootBlocks = data.options.roots.map((r) => ["@root:" + r.key, r.label]);
-  if (data.files.some((f) => place(f).area === "core")) rootBlocks.push(["@core", "src/core"]);
   if (data.files.some((f) => place(f).area === "other"))
     rootBlocks.push(["@other", "unclassified"]);
   const domainBlocks = [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith("@")))]
