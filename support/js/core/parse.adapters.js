@@ -5,7 +5,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { parseSync } from 'oxc-parser';
-import { norm } from './model.js';
+import { norm } from './model.entities.js';
 
 // A directory's entries, cached by mtime: the unit-directory guard has to know what else lives beside a file, and a lint pass asks that of the same directory once per file in it.
 const dirCache = new Map();

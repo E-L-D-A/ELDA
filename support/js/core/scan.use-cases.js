@@ -5,14 +5,14 @@
 
 import { join } from 'node:path';
 
-import { createWalker } from './flow.js';
-import { graphRoles } from './ownership.js';
-import { EXT_CANDIDATES, moduleInfo } from './parse.js';
-import { gatherFiles, readOptions, srcRootOf } from './tree.js';
-import { cycles } from './graph.js';
-import { deepSideEffect } from './messages.js';
-import { inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.js';
-import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.js';
+import { createWalker } from './flow.use-cases.js';
+import { graphRoles } from './ownership.use-cases.js';
+import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
+import { gatherFiles, readOptions, srcRootOf } from './tree.adapters.js';
+import { cycles } from './graph.use-cases.js';
+import { deepSideEffect } from './messages.entities.js';
+import { inTreeSpec, isRelative, norm, posixResolve, targetOf } from './model.entities.js';
+import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.use-cases.js';
 
 export function buildGraph(appDir) {
   const srcDir = srcRootOf(appDir);

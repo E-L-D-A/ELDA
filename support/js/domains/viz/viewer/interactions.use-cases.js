@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // Interactions: delegated hover and pinning, grab panning, the tooltip.
 
-import { getEditorLink } from "./lib.js";
-import { edgeTip, endLabel } from "./edges.js";
-import { applyPin, blur, focus } from "./focus.js";
-import { place } from "./placement.js";
-import { compactFiles, drawn, render } from "./render.js";
+import { getEditorLink } from "./entities.js";
+import { edgeTip, endLabel } from "./edges.use-cases.js";
+import { applyPin, blur, focus } from "./focus.use-cases.js";
+import { place } from "./placement.use-cases.js";
+import { compactFiles, drawn, render } from "./render.use-cases.js";
 import {
   data,
   hiddenFiles,
@@ -17,18 +17,18 @@ import {
   setSelected,
   tooltip,
   wrap,
-} from "./state.js";
+} from "./entities.js";
 
 // Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
 // The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
 wrap.addEventListener("pointerover", (e) => {
   if (e.target.classList.contains("hit")) {
-    showTip(e, edgeTip(drawn[Number(e.target.dataset.i)]));
+    showTip(e, edgeTip(drawn()[Number(e.target.dataset.i)]));
     return;
   }
   const chip = e.target.closest(".chip");
   if (!chip || chip.contains(e.relatedTarget)) return;
-  const f = data.files[Number(chip.dataset.id)];
+  const f = data().files[Number(chip.dataset.id)];
   if (chip.classList.contains("ghost")) {
     showTip(e, `${f.path}\nhidden - click to restore`);
     return;
@@ -36,7 +36,7 @@ wrap.addEventListener("pointerover", (e) => {
   // Under a reach walk the counts are the point of the hover: how much this file pulls in, and how much breaks when it changes.
   const { out, inc, deep } = focus(f.id);
   // An aggregate stands for a whole rank of a folded domain, so its tip names the files it folded away.
-  const held = compactFiles.get(f.id);
+  const held = compactFiles().get(f.id);
   const head = held
     ? [
         `${endLabel(f.id)} · ${held.length} file${held.length > 1 ? "s" : ""}`,
@@ -62,7 +62,7 @@ wrap.addEventListener("pointerout", (e) => {
   }
   const chip = e.target.closest(".chip");
   if (!chip || chip.contains(e.relatedTarget)) return;
-  blur(pinnedPath === null && pinnedCycle === null, true);
+  blur(pinnedPath() === null && pinnedCycle() === null, true);
   hideTip();
 });
 wrap.addEventListener("pointermove", (e) => {
@@ -72,7 +72,7 @@ wrap.addEventListener("click", (e) => {
   const chip = e.target.closest(".chip");
   if (!chip) return;
   e.stopPropagation();
-  const f = data.files[Number(chip.dataset.id)];
+  const f = data().files[Number(chip.dataset.id)];
   if (chip.classList.contains("ghost")) {
     hiddenFiles.delete(f.path);
     hideTip();
@@ -85,13 +85,13 @@ wrap.addEventListener("click", (e) => {
   // A pin taken from the board is not a finding, so the drawer's selection lets go.
   setPinCycle(null);
   setSelected(null);
-  setPin(pinnedPath === f.path ? null : f.path);
+  setPin(pinnedPath() === f.path ? null : f.path);
   render();
 });
 // A file joins the hidden shelf with its pin cleared when it was the pinned one.
 function banish(f) {
   hiddenFiles.add(f.path);
-  if (pinnedPath === f.path) {
+  if (pinnedPath() === f.path) {
     setPin(null);
     setSelected(null);
   }
@@ -109,14 +109,14 @@ wrap.addEventListener("auxclick", (e) => {
   e.preventDefault();
   if (head) {
     const { domain, sub, unit } = head.dataset;
-    for (const f of data.files) {
+    for (const f of data().files) {
       const p = place(f);
       if (p.area !== "domain" || p.domain !== domain || p.sub !== sub) continue;
       if (unit !== undefined && p.unit !== unit) continue;
       banish(f);
     }
   } else {
-    const f = data.files[Number(chip.dataset.id)];
+    const f = data().files[Number(chip.dataset.id)];
     if (chip.classList.contains("ghost")) hiddenFiles.delete(f.path);
     else {
       if (place(f).area !== "domain") return;
@@ -131,7 +131,7 @@ wrap.addEventListener("pointerdown", (e) => {
   if (e.button === 1 && e.target.closest(".chip, .grouphead, .colhead")) e.preventDefault();
 });
 document.body.addEventListener("click", () => {
-  if (!suppressClick && (pinnedPath !== null || pinnedCycle !== null)) {
+  if (!suppressClick && (pinnedPath() !== null || pinnedCycle() !== null)) {
     setPin(null);
     setPinCycle(null);
     setSelected(null);

@@ -4,7 +4,7 @@
 // So this pass finds every cycle and grades it by the widest boundary it crosses; the settling element is the reviewer's to name, and an ungraded cycle is a causality loop waiting for its first stack overflow.
 // Pure: classified nodes and edges in, cycles out. The scan supplies the graph and the roles, and nothing here reads a filesystem or a lint host.
 
-import { cycle as cycleMessage } from './messages.js';
+import { cycle as cycleMessage } from './messages.entities.js';
 
 // The distance classes, widest first, mirroring the diagonal's gradient (model.js): severity grows with the width of the boundary the cycle crosses, and Gate 1 names the widest class.
 export const CYCLE_SCOPES = ['across-domains', 'across-subdomains', 'within-subdomain'];

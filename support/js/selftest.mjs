@@ -24,8 +24,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
 
-import { norm } from './core/model.js';
-import { buildGraph } from './core/scan.js';
+import { norm } from './core/model.entities.js';
+import { buildGraph } from './core/scan.use-cases.js';
 import plugin from './index.js';
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -140,7 +140,7 @@ const decidable = [...bag].flatMap(([id, hits]) => hits.filter((h) => CYCLE.incl
 console.log(`${(gated.length ? 'fires' : 'SILENT').padStart(6)}  ${'cycles (graph pass)'.padEnd(26)} ${graph.cycles.length}`);
 if (list) {
   for (const c of graph.cycles) {
-    console.log(`          ${c.scope}${c.gate ? ' (Gate 1)' : ''}`);
+    console.log(`          ${c.scope}${c.gate ? ' (gating class)' : ''}`);
     for (const id of c.files) console.log(`            ${graph.files[id].path}`);
   }
 }

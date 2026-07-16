@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Placement: where a file renders, derived from the role the scanner assigned.
 
-import { render } from "./render.js";
-import { ROWS, collapsed, data, savePrefs } from "./state.js";
+import { render } from "./render.use-cases.js";
+import { ROWS, collapsed, data, savePrefs } from "./entities.js";
 
 // The top-level block a file belongs to: the composition root, or its domain - a core area draws as a domain block like any other.
 export function blockOf(f) {
@@ -91,12 +91,12 @@ export function isBarFile(f) {
   return p.area === "domain" && p.unit === "" && (p.row === "services" || p.row === "entities");
 }
 
-// A services composer (a sub-root band) threads away like a surface: an edge into it re-emerges as edges to the modules it re-exports, so arrows land on the real carriers behind the composition layer. `data.flows` already carries the composer's onward hop.
+// A services composer (a sub-root band) threads away like a surface: an edge into it re-emerges as edges to the modules it re-exports, so arrows land on the real carriers behind the composition layer. `data().flows` already carries the composer's onward hop.
 export function isComposerFile(f) {
   return isBarFile(f) && f.role.layer === "services";
 }
 export function threadComposers(list) {
-  const composers = new Set(data.files.filter(isComposerFile).map((f) => f.id));
+  const composers = new Set(data().files.filter(isComposerFile).map((f) => f.id));
   if (!composers.size) return list;
   const outBy = new Map();
   for (const e of list)

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // elda-viz - render an app's real dependency graph as the ELDA-Layers diagram: files sorted into layer x subdomain cells, arrows colored by the same verdicts the lint rules report.
-// The classification and the verdicts come from model.js, shared with the plugin, so the diagram and the linter judge every edge identically; an edge that looks wrong yet draws grey is a candidate for a missing rule.
-// The scan itself lives in scan.js, so this CLI, the selftest, and anything else that asks a whole-graph question all read one and the same graph.
+// The classification and the verdicts come from the core modules, shared with the plugin, so the diagram and the linter judge every edge identically; an edge that looks wrong yet draws grey is a candidate for a missing rule.
+// The scan itself lives in core/scan.use-cases.js, so this CLI, the selftest, and anything else that asks a whole-graph question all read one and the same graph.
 //
 //   elda-viz [appDir] [--port N] [--out file.html] [--no-open]
 //
@@ -13,9 +13,9 @@ import { existsSync, watch, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 
-import { CODE_RE } from "./core/parse.js";
-import { buildGraph } from "./core/scan.js";
-import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.js";
+import { CODE_RE } from "./core/parse.adapters.js";
+import { buildGraph } from "./core/scan.use-cases.js";
+import { STYLE_RE, isAsset, srcRootOf, walk } from "./core/tree.adapters.js";
 import {
   moduleForUrl,
   moduleSource,

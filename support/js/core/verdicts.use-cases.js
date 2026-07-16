@@ -2,8 +2,8 @@
 // A verdict decides here and is phrased in messages.js, so this file carries the judgment and that one carries the words; the structural facts it reads (a relationship, a unit, a rank, the composer and services-surface predicates) come from model.js.
 // The lint rules (index.js) and the dependency visualizer (visualize.js) both read this module, so the linter and the diagram judge every edge identically.
 
-import * as msg from './messages.js';
-import { LAYER_RANK, isComposer, isServicesSurface, rel, unitOf } from './model.js';
+import * as msg from './messages.entities.js';
+import { LAYER_RANK, isComposer, isServicesSurface, rel, unitOf } from './model.entities.js';
 
 // A reference the analyzers cannot resolve to a file. The target is unknown, so no invariant can be read on it at all.
 // Staying quiet here fails open in the worst available direction, because the shape-only fallback reads a dangling `./x` as a reference INSIDE the importer's own subdomain, which is the most permissive reading there is: move a file into a new directory and leave its imports behind, and every reach it makes turns into a same-subdomain read that nothing objects to.

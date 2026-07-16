@@ -3,8 +3,8 @@
 // The layer and the surface-ness ride the file's own name, wherever it sits on disk. The chain rides the edges.
 // Shared by the enforcer (index.js) and the informer (visualize.js) so the linter and the diagram infer one structure. Pure: a scanned graph in, a role per file out.
 
-import { fileRole, isRelative, layerOf, stripExt, targetOf } from './model.js';
-import { dishonestPlacement } from './messages.js';
+import { fileRole, isRelative, layerOf, stripExt, targetOf } from './model.entities.js';
+import { dishonestPlacement } from './messages.entities.js';
 
 // A file reached from domains that share no ancestor sits below all of them: pure core, the dependency-order's bottom (CHANNEL.6 sharedness).
 // The sentinel is sticky - one more reach from one more domain never lifts a core file back into that domain - where an empty chain array could not be, since an empty array is a prefix of everything.
@@ -48,8 +48,10 @@ const isEntry = (path) => {
 // The chain a relative reference hands its target: the importer's chain walked along the directory delta.
 // A step up leaves the current subdomain, so it pops; a step down names a child only when the reference enters through a surface, since a directory by itself carries no boundary and a reach past the surface stays classified by its other, owning reaches (the deeper side of the merge).
 // The child's name is the surface's own directory - one segment - because the directories travelled on the way are grouping, and the one the surface sits in is the one it names.
+// The delta describes positions in the domains tree, so a target outside it has no position to walk to: the reference carries no chain information and hands on the importer's chain, exactly as a chainless aliased specifier does.
 function relativeChain(importerChain, importerDir, targetPath) {
   if (importerChain === CORE) return CORE;
+  if (!/(^|\/)domains\//.test(targetPath)) return importerChain;
   const from = importerDir ? importerDir.split('/') : [];
   const to = dirOf(targetPath) ? dirOf(targetPath).split('/') : [];
   const shared = commonPrefix(from, to).length;
@@ -192,6 +194,14 @@ export function graphRoles(graph) {
       .filter((e) => e.to === f.id && !coreClaimed.has(e.from) && (chainOf.get(e.from)?.length ?? 0) > 0)
       .map((e) => chainOf.get(e.from));
     if (!consumers.length) return null;
+    // Roots compose core (the runtime's own arrow into Shared) and core composes itself, so a root-side or core-internal consumer is a witness against lone ownership: the lone-owner verdict is concluded only when every consumer sits inside the one domain.
+    const witnessed = graph.edges.some((e) => {
+      if (e.to !== f.id || e.from === f.id) return false;
+      if (coreClaimed.has(e.from)) return true;
+      const c = chainOf.get(e.from);
+      return c === CORE || (c !== undefined && c.length === 0);
+    });
+    if (witnessed) return null;
     const common = consumers.reduce((a, b) => { const o = []; for (let i = 0; i < Math.min(a.length, b.length); i++) { if (a[i] === b[i]) o.push(a[i]); else break; } return o; });
     if (common.length === 0) return null;
     const owner = common.join('/');

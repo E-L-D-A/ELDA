@@ -11,9 +11,9 @@
 // The conventions are baked in: layer membership rides file names, and a directory expresses a concern, which makes it a subdomain.
 // Only `domainAlias` / `appAlias` / `compositionRoot` vary per project, defaulting to `#` / `@` / `routes`.
 // This is the plugin's composition root: it mounts the enforce domain's rules and ships the grade presets.
-// The rules live in domains/enforce; the path classification is in core/model.js and the reference verdicts in core/verdicts.js, shared with the dependency visualizer so the linter and the diagram judge every edge identically.
+// The rules live in domains/enforce; the path classification is in core/model.entities.js and the reference verdicts in core/verdicts.use-cases.js, shared with the dependency visualizer so the linter and the diagram judge every edge identically.
 
-import { rules } from './domains/enforce/enforce.use-cases.js';
+import { rules } from './domains/enforce/services.js';
 
 const plugin = {
   meta: { name: 'elda' },

@@ -1,14 +1,62 @@
 // ---------------------------------------------------------------------------
-// Boot, toggles, live reload.
-// This is the entry module: it imports the others so their bodies evaluate, and its own body runs last, wiring the header and starting the first load once every definition is in place.
+// The viewer's composer: it boots the page, wires the header, injects the storage effect, and starts the first load once every definition is in place.
 // interactions registers its handlers as a side effect and nothing takes its exports, so it is imported for effect; issues loads through render, which uses it.
 
-import "./interactions.js";
+import "./interactions.use-cases.js";
 
-import { drawEdges, updateStickyEdges } from "./edges.js";
-import { applyPin } from "./focus.js";
-import { render } from "./render.js";
-import { $, INLINE, TOGGLES, data, loadPrefs, savePrefs, setData } from "./state.js";
+import { drawEdges, updateStickyEdges } from "./edges.use-cases.js";
+import { applyPin } from "./focus.use-cases.js";
+import { render } from "./render.use-cases.js";
+import {
+  $,
+  INLINE,
+  collapsed,
+  data,
+  hiddenBlocks,
+  savePrefs,
+  setData,
+  setPersist,
+} from "./entities.js";
+
+// The view-mode toggles in the header, persisted alongside block visibility.
+const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach"];
+
+// On a fresh session every composition root starts hidden; the domains, core blocks among them, carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
+const defaultHidden = () => (data() ? data().options.roots.map((r) => "@root:" + r.key) : []);
+
+// Block visibility and the view-mode toggles persist per app for the browser session.
+// Storage may be unavailable on a file:// snapshot, so every read falls back to the built-in defaults.
+const storageKey = () => "elda-viz:" + (data() ? data().app : "");
+function loadPrefs() {
+  let hidden = defaultHidden();
+  let folded = [];
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(storageKey()) || "null");
+    if (stored) {
+      if (Array.isArray(stored.hidden)) hidden = stored.hidden;
+      if (Array.isArray(stored.collapsed)) folded = stored.collapsed;
+      for (const id of TOGGLES)
+        if (typeof stored.toggles?.[id] === "boolean") $(id).checked = stored.toggles[id];
+    }
+  } catch {}
+  hiddenBlocks.clear();
+  for (const b of hidden) hiddenBlocks.add(b);
+  collapsed.clear();
+  for (const d of folded) collapsed.add(d);
+}
+setPersist(() => {
+  try {
+    const toggles = Object.fromEntries(TOGGLES.map((id) => [id, $(id).checked]));
+    sessionStorage.setItem(
+      storageKey(),
+      JSON.stringify({
+        hidden: [...hiddenBlocks],
+        collapsed: [...collapsed],
+        toggles,
+      }),
+    );
+  } catch {}
+});
 
 for (const id of TOGGLES)
   $(id).addEventListener("change", () => {
@@ -60,14 +108,14 @@ async function load() {
   try {
     setData(INLINE ?? (await (await fetch("/data.json")).json()));
     if (!INLINE) {
-      if (viewerStamp !== null && data.viewer !== viewerStamp) {
+      if (viewerStamp !== null && data().viewer !== viewerStamp) {
         location.reload();
         return;
       }
-      viewerStamp = data.viewer ?? null;
+      viewerStamp = data().viewer ?? null;
     }
-    $("app-name").textContent = data.app;
-    document.title = `ELDA · ${data.app}`;
+    $("app-name").textContent = data().app;
+    document.title = `ELDA · ${data().app}`;
     loadPrefs();
     render();
   } catch (error) {
@@ -117,5 +165,5 @@ if (!INLINE) {
   });
   connect();
 }
-// The entry module's body runs after every module it imports has evaluated, so by here every definition and every piece of state is in place; this starts the first load.
+// The composer's body runs after every module it imports has evaluated, so by here every definition and every piece of state is in place; this starts the first load.
 await load();

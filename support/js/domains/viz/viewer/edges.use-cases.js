@@ -1,18 +1,18 @@
 // ---------------------------------------------------------------------------
 // Edges.
 
-import { compactRow, isBarFile, place } from "./placement.js";
-import { chips, compactRep, cycleClosers, drawn, h } from "./render.js";
-import { $, ROW_LABEL, collapsed, data, edgeKey, svg, wrap } from "./state.js";
+import { compactRow, isBarFile, place } from "./placement.use-cases.js";
+import { chips, compactRep, cycleClosers, drawn, h } from "./render.use-cases.js";
+import { $, ROW_LABEL, collapsed, data, edgeKey, svg, wrap } from "./entities.js";
 
 // The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
 let stickyPaths = [];
 
 // The node an endpoint draws as: a file of a folded domain draws as its rank's aggregate, so every reference crossing into that rank lands on one chip, which is where the bundle forms.
 const nodeOf = (id) => {
-  const p = place(data.files[id]);
+  const p = place(data().files[id]);
   if (!p.collapsed) return id;
-  return compactRep.get(p.domain + "\0" + compactRow(p)) ?? id;
+  return compactRep().get(p.domain + "\0" + compactRow(p)) ?? id;
 };
 
 // How the paints rank when several references share one arrow: a bundle takes the worst of them, so folding a domain never swallows a finding.
@@ -60,14 +60,14 @@ function edgeClass(e) {
   if (e.laundered) return "laundered";
   if (e.tier === "invariant") return "violation";
   if (e.tier === "smell") return "smell";
-  if (cycleClosers.has(edgeKey(e))) return "cycle";
+  if (cycleClosers().has(edgeKey(e))) return "cycle";
   if (e.typeOnly) return "type";
   return "ok";
 }
 
 export function edgeVisible(e) {
   if (e.to == null) return false;
-  if (!chips.has(e.from) || !chips.has(e.to)) return false;
+  if (!chips().has(e.from) || !chips().has(e.to)) return false;
   const cls = edgeClass(e);
   if (cls === "ok" && !$("t-ok").checked) return false;
   if (cls === "type" && !$("t-type").checked) return false;
@@ -77,13 +77,13 @@ export function edgeVisible(e) {
 // The logical orientation of an edge from its grid placement, not its pixels: a reference within one unit column is vertical, an equal-rank reference across columns is horizontal, a reference crossing both a column and a rank is a diagonal (the shape no ELDA row draws), and two files sharing one cell arc beside it.
 // The composition root drops vertically into the column it wires; a core block is reached laterally from the feature blocks; a domain-wide band spans its own subdomain's stack, so within that subdomain its edges are vertical, and two bands of the same kind on one shelf read horizontally across subdomains.
 function edgeMode(e) {
-  const pf = place(data.files[e.from]),
-    pt = place(data.files[e.to]);
+  const pf = place(data().files[e.from]),
+    pt = place(data().files[e.to]);
   if (pf.area === "root" || pt.area === "root") return "v";
   // A reach into a core block is legal from any rank - the diagram's dashed laterals into Shared - so a cross-block core edge reads horizontally; inside the block the normal geometry holds.
   if ((pf.core || pt.core) && pf.domain !== pt.domain) return "h";
-  const fromBar = isBarFile(data.files[e.from]),
-    toBar = isBarFile(data.files[e.to]);
+  const fromBar = isBarFile(data().files[e.from]),
+    toBar = isBarFile(data().files[e.to]);
   if (fromBar || toBar) {
     const bar = fromBar ? pf : pt,
       other = fromBar ? pt : pf;
@@ -187,7 +187,7 @@ export function drawEdges() {
 
   const rectOf = rectFor(wrapRect);
   const entries = [];
-  drawn.forEach((e, i) => {
+  drawn().forEach((e, i) => {
     if (!edgeVisible(e) || e.from === e.to) return;
     entries.push({ e, i, sides: edgeSides(e, rectOf) });
   });
@@ -221,9 +221,9 @@ export function drawEdges() {
   }
 }
 
-const isRootFile = (id) => place(data.files[id]).area === "root";
+const isRootFile = (id) => place(data().files[id]).area === "root";
 const rectFor = (wrapRect) => (id) => {
-  const r = chips.get(id).getBoundingClientRect();
+  const r = chips().get(id).getBoundingClientRect();
   return {
     x: r.left - wrapRect.left,
     y: r.top - wrapRect.top,
@@ -279,7 +279,7 @@ function verdictBlock(e) {
 
 // How an endpoint reads once its domain is folded: the domain and the rank it landed on, since the file behind the aggregate is one of many.
 export const endLabel = (id) => {
-  const f = data.files[id];
+  const f = data().files[id];
   const p = place(f);
   if (!p.collapsed) return f.path;
   const rank = p.band
@@ -310,7 +310,7 @@ function bundleTip(e) {
     h(
       "div",
       { class: "t-row t-via" },
-      shown.map((m) => h("div", {}, `${data.files[m.from].path} → ${data.files[m.to].path}`)),
+      shown.map((m) => h("div", {}, `${data().files[m.from].path} → ${data().files[m.to].path}`)),
     ),
     e.bundle.length > shown.length
       ? h("div", { class: "t-row t-names" }, `+ ${e.bundle.length - shown.length} more`)
@@ -330,7 +330,7 @@ export function edgeTip(e) {
   const tip = h(
     "div",
     {},
-    h("div", { class: "t-src" }, data.files[e.from].path),
+    h("div", { class: "t-src" }, data().files[e.from].path),
     h(
       "div",
       { class: "t-row t-spec" },
@@ -344,10 +344,10 @@ export function edgeTip(e) {
       ? h(
           "div",
           { class: "t-row t-via" },
-          e.via.map((id) => h("div", {}, `via ${data.files[id].path}`)),
+          e.via.map((id) => h("div", {}, `via ${data().files[id].path}`)),
         )
       : null,
-    e.to != null ? h("div", { class: "t-row t-land" }, `= ${data.files[e.to].path}`) : null,
+    e.to != null ? h("div", { class: "t-row t-land" }, `= ${data().files[e.to].path}`) : null,
   );
   const verdict = verdictBlock(e);
   if (verdict) tip.append(verdict);

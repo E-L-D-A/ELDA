@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Focus: hovering or pinning a chip raises its edges and its neighbors; raising a cycle raises the set of files it encloses.
 
-import { adjIn, adjOut, chips } from "./render.js";
+import { adjIn, adjOut, chips } from "./render.use-cases.js";
 import {
   $,
   cycleId,
@@ -14,7 +14,7 @@ import {
   setPinCycle,
   setSelected,
   svg,
-} from "./state.js";
+} from "./entities.js";
 
 // What a focus reaches, each direction carrying its hop distance: downstream is what this file pulls in, upstream is what breaks when it changes.
 // One hop answers "who does it touch"; the reach toggle walks the closure, which is the question a reader asks of a tree they did not write.
@@ -36,7 +36,7 @@ function neighbourhood(id) {
     }
     return dist;
   };
-  return { out: walk(adjOut), inc: walk(adjIn), deep };
+  return { out: walk(adjOut()), inc: walk(adjIn()), deep };
 }
 
 export function focus(id) {
@@ -63,7 +63,7 @@ export function focus(id) {
           : `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
     );
   }
-  for (const [cid, el] of chips) {
+  for (const [cid, el] of chips()) {
     const down = out.has(cid),
       up = inc.has(cid);
     el.classList.remove("cycle-member");
@@ -93,7 +93,7 @@ function focusCycle(cycle) {
         : `url(#m-${[...p.classList].find((c) => c !== "edge" && !c.startsWith("hi-"))})`,
     );
   }
-  for (const [cid, el] of chips) {
+  for (const [cid, el] of chips()) {
     el.classList.remove("rel-out", "rel-in", "pinned");
     el.classList.toggle("cycle-member", members.has(cid));
     el.classList.toggle("dim", !members.has(cid));
@@ -112,7 +112,7 @@ export function blur(pinned, pointerout) {
     p.style.removeProperty("--hop");
     p.setAttribute("marker-end", `url(#m-${[...p.classList].find((c) => c !== "edge")})`);
   }
-  for (const el of chips.values()) {
+  for (const el of chips().values()) {
     el.classList.remove("dim", "rel-out", "rel-in", "pinned", "cycle-member");
     el.style.removeProperty("--hop");
   }
@@ -120,22 +120,22 @@ export function blur(pinned, pointerout) {
 
 export function applyPin() {
   // A pin is exclusive, so the last one lets go before the next takes hold: the drawer re-aims the board without rebuilding it, and a focus pass alone would leave the old chip wearing its ring.
-  for (const el of chips.values()) el.classList.remove("pinned");
-  if (pinnedCycle !== null) {
-    const cycle = data.cycles.find((c) => cycleId(c) === pinnedCycle);
+  for (const el of chips().values()) el.classList.remove("pinned");
+  if (pinnedCycle() !== null) {
+    const cycle = data().cycles.find((c) => cycleId(c) === pinnedCycle());
     if (cycle) {
       focusCycle(cycle);
       return;
     }
     setPinCycle(null);
   }
-  if (pinnedPath === null) {
+  if (pinnedPath() === null) {
     blur();
     return;
   }
-  const f = data.files.find((f) => f.path === pinnedPath);
+  const f = data().files.find((f) => f.path === pinnedPath());
   // The file has no chip: its domain was hidden or folded away, so the pin drops and the drawer stops claiming to show it.
-  if (!f || !chips.has(f.id)) {
+  if (!f || !chips().has(f.id)) {
     setPin(null);
     setSelected(null);
     blur();
@@ -143,5 +143,5 @@ export function applyPin() {
     return;
   }
   focus(f.id);
-  chips.get(f.id).classList.add("pinned");
+  chips().get(f.id).classList.add("pinned");
 }

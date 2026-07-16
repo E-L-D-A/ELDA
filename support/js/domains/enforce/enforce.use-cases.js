@@ -10,7 +10,7 @@ import {
   targetOf,
   targetOfPath,
   diagonalScope,
-} from '../../core/model.js';
+} from '../../core/model.entities.js';
 import {
   importVerdict,
   unjudgedVerdict,
@@ -19,12 +19,12 @@ import {
   rootLandedVerdict,
   publishVerdict,
   selfSurfaceVerdict,
-} from '../../core/verdicts.js';
-import { createWalker } from '../../core/flow.js';
-import { srcDirOf } from '../../core/parse.js';
-import { buildGraph } from '../../core/scan.js';
-import { graphRoles } from '../../core/ownership.js';
-import * as msg from '../../core/messages.js';
+} from '../../core/verdicts.use-cases.js';
+import { createWalker } from '../../core/flow.use-cases.js';
+import { srcDirOf } from '../../core/parse.adapters.js';
+import { buildGraph } from '../../core/scan.use-cases.js';
+import { graphRoles } from '../../core/ownership.use-cases.js';
+import * as msg from '../../core/messages.entities.js';
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 

@@ -1,5 +1,5 @@
 // The entry specifier is the one name the page, the served module routes, and a snapshot's import map all share, so it is declared once here and referenced everywhere else.
-export const ENTRY = './viewer/index.js';
+export const ENTRY = './viewer/services.js';
 
 export const template = /* html */`
   <header>

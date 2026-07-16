@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // DOM building.
 
-import { bundleEdges, drawEdges, edgeVisible } from "./edges.js";
-import { applyPin, focus } from "./focus.js";
-import { renderIssues } from "./issues.js";
+import { bundleEdges, drawEdges, edgeVisible } from "./edges.use-cases.js";
+import { applyPin, focus } from "./focus.use-cases.js";
+import { renderIssues } from "./issues.use-cases.js";
 import {
   blockOf,
   chipParts,
@@ -13,7 +13,7 @@ import {
   place,
   threadComposers,
   toggleCollapse,
-} from "./placement.js";
+} from "./placement.use-cases.js";
 import {
   $,
   ROWS,
@@ -27,17 +27,24 @@ import {
   savePrefs,
   setCollapsed,
   wrap,
-} from "./state.js";
+} from "./entities.js";
 
 // Render owns the derived state it rebuilds every pass: the chip map keyed by file id, the drawn edge list, the cycle-closing edge set, the reach adjacency both ways, and the folded-domain aggregates.
-// Every module reads these; only render reassigns them, so they stay exported `let`s here rather than moving through a setter.
-export let chips = new Map();
-export let drawn = [];
-export let cycleClosers = new Set();
-export let adjOut = new Map();
-export let adjIn = new Map();
-export let compactRep = new Map();
-export let compactFiles = new Map();
+// Every module reads these through the accessors; only render reassigns the private bindings, so no live mutable binding crosses the module boundary (CHANNEL.4).
+let _chips = new Map();
+let _drawn = [];
+let _cycleClosers = new Set();
+let _adjOut = new Map();
+let _adjIn = new Map();
+let _compactRep = new Map();
+let _compactFiles = new Map();
+export const chips = () => _chips;
+export const drawn = () => _drawn;
+export const cycleClosers = () => _cycleClosers;
+export const adjOut = () => _adjOut;
+export const adjIn = () => _adjIn;
+export const compactRep = () => _compactRep;
+export const compactFiles = () => _compactFiles;
 // A file's dependency count is its distinct outgoing references; stacks float the highest-dependency file to the top and columns bubble it left, so arrows run down and to the right. Only render sorts by it.
 let outDeg = new Map();
 const deg = (f) => outDeg.get(f.id) ?? 0;
@@ -95,16 +102,16 @@ function makeChip(f, ghost) {
     label,
     badges.map((b) => h("span", { class: "badge" }, b)),
   );
-  if (!ghost) chips.set(f.id, el);
+  if (!ghost) _chips.set(f.id, el);
   return el;
 }
 
 export function render() {
-  chips = new Map();
+  _chips = new Map();
   // Recompute dependency counts from the authored edges, distinct per target, so stacking and ordering stay stable under the view toggles.
   outDeg = new Map();
   const counted = new Set();
-  for (const e of data.edges) {
+  for (const e of data().edges) {
     if (e.to == null) continue;
     const k = e.from + ">" + e.to;
     if (counted.has(k)) continue;
@@ -131,18 +138,18 @@ export function render() {
   // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
   // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
   // The closers are keyed before the edges are drawn, because a bundle takes its paint from the worst reference it carries and a cycle closer is one of the paints it can take.
-  cycleClosers = new Set(data.cycles.flatMap((c) => c.edges.map(edgeKey)));
+  _cycleClosers = new Set(data().cycles.flatMap((c) => c.edges.map(edgeKey)));
   // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
-  drawn = expunge ? data.flows : data.edges;
-  if (threadC) drawn = threadComposers(drawn);
-  if (collapsed.size) drawn = bundleEdges(drawn);
+  _drawn = expunge ? data().flows : data().edges;
+  if (threadC) _drawn = threadComposers(_drawn);
+  if (collapsed.size) _drawn = bundleEdges(_drawn);
   // The adjacency the reach walk rides is the board's own: an edge a filter dropped or a hidden block took away is out of the walk exactly as it is out of the picture, so the reach you read is the reach of the graph in front of you.
-  adjOut = new Map();
-  adjIn = new Map();
-  for (const e of drawn) {
+  _adjOut = new Map();
+  _adjIn = new Map();
+  for (const e of _drawn) {
     if (e.from === e.to || !edgeVisible(e)) continue;
-    (adjOut.get(e.from) ?? adjOut.set(e.from, []).get(e.from)).push(e.to);
-    (adjIn.get(e.to) ?? adjIn.set(e.to, []).get(e.to)).push(e.from);
+    (_adjOut.get(e.from) ?? _adjOut.set(e.from, []).get(e.from)).push(e.to);
+    (_adjIn.get(e.to) ?? _adjIn.set(e.to, []).get(e.to)).push(e.from);
   }
   wrap.classList.toggle("reach", $("t-reach").checked);
   renderBlockBar();
@@ -156,10 +163,10 @@ export function render() {
 // One Application Runtime strip per composition root: the client route root, the server, and the builder each draw their own bar feeding the shared domains.
 function renderRootBar(visible) {
   const container = $("root-bar");
-  const blocks = data.options.roots
+  const blocks = data().options.roots
     .map((r) => {
       const key = "@root:" + r.key;
-      const files = data.files
+      const files = data().files
         .filter((f) => {
           const p = place(f);
           return p.area === "root" && p.root === r.key && visible(f);
@@ -186,7 +193,7 @@ function renderRootBar(visible) {
 // A file the classifier could not place gets a box of its own beside the domains. Leaving it undrawn was the worse silence of the two: it is a file in the tree that no rule reads, and the diagram was the one place that could say so.
 function renderOtherBox(visible) {
   const otherBox = $("other-box");
-  const otherFiles = data.files.filter((f) => place(f).area === "other" && visible(f)).sort(byDeg);
+  const otherFiles = data().files.filter((f) => place(f).area === "other" && visible(f)).sort(byDeg);
   otherBox.hidden = otherFiles.length === 0;
   otherBox.replaceChildren(
     "unreached ",
@@ -204,8 +211,8 @@ function renderDomains(visible, ghost, rowList, expunge) {
   const shelves = new Map();
   // A folded domain's files, bucketed by the row each draws in: the two bands keep their own keys, so the composer cap and the shared base stay outside the cake exactly as they do in an open box.
   const compact = new Map();
-  compactRep = new Map();
-  compactFiles = new Map();
+  _compactRep = new Map();
+  _compactFiles = new Map();
   // The bare composer (services) and the bare entities file are the (sub)domain's own composition root and shared base.
   // They lift out of the layer cake into a sub-root cap above the columns and a shared-base bar below them, keyed by domain then subdomain.
   const subRoots = new Map();
@@ -216,7 +223,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
     if (!bySub.has(sub)) bySub.set(sub, []);
     bySub.get(sub).push(f);
   };
-  for (const f of data.files) {
+  for (const f of data().files) {
     const p = place(f);
     if (p.area !== "domain") continue;
     if (p.core) coreBlocks.add(p.domain);
@@ -274,7 +281,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
   // Every domain box subgrids into this one template, which is what levels each layer row across the diagram; a shallow domain simply leaves the deeper rows empty.
   // The depth is read off every file rather than the visible ones, so hiding a subdomain never reflows the rows underneath.
   let D = 1;
-  for (const f of data.files) {
+  for (const f of data().files) {
     const p = place(f);
     if (p.area === "domain" && p.sub !== "") D = Math.max(D, p.sub.split("/").length);
   }
@@ -292,7 +299,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
     subDeg = new Map(),
     colDeg = new Map();
   const bump = (m, k, v) => m.set(k, (m.get(k) ?? 0) + v);
-  for (const f of data.files) {
+  for (const f of data().files) {
     const p = place(f);
     if (p.area !== "domain") continue;
     const d = deg(f);
@@ -306,8 +313,8 @@ function renderDomains(visible, ghost, rowList, expunge) {
   const aggChip = (name, key, files) => {
     const rep = Math.min(...files.map((f) => f.id));
     const row = place(files[0]).row;
-    compactRep.set(name + "\0" + key, rep);
-    compactFiles.set(rep, files);
+    _compactRep.set(name + "\0" + key, rep);
+    _compactFiles.set(rep, files);
     const el = h(
       "span",
       {
@@ -318,7 +325,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
       String(files.length),
       h("span", { class: "agg-n" }, files.length === 1 ? "file" : "files"),
     );
-    chips.set(rep, el);
+    _chips.set(rep, el);
     return el;
   };
 
@@ -624,10 +631,10 @@ function renderDomains(visible, ghost, rowList, expunge) {
 // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
 // The composition roots share the first row as the non-domain modules; the domains, core blocks among them, take the second.
 function renderBlockBar() {
-  const rootBlocks = data.options.roots.map((r) => ["@root:" + r.key, r.label]);
-  if (data.files.some((f) => place(f).area === "other"))
+  const rootBlocks = data().options.roots.map((r) => ["@root:" + r.key, r.label]);
+  if (data().files.some((f) => place(f).area === "other"))
     rootBlocks.push(["@other", "unclassified"]);
-  const domainBlocks = [...new Set(data.files.map(blockOf).filter((b) => b && !b.startsWith("@")))]
+  const domainBlocks = [...new Set(data().files.map(blockOf).filter((b) => b && !b.startsWith("@")))]
     .sort()
     .map((d) => [d, d]);
 

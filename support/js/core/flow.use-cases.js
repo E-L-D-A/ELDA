@@ -5,8 +5,8 @@
 // The parse and read primitives live in parse.js; this file resolves specifiers against the filesystem and traverses the tables they yield.
 
 import { existsSync, statSync } from 'node:fs';
-import { classify, isRelative, norm } from './model.js';
-import { EXT_CANDIDATES, moduleInfo } from './parse.js';
+import { classify, isRelative, norm } from './model.entities.js';
+import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
 
 // A surface is a plain-named file inside domains/ (a barrel, a named surface): rank-less curation, the walk's only conduit.
 const isSurface = (absPath) => {

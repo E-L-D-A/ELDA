@@ -1,10 +1,10 @@
 // ---------------------------------------------------------------------------
 // Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
 
-import { getEditorLink } from "./lib.js";
-import { applyPin } from "./focus.js";
-import { place } from "./placement.js";
-import { chips, h, render } from "./render.js";
+import { getEditorLink } from "./entities.js";
+import { applyPin } from "./focus.use-cases.js";
+import { place } from "./placement.use-cases.js";
+import { chips, h, render } from "./render.use-cases.js";
 import {
   $,
   collapsed,
@@ -16,7 +16,7 @@ import {
   setPin,
   setPinCycle,
   setSelected,
-} from "./state.js";
+} from "./entities.js";
 
 // A header stat: the count and its label; the severity stats add a dot that takes the severity color while the count is nonzero.
 const stat = (n, label, sev) =>
@@ -59,7 +59,7 @@ export function renderIssues() {
       ...items.map((item, i) => {
         const el = build(item);
         el.dataset.key = `${title}#${keyOf(item, i)}`;
-        if (el.dataset.key === selectedKey) el.classList.add("selected");
+        if (el.dataset.key === selectedKey()) el.classList.add("selected");
         return el;
       }),
     );
@@ -70,7 +70,7 @@ export function renderIssues() {
     const shut = [
       ...new Set(
         ids
-          .map((id) => place(data.files[id]))
+          .map((id) => place(data().files[id]))
           .filter((p) => p.collapsed)
           .map((p) => p.domain),
       ),
@@ -83,7 +83,7 @@ export function renderIssues() {
   };
   const scrollTo = (id) =>
     requestAnimationFrame(() =>
-      chips.get(id)?.scrollIntoView({
+      chips().get(id)?.scrollIntoView({
         block: "center",
         inline: "center",
         behavior: "smooth",
@@ -98,7 +98,7 @@ export function renderIssues() {
     ev.stopPropagation();
     select(ev);
     setPinCycle(null);
-    setPin(data.files[id].path);
+    setPin(data().files[id].path);
     if (!reveal([id])) {
       applyPin();
       markSelection();
@@ -137,30 +137,30 @@ export function renderIssues() {
         class: "item " + (e.tier === "invariant" ? "violation" : "smell"),
         onclick: pinFrom(e),
       },
-      h("div", {}, pathLink(data.files[e.from].path), " → ", h("b", {}, e.spec)),
+      h("div", {}, pathLink(data().files[e.from].path), " → ", h("b", {}, e.spec)),
       h("div", { class: "msg" }, e.verdict),
     );
   // A reference is named by where it starts, how it is written, what it asks for, and the bindings it takes, which is what survives a rescan.
   // The bindings are load-bearing: one file can import the same module twice, and those two references are one finding each.
   // The names ride as an array of bindings or as the string '*' for a namespace or dynamic import, so the key takes either shape as it comes.
   const edgeItemKey = (e) =>
-    `${data.files[e.from].path}:${e.kind}:${e.spec}:${Array.isArray(e.names) ? e.names.join(",") : e.names ?? ""}`;
+    `${data().files[e.from].path}:${e.kind}:${e.spec}:${Array.isArray(e.names) ? e.names.join(",") : e.names ?? ""}`;
   section(
     "Violations",
-    data.edges.filter((e) => e.tier === "invariant"),
+    data().edges.filter((e) => e.tier === "invariant"),
     verdictItem,
     edgeItemKey,
   );
   section(
     "Inadvisable (graded smells)",
-    data.edges.filter((e) => e.tier === "smell"),
+    data().edges.filter((e) => e.tier === "smell"),
     verdictItem,
     edgeItemKey,
   );
   // Findings the per-file rules cannot see: every hop is clean, the landed flow is not.
   section(
     "Laundered through indirection (graph-only)",
-    data.flows.filter((f) => f.laundered),
+    data().flows.filter((f) => f.laundered),
     (f) =>
       h(
         "div",
@@ -168,20 +168,20 @@ export function renderIssues() {
           class: "item laundered",
           onclick: pinFrom(f),
         },
-        h("div", {}, pathLink(data.files[f.from].path), " ⇒ ", pathLink(data.files[f.to].path)),
+        h("div", {}, pathLink(data().files[f.from].path), " ⇒ ", pathLink(data().files[f.to].path)),
         h(
           "div",
           { class: "msg" },
-          `via ${f.via.map((id) => data.files[id].path).join("\n   via ")}\n${f.verdict}`,
+          `via ${f.via.map((id) => data().files[id].path).join("\n   via ")}\n${f.verdict}`,
         ),
       ),
-    (f) => `${data.files[f.from].path}=>${data.files[f.to].path}`,
+    (f) => `${data().files[f.from].path}=>${data().files[f.to].path}`,
   );
   // The two judges disagree: the tree places the file as one thing, the graph consumes it as another (the thesis's own finding).
   // The file draws where the tree claims it and its other findings are judged by that claim, so this list is where the contest itself surfaces.
   section(
     "Contested placement (tree vs graph)",
-    data.files.filter((f) => f.dispute),
+    data().files.filter((f) => f.dispute),
     (f) =>
       h(
         "div",
@@ -194,7 +194,7 @@ export function renderIssues() {
   // A cycle of legal references is invisible to every per-file rule, because no file in it is at fault (CHANNEL.5): every file in a cycle reaches every other, so the cycle is what a reviewer adjudicates, naming the settling element that encloses it or breaking the cycle.
   section(
     "Reference cycles (graph-only)",
-    data.cycles,
+    data().cycles,
     (c) =>
       h(
         "div",
@@ -202,7 +202,7 @@ export function renderIssues() {
         h(
           "div",
           { class: "files" },
-          ...c.files.flatMap((id, i) => [i ? " ⇄ " : "", pathLink(data.files[id].path)]),
+          ...c.files.flatMap((id, i) => [i ? " ⇄ " : "", pathLink(data().files[id].path)]),
         ),
         h("div", { class: "msg" }, c.verdict),
       ),
@@ -210,12 +210,12 @@ export function renderIssues() {
   );
   section(
     "Unresolved specifiers",
-    data.edges.filter((e) => e.to == null),
+    data().edges.filter((e) => e.to == null),
     (e) =>
       h(
         "div",
         { class: "unresolved item", onclick: pinFrom(e) },
-        pathLink(data.files[e.from].path),
+        pathLink(data().files[e.from].path),
         " → ",
         h("b", {}, e.spec),
       ),
@@ -223,7 +223,7 @@ export function renderIssues() {
   );
   // A surface that owns exported value bindings holds contents no layer file carries yet, read off the shared binding tables.
   // The lint rule reports each declaration with its remedy and keeps the authoritative counts; this list is the per-file fact, so the two never claim one number.
-  const owning = data.files.filter((f) => f.owns?.length);
+  const owning = data().files.filter((f) => f.owns?.length);
   section(
     "Unextracted declarations (surfaces owning bindings)",
     owning,
@@ -244,7 +244,7 @@ export function renderIssues() {
     (f) => f.path,
   );
   // A file no composition root can reach ships to nobody. SURFACE.4 reads that as a review signal - a domain may expose more than its consumers currently require - so it is listed, never scored as a breach.
-  const unreached = data.files.filter((f) => f.reachable === false);
+  const unreached = data().files.filter((f) => f.reachable === false);
   section(
     "Unreachable from any root",
     unreached,
@@ -259,23 +259,23 @@ export function renderIssues() {
   );
   section(
     "Unclassified files",
-    data.files.filter((f) => place(f).area === "other"),
+    data().files.filter((f) => place(f).area === "other"),
     (f) => h("div", { class: "item", onclick: pinId(f.id) }, pathLink(f.path)),
     (f) => f.path,
   );
   if (issuesBody.childElementCount === 1)
     issuesBody.append(h("div", { class: "drawer-empty" }, "No findings"));
-  const bad = data.edges.filter((e) => e.tier === "invariant").length;
-  const smell = data.edges.filter((e) => e.tier === "smell").length;
-  const laundered = data.flows.filter((f) => f.laundered).length;
-  const cycles = data.cycles.length;
-  const contested = data.files.filter((f) => f.dispute).length;
+  const bad = data().edges.filter((e) => e.tier === "invariant").length;
+  const smell = data().edges.filter((e) => e.tier === "smell").length;
+  const laundered = data().flows.filter((f) => f.laundered).length;
+  const cycles = data().cycles.length;
+  const contested = data().files.filter((f) => f.dispute).length;
   const found = bad + smell + laundered + cycles + contested;
   $("issue-count").textContent = `${found}`;
   $("issue-count").classList.toggle("hot", found > 0);
   $("counts").replaceChildren(
-    stat(data.files.length, "files"),
-    stat(data.edges.length, "edges"),
+    stat(data().files.length, "files"),
+    stat(data().edges.length, "edges"),
     stat(bad, "violations", bad ? "sev-bad" : "sev-zero"),
     stat(laundered, "laundered", laundered ? "sev-laundered" : "sev-zero"),
     stat(cycles, "cycles", cycles ? "sev-cycle" : "sev-zero"),
