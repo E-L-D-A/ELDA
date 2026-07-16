@@ -2,26 +2,11 @@
 // Board building: the root bars, the domain boxes, the unclassified box, and the block bar, rebuilt as one pass that commits its derived reading to the board.
 // The pass builds DOM and computes the derived state together, commits both to board.use-cases.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
 
-import { commit, rebuild } from "./use-cases.js";
-import { $, h, wrap } from "./adapters.js";
-import { ROWS, ROW_LABEL, byPath } from "./entities.js";
-import {
-  blockOf,
-  chipParts,
-  compactRow,
-  isComposerFile,
-  isLonerCore,
-  place,
-} from "./use-cases.js";
-import {
-  collapsed,
-  data,
-  hiddenBlocks,
-  hiddenFiles,
-  savePrefs,
-  setCollapsed,
-  toggle,
-} from "./use-cases.js";
+import { commit, rebuild } from "../use-cases/board.js";
+import { $, h, wrap } from "../adapters/dom.js";
+import { ROWS, ROW_LABEL, byPath } from "../entities/vocab.js";
+import { blockOf, chipParts, compactRow, isComposerFile, isLonerCore, place } from "../use-cases/placement.js";
+import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../use-cases/state.js";
 
 // The pass rebuilds the derived state into these private bindings and commits them whole; every reader takes them from the board.
 let _chips = new Map();

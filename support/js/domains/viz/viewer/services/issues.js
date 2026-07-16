@@ -2,20 +2,10 @@
 // Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
 // A drawer click re-aims the board through the board's own ports (rebuild, applyPin), so this service composes no sibling service.
 
-import { applyPin, chips, rebuild } from "./use-cases.js";
-import { $, h, markSelection } from "./adapters.js";
-import { place } from "./use-cases.js";
-import {
-  collapsed,
-  cycleId,
-  data,
-  getEditorLink,
-  savePrefs,
-  selectedKey,
-  setPin,
-  setPinCycle,
-  setSelected,
-} from "./use-cases.js";
+import { applyPin, chips, rebuild } from "../use-cases/board.js";
+import { $, h, markSelection } from "../adapters/dom.js";
+import { place } from "../use-cases/placement.js";
+import { collapsed, cycleId, data, getEditorLink, savePrefs, selectedKey, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
 
 // A header stat: the count and its label; the severity stats add a dot that takes the severity color while the count is nonzero.
 const stat = (n, label, sev) =>
@@ -230,6 +220,29 @@ export function renderIssues() {
       ),
     (g) => g.scope,
   );
+  // The recommendations are the slicing leans clustered per scope: every listed import is legal, and the fan of them is the drawn geometry of a slice at odds with its dataflow, so the section recommends the other direction and scores nothing.
+  section(
+    "Recommendations (re-slice)",
+    data().recommendations ?? [],
+    (g) =>
+      h(
+        "div",
+        { class: "item recommendation", onclick: pinFrom(g.edges[0]) },
+        h(
+          "div",
+          { class: "files" },
+          ...g.edges.slice(0, 6).flatMap((e, i) => [
+            i ? " · " : "",
+            pathLink(data().files[e.from].path),
+            " ↘ ",
+            pathLink(data().files[e.to].path),
+          ]),
+          g.edges.length > 6 ? ` + ${g.edges.length - 6} more` : "",
+        ),
+        h("div", { class: "msg" }, g.verdict),
+      ),
+    (g) => g.scope,
+  );
   section(
     "Unresolved specifiers",
     data().edges.filter((e) => e.to == null),
@@ -305,6 +318,7 @@ export function renderIssues() {
     stat(smell, "inadvisable", smell ? "sev-smell" : "sev-zero"),
     stat(owning.length, "unextracted", owning.length ? "sev-dead" : "sev-zero"),
     stat((data().pressure ?? []).length, "slicing", (data().pressure ?? []).length ? "sev-smell" : "sev-zero"),
+    stat((data().recommendations ?? []).length, "re-slice", (data().recommendations ?? []).length ? "sev-lean" : "sev-zero"),
     stat(unreached.length, "unreachable", unreached.length ? "sev-dead" : "sev-zero"),
   );
 }

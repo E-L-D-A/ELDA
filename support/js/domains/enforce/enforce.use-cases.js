@@ -12,7 +12,7 @@ import {
   targetOf,
   targetOfPath,
 } from '../../core/entities/model.js';
-import { graphRoles } from '../../core/ownership.use-cases.js';
+import { graphRoles } from '../../core/use-cases/ownership.js';
 import {
   importVerdict,
   landedVerdict,
@@ -21,7 +21,7 @@ import {
   rootLandedVerdict,
   selfSurfaceVerdict,
   unjudgedVerdict,
-} from '../../core/verdicts.use-cases.js';
+} from '../../core/use-cases/verdicts.js';
 
 // The scan, the walker, and the app-root resolution sit at ranks above this one (core's services, core's adapters), so the rules declare the needs here and enforce's services file supplies the implementations by ordinary composition (LAYER.2); this module touches no filesystem and reaches nothing upward.
 let host = { appRootOf: () => null, buildGraph: () => null, createWalker: () => null };

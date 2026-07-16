@@ -1,7 +1,7 @@
 // The host bindings: the document lookups every builder shares, the element builder, and the selection sweep over the drawer's items.
 // This is the one place the viewer touches the document API outside its services, so everything below the adapters row stays pure.
 
-import { selectedKey } from "./use-cases.js";
+import { selectedKey } from "../use-cases/state.js";
 
 export const $ = (id) => document.getElementById(id);
 export const wrap = $("wrap"),

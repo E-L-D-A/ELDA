@@ -2,20 +2,10 @@
 // Edge geometry and classification: which node an endpoint draws as, how references bundle under a fold, what paints an edge, which sides and ports it occupies, and the cubic through them.
 // Pure over the board's derived state and a caller-supplied rect reader; the SVG painting that consumes this lives in edges.services.js.
 
-import { edgeKey } from "./entities.js";
-import {
-  chips,
-  collapsed,
-  commit,
-  compactRep,
-  compactRow,
-  cycleClosers,
-  data,
-  isBarFile,
-  place,
-  threadComposers,
-  toggle,
-} from "./use-cases.js";
+import { edgeKey } from "../entities/vocab.js";
+import { collapsed, data, toggle } from "./state.js";
+import { chips, commit, compactRep, cycleClosers } from "./board.js";
+import { compactRow, isBarFile, place, threadComposers } from "./placement.js";
 
 // The node an endpoint draws as: a file of a folded domain draws as its rank's aggregate, so every reference crossing into that rank lands on one chip, which is where the bundle forms.
 const nodeOf = (id) => {
@@ -70,6 +60,8 @@ export function edgeClass(e) {
   if (e.tier === "invariant") return "violation";
   if (e.tier === "smell") return "smell";
   if (cycleClosers().has(edgeKey(e))) return "cycle";
+  // A slicing lean is a legal downward read across a piece boundary, marked by the scan; its own paint is what makes the re-slice geometry visible on the board.
+  if (e.lean) return "lean";
   if (e.typeOnly) return "type";
   return "ok";
 }
@@ -78,7 +70,7 @@ export function edgeVisible(e) {
   if (e.to == null) return false;
   if (!chips().has(e.from) || !chips().has(e.to)) return false;
   const cls = edgeClass(e);
-  if (cls === "ok" && !toggle("t-ok")) return false;
+  if ((cls === "ok" || cls === "lean") && !toggle("t-ok")) return false;
   if (cls === "type" && !toggle("t-type")) return false;
   return true;
 }

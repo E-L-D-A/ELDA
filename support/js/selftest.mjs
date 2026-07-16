@@ -142,8 +142,12 @@ const decidable = [...bag].flatMap(([id, hits]) => hits.filter((h) => CYCLE.incl
 console.log(`${(gated.length ? 'fires' : 'SILENT').padStart(6)}  ${'cycles (graph pass)'.padEnd(26)} ${graph.cycles.length}`);
 
 // The slicing-pressure pass, held to the same bar: the broken app's core carries two rank-climbing imports between sibling pieces, and the pass must gather them into one scope.
-const pressured = scanApp(BROKEN).pressure ?? [];
+const brokenGraph = scanApp(BROKEN);
+const pressured = brokenGraph.pressure ?? [];
 console.log(`${(pressured.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing pressure (graph)'.padEnd(26)} ${pressured.length}`);
+// The lean reading, held to the same bar: the broken core's two use-cases pieces both read its entities piece downward, and the pass must gather them into one recommendation.
+const recommended = brokenGraph.recommendations ?? [];
+console.log(`${(recommended.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing leans (graph)'.padEnd(26)} ${recommended.length}`);
 if (list) {
   for (const c of graph.cycles) {
     console.log(`          ${c.scope}${c.gate ? ' (gating class)' : ''}`);
@@ -172,6 +176,11 @@ if (unseen.length) {
   console.error(`\nThe graph pass missed the bag's cross-domain cycle: ${unseen.join(', ')}`);
   console.error('Either the pass is broken, or the cycle was broken by an edit. Both are failures.');
 }
+if (!recommended.length) {
+  console.error(`
+The slicing-lean pass missed the broken core's downward imports onto its entities piece.`);
+  console.error('Either the pass is broken, or the fan was broken by an edit. Both are failures.');
+}
 if (!pressured.length) {
   console.error(`
 The slicing-pressure pass missed the broken core's cluster of rank-climbing imports.`);
@@ -181,5 +190,5 @@ if (decidable.length) {
   console.error(`\nA per-file rule reports on the cycle, so it no longer proves the graph pass: ${decidable.join(', ')}`);
   console.error('The cycle must be legal edge by edge; give the rule its own fixture breach and restore this one.');
 }
-if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length) process.exit(1);
+if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length) process.exit(1);
 console.log(`\nAll ${bag.size} rules fire on their fixtures, the graph-classified rules fire on the connected app, the green app stays silent, and the graph passes hold their cycle and their slicing cluster.`);

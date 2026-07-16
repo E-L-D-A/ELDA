@@ -5,12 +5,12 @@
 
 // --- Undecidable references -------------------------------------------------
 
-// A reach the analyzers cannot resolve to a file (imports / a composition root's dynamic import); `cites` is the invariant the reading role would have been judged against.
+// A reference the analyzers cannot resolve to a file (imports / a composition root's dynamic import); `cites` is the invariant the reading role would have been judged against.
 export const unjudged = (cites, spec, why) =>
-  `ELDA ${cites} (unjudged): '${spec}' ${why}, so the file it names, and with it the layer and owner this reference carries, cannot be read - and no invariant can be checked on it. A reach that cannot be judged cannot be permitted: give it a specifier that resolves.`;
+  `ELDA ${cites} (unjudged): '${spec}' ${why}, so the file it names, and with it the layer and owner this reference carries, cannot be read - and no invariant can be checked on it. A reference that cannot be judged cannot be permitted: give it a specifier that resolves.`;
 
 export const rootLandsOutside = (landed) =>
-  `ELDA ROOT.1 (unjudged): this binding lands on '${landed}', a module outside every domain and outside every declared root, so the layer and owner it carries cannot be judged. Route the reach through a domain's surface, or move the module into the domain that owns it.`;
+  `ELDA ROOT.1 (unjudged): this binding lands on '${landed}', a module outside every domain and outside every declared root, so the layer and owner it carries cannot be judged. Route the reference through a domain's surface, or move the module into the domain that owns it.`;
 
 export const rootDynamicComputed = () =>
   `ELDA ROOT.1 (unjudged): a dynamic import with a computed specifier resolves nowhere the analyzers can follow, so the layer and owner it lands on cannot be judged. Give the import a statically-known specifier.`;
@@ -41,7 +41,7 @@ export const mutableExportNamed = (name) =>
   `ELDA CHANNEL.4: exporting the mutable binding '${name}' shares it live by reference; publish a constant, an accessor, or a channel instead.`;
 
 export const entityState = (name) =>
-  `ELDA LAYER.4: an entities file holds pure domain invariants and owns no state, and the module-level mutable binding '${name}' is state at the pure rank. Give the state an owner at an outer rank and keep the invariants and pure functions here.`;
+  `ELDA LAYER.4: an entities file holds pure domain invariants and owns no state, and the module-level mutable binding '${name}' is state in the one layer that holds only invariants. Move the state to an outer layer that owns it, and keep the invariants and pure functions here.`;
 
 // --- SURFACE ----------------------------------------------------------------
 
@@ -67,30 +67,30 @@ export const referenceSibPublicSurface = (sib, domainAlias, targetLayer) =>
   `ELDA SURFACE.3: reference '${sib}' through a public surface (${domainAlias}/${sib}, or a named surface entry), never its ${targetLayer} layer.`;
 
 export const selfSurface = (own, face) =>
-  `ELDA LAYER.1 / SURFACE.3: a surface is a domain's face to its consumers, and '${own}' is not a consumer of itself; this reference takes ${face} from inside. A surface holds no rank, so the binding arrives carrying no layer and LAYER.1 cannot be read on this reference at all: an inner layer reaches an outer one straight through the surface and no per-file rule sees it. Import the file that owns the binding.`;
+  `ELDA LAYER.1 / SURFACE.3: a surface is a domain's face to its consumers, and '${own}' is not a consumer of itself; this reference takes ${face} from inside. A surface holds no layer of its own, so the binding arrives carrying none and LAYER.1 cannot be read on this reference at all: an inner layer takes from an outer one straight through the surface and no per-file rule sees it. Import the file that owns the binding.`;
 
 export const surfaceDeclaration = (what) =>
-  `ELDA SURFACE.2 / OWNER.2: a surface curates what the layers own and holds no rank of its own, so ${what} has no layer and no owner here, and no rule can judge where it sits. Declare it in the layer file that owns it, and re-export it from this surface.`;
+  `ELDA SURFACE.2 / OWNER.2: a surface curates what the layers own and holds no layer of its own, so ${what} has no layer and no owner here, and no rule can judge where it sits. Declare it in the layer file that owns it, and re-export it from this surface.`;
 
 // The single-file domain: the file is its own surface and its declarations are the domain's contents, so no layer file exists yet to own them.
 export const surfaceDeclarationLoner = (what) =>
   `ELDA SURFACE.2 / OWNER.2: this file is a whole domain in one module, so it doubles as the domain's surface, and ${what} declared on a surface has no layer to be judged at. Rename the file with the layer suffix its contents hold, or extract the contents into layer files and keep this one as the surface that re-exports them.`;
 
 export const diagonal = (from, targetUnit, targetLayer) =>
-  `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${targetLayer} - a diagonal reach across both name and rank. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${targetLayer} file if the subdomain shares it, or cross at equal rank through this unit's own ${targetLayer} row.`;
+  `ELDA SURFACE.5: ${from} takes a value from '${targetUnit}' at ${targetLayer} - a diagonal: the reference changes unit and layer at once. Rename the target into the consuming unit if it alone consumes it, promote it to the subdomain's bare ${targetLayer} file if the subdomain shares it, or take it from this unit's own ${targetLayer} file, which crosses at equal layer.`;
 
 export const landedDiagonal = (from, where, targetLayer) =>
-  `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${targetLayer}, below its own rank - a diagonal no row of the diagram draws. Cross at equal rank: reference it from this unit's own ${targetLayer} row, and let its own column climb.`;
+  `ELDA SURFACE.5 (landed): ${from} takes a value landing in ${where} at ${targetLayer}, below this file's own layer - a diagonal: the landing changes owner and layer at once. Take the value from this unit's own ${targetLayer} file, which crosses at equal layer and imports downward inside its unit.`;
 
 export const published = (what) =>
   `ELDA SURFACE.2 (published): the runtime-composition surface publishes the domain's services to its composition root, and this re-export forwards ${what} onto it instead. A use-case does not become a service by transiting a services file: consume it here and declare the service that owns it, or publish it on the consumable surface where it belongs.`;
 
-// A side-effect-only import reaching past its unit; phrased once and read by both the plugin rule and the scan.
+// A side-effect-only import that runs a module outside its unit; phrased once and read by both the plugin rule and the scan.
 export const deepSideEffect = (spec) =>
   `ELDA SURFACE.5: side-effect import '${spec}' runs another module for effect with nothing named crossing the edge; co-locate it in the unit, compose it at the root, or import a named value.`;
 
 export const importStarOpaque = () =>
-  'ELDA SURFACE.4: `import * as` consumes a surface opaquely - every export looks used, blinding the unconsumed-export signal. Import the named symbols you use.';
+  'ELDA SURFACE.4: `import * as` consumes a surface opaquely - every export looks used, so an unconsumed export can never be noticed. Import the named symbols you use.';
 
 export const exportStar = () =>
   'ELDA SURFACE.1: `export *` republishes whatever the module exports, so the surface is not a deliberate named contract. Re-export named symbols.';
@@ -104,7 +104,7 @@ export const lateralMountsPeer = (layer, importerUnit, peerChain) =>
   `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit}' mounts peer '${peerChain}' at its runtime-composition surface; prefer a named slot port its composer fills, and justify the mounting where the port becomes ceremony.`;
 
 export const lateralReachesUnit = (layer, importerUnit, targetUnit, roleChain, remedy) =>
-  `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit}' reaches a different ${layer} unit '${targetUnit}' in '${roleChain}'; ${remedy}`;
+  `ELDA OWNER.5 (inadvisable): ${layer} unit '${importerUnit}' imports from a different ${layer} unit '${targetUnit}' in '${roleChain}'; ${remedy}`;
 
 export const vocabWrite = (m, key) =>
   `ELDA OWNER.2 / ROOT.2: shared-namespace write ${m}('${key}', ...) at the integration surface; route it through the owner's binding surface.`;
@@ -135,12 +135,22 @@ export const subReferencesParent = (parent) =>
   `ELDA ROOT.7: a subdomain never references its parent ('${parent}'); either unwrap the subdomain or extract its shared content into a sibling subdomain.`;
 
 export const rootLanded = (chain, targetLayer) =>
-  `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${chain}' at ${targetLayer}. Consuming ${targetLayer} is a service's own work, so the reach marks a service smashed into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
+  `ELDA ROOT.1 (landed): a composition root wires services; this binding lands on '${chain}' at ${targetLayer}. Consuming ${targetLayer} is a service's own work, so the landing marks a service written into the root: extract that service, publish it on the domain's runtime-composition surface, and mount it.`;
 
-// The slicing-pressure reading (the spec's Slicing direction): a cluster of rank-climbing reaches between sibling pieces is a partition fighting its dataflow.
+// The slicing-pressure reading (the spec's Slicing direction): a cluster of upward imports between sibling domains says the split fights the dataflow.
 // The pass gathers the cluster and the reviewer decides the new slice, so the verdict suggests and never gates.
 export const slicingPressure = (scope, count, pairs) =>
-  `ELDA slicing: ${count} imports climb the rank order between sibling pieces of '${scope}' (${pairs.join('; ')}). A cluster like this is the pressure of a partition fighting its dataflow. Consider re-slicing: merge the fighting siblings into one piece whose rank rows carry the structure, or re-rank the pieces so every import points down.`;
+  `ELDA slicing: ${count} imports in '${scope}' step up a layer and cross into a sibling domain on the way (${pairs.join('; ')}). Each one is a violation on its own, and their clustered appearance says the split itself is at fault: merge the siblings into one domain grouped by layer, or move each one to the layer its imports say it holds.`;
+
+// The pressure verdict's legal mirror: these imports are downward and legal one by one, and the cluster of them says the slice is at odds with the dataflow, so this recommends and never gates.
+export const slicingLean = (scope, count, spelled) => {
+  const grouped = spelled === 'horizontal' ? 'layer' : 'concern';
+  const flow = spelled === 'horizontal' ? 'concerns' : 'layers';
+  const flip = spelled === 'horizontal'
+    ? `by concern (each file named for its concern, carrying its layer as a name suffix)`
+    : `by layer (directories named for each layer, holding plain concern-named files)`;
+  return `ELDA slicing: ${count} imports in '${scope}' step down a layer and cross into a sibling domain on the way. While technically legal, their clustered appearance says: the code flows along the ${flow} while the files are grouped by ${grouped}. Consider grouping '${scope}' ${flip}; the same imports then stay inside one group.`;
+};
 
 // A reference cycle over the landed value graph (the graph pass, graph.js); `domains` and `chains` are the distinct domains and subdomain chains it encloses, and a single-file component is a self-reference.
 export const cycle = ({ domains, chains, componentLength, firstPath }) => {
@@ -152,5 +162,5 @@ export const cycle = ({ domains, chains, componentLength, firstPath }) => {
   const what = componentLength === 1
     ? `the file '${firstPath}' references itself`
     : `${componentLength} files close a reference cycle ${where}`;
-  return `ELDA CHANNEL.5: ${what}, and every reference in it carries a value synchronously. Lift the shared content the cycle encloses into a piece both sides consume, which collapses the mutual dependency into one-way leans - or, where the loop is a designed feedback, enclose a settling element: a change-gated channel with a tight equality, which breaks the synchronous re-entry.`;
+  return `ELDA CHANNEL.5: ${what}, and every reference in it carries a value synchronously. Lift the shared content the cycle encloses into a domain both sides consume, which collapses the mutual dependency into one-way imports - or, where the loop is a designed feedback, enclose a settling element: a change-gated channel with a tight equality, which breaks the synchronous re-entry.`;
 };

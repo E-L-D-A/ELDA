@@ -234,8 +234,9 @@ export const isServicesSurface = (t) => t.layer === 'services'
 // OWNER.5 as Tier-2 "inadvisable dependencies" (the red arrows in ELDA-Layers, drawn at both outer rows): lateral coupling between two units of the same outer layer bypasses the use-case crossing where cross-unit flow belongs.
 // A unit is one concern-part (SURFACE.5, the spec's "Units"): the files sharing one name at a subdomain's root, or the contents of one unit directory.
 // Same name or same directory means one unit and co-located imports are free; the label is the file's own name, or the directory path.
+// A layer row of the horizontal slicing carries no unit name of its own: a plain file directly in the row is the layer aggregate spread across files, the same shared base the vertical spelling writes as one bare reserved-name file, while a directory inside the row labels a unit the way a unit directory does.
 export const unitOf = (c) => {
-  if (c.via === 'branch') return [c.layer, ...c.sub.slice(0, -1)].join('/');
+  if (c.via === 'branch') return c.sub.slice(0, -1).join('/');
   if (c.via === 'unit-dir') return c.sub.slice(0, -1).join('/');
   if (c.via === 'suffix') return c.name ?? '';
   // A bare reserved-name file is the subdomain's own layer aggregate.

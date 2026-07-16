@@ -2,8 +2,8 @@
 // The reach walk behind a focus: what a file pulls in and what breaks when it changes, each direction carrying its hop distance.
 // Pure over the board's adjacency; the class application that paints the result lives in focus.services.js.
 
-import { adjIn, adjOut } from "./use-cases.js";
-import { toggle } from "./use-cases.js";
+import { adjIn, adjOut } from "./board.js";
+import { toggle } from "./state.js";
 
 // One hop answers "who does it touch"; the reach toggle walks the closure, which is the question a reader asks of a tree they did not write.
 export function neighbourhood(id) {

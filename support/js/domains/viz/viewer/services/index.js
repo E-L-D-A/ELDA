@@ -2,24 +2,15 @@
 // The viewer's composer: it fills the board's ports with the rebuild pipeline and the pin application, wires the interaction service with the siblings it composes on events, injects the storage effect, syncs the header toggles into state, and starts the first load once every definition is in place.
 // The pipeline is the one place the services meet: board, drawer, arrows, pin - so no service imports another, and a handler anywhere below asks the board.
 
-import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "./use-cases.js";
-import { deriveDrawn } from "./edges.use-cases.js";
-import { $ } from "./adapters.js";
-import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.services.js";
-import { applyPin, blur, focus } from "./focus.services.js";
-import { installInteractions } from "./interactions.services.js";
-import { renderIssues } from "./issues.services.js";
-import { renderBoard } from "./render.services.js";
-import {
-  INLINE,
-  collapsed,
-  data,
-  hiddenBlocks,
-  savePrefs,
-  setData,
-  setPersist,
-  setToggle,
-} from "./use-cases.js";
+import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "../use-cases/board.js";
+import { deriveDrawn } from "../use-cases/edges.js";
+import { $ } from "../adapters/dom.js";
+import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.js";
+import { applyPin, blur, focus } from "./focus.js";
+import { installInteractions } from "./interactions.js";
+import { renderIssues } from "./issues.js";
+import { renderBoard } from "./render.js";
+import { INLINE, collapsed, data, hiddenBlocks, savePrefs, setData, setPersist, setToggle } from "../use-cases/state.js";
 
 onRebuild(() => {
   renderBoard();

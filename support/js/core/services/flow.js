@@ -6,8 +6,8 @@
 
 import { existsSync, statSync } from 'node:fs';
 
-import { fileRole, isRelative, norm } from './entities/model.js';
-import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
+import { fileRole, isRelative, norm } from '../entities/model.js';
+import { EXT_CANDIDATES, moduleInfo } from '../adapters/parse.js';
 
 const dirOf = (p) => p.slice(0, p.lastIndexOf('/'));
 

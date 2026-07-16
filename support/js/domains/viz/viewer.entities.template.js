@@ -1,5 +1,5 @@
 // The entry specifier is the one name the page, the served module routes, and a snapshot's import map all share, so it is declared once here and referenced everywhere else.
-export const ENTRY = './viewer/services.js';
+export const ENTRY = './viewer/services/index.js';
 
 export const template = /* html */`
   <header>
@@ -46,10 +46,13 @@ export const template = /* html */`
         <span><i class="out"></i>depends on</span>
       </div>
       <div class="col">
-        <span><i class="violation"></i>violation</span>
-        <span><i class="laundered"></i>laundered</span>
         <span><i class="cycle"></i>reference cycle</span>
         <span><i class="smell"></i>inadvisable</span>
+        <span><i class="lean"></i>slicing tension</span>
+      </div>
+      <div class="col">
+        <span><i class="violation"></i>violation</span>
+        <span><i class="laundered"></i>laundered</span>
       </div>
     </div>
     <nav id="bottombar"></nav>

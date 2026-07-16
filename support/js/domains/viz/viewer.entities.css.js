@@ -28,6 +28,7 @@ export const styles = /* css */`
   --smell: #c68118;
   --laundered: #e07b39;
   --cycle: #a06ce0;
+  --lean: #62b0c4;
   --hi-out: #3f8de0;
   --hi-in: #1ba46c;
   --accent: #3f8de0;
@@ -39,6 +40,10 @@ export const styles = /* css */`
 /* The open drawer covers the viewport's right strip, so programmatic scrolls (issue clicks) must treat that strip as off-screen. */
 html:has(#issues.open) {
   scroll-padding-right: calc(var(--drawer-w) + 24px);
+}
+/* Scroll-padding alone only guides programmatic scrolls, so also reserve a matching strip of pannable space on the right; any file can then be panned out from behind the open drawer. */
+html:has(#issues.open) #wrap {
+  padding-right: calc(var(--drawer-w) + 24px);
 }
 * {
   box-sizing: border-box;
@@ -163,6 +168,12 @@ header h1 .brand {
 .counts .sev-laundered b {
   color: var(--laundered);
 }
+.counts .sev-lean .dot {
+  background: var(--lean);
+}
+.counts .sev-lean b {
+  color: var(--lean);
+}
 /* A cycle is a property of the graph rather than a worse breach, so it takes a hue of its own outside the severity ramp. */
 .counts .sev-cycle .dot {
   background: var(--cycle);
@@ -227,6 +238,9 @@ header h1 .brand {
 }
 .legend i.cycle {
   border-top: 2px solid var(--cycle);
+}
+.legend i.lean {
+  border-top: 2px solid var(--lean);
 }
 .legend i.type {
   border-top: 2px dotted var(--type);
@@ -453,6 +467,12 @@ body.panning, body.panning .chip {
   stroke: var(--ok);
   stroke-width: 1.1;
   opacity: 0.45;
+}
+/* A slicing lean is legal and load-bearing for the re-slice reading, so it sits above the ordinary dependency's fade without reaching the severity weights. */
+#edges path.lean {
+  stroke: var(--lean);
+  stroke-width: 1.3;
+  opacity: 0.85;
 }
 #edges path.type {
   stroke: var(--type);
@@ -1092,6 +1112,10 @@ body.panning, body.panning .chip {
 /* An unreachable file is not a breach, so it carries no severity stripe; only its path is actionable. */
 #issues .unreachable.item {
   color: var(--muted);
+}
+/* A recommendation lists legal imports, so it takes the lean hue instead of a severity stripe. */
+#issues .item.recommendation {
+  background: linear-gradient(110deg, var(--lean), transparent 6%), linear-gradient(var(--box-hi), var(--box-hi));
 }
 /* An owning surface is an observation, so it carries no stripe either; the lint rule holds the severity and the counts. */
 #issues .unextracted.item {

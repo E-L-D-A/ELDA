@@ -6,16 +6,27 @@ import { existsSync, readFileSync, readdirSync, statSync, watch } from 'node:fs'
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CODE_RE } from '../../core/parse.adapters.js';
-import { buildGraph } from '../../core/scan.services.js';
-import { STYLE_RE, isAsset, readOptions, walk } from '../../core/tree.adapters.js';
+import { CODE_RE } from '../../core/adapters/parse.js';
+import { buildGraph } from '../../core/services/scan.js';
+import { STYLE_RE, isAsset, readOptions, walk } from '../../core/adapters/tree.js';
 import { livePage, snapshotPage } from './viewer.use-cases.js';
 
 const viewerDir = join(dirname(fileURLToPath(import.meta.url)), 'viewer');
 const modulePath = (name) => join(viewerDir, `${name}.js`);
 
-export const moduleNames = () =>
-  readdirSync(viewerDir).filter((f) => f.endsWith('.js')).map((f) => f.slice(0, -'.js'.length));
+// Module names are viewer-relative and may carry a layer directory ('use-cases/state'), so the listing walks the tree.
+export const moduleNames = () => {
+  const out = [];
+  const visit = (dir, rel) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const name = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) visit(join(dir, e.name), name);
+      else if (e.name.endsWith('.js')) out.push(name.slice(0, -'.js'.length));
+    }
+  };
+  visit(viewerDir, '');
+  return out;
+};
 export const moduleSource = (name) => readFileSync(modulePath(name), 'utf8');
 
 // The served route for a viewer module, matched against the real module set so the route reads no path the caller supplies; null for any other URL.
@@ -33,7 +44,7 @@ export const viewerStamp = () =>
   String(moduleNames().reduce((max, n) => Math.max(max, statSync(modulePath(n)).mtimeMs), 0));
 
 // A change to any viewer module reaches every open page through the caller's notification.
-export const watchViewer = (onChange) => watch(viewerDir, onChange);
+export const watchViewer = (onChange) => watch(viewerDir, { recursive: true }, onChange);
 
 // The app scan and its change signal, as the service the CLI root mounts.
 export const scanApp = (appDir) => buildGraph(appDir);

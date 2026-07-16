@@ -2,12 +2,12 @@
 // Edge painting: the SVG layer, the on-scroll geometry updates, and the edge tooltips.
 // The geometry and classification live in edges.use-cases.js; this service measures the chips, paints the paths, and builds the tip elements.
 
-import { chips, drawn } from "./use-cases.js";
-import { h, svg, wrap } from "./adapters.js";
-import { assignPorts, edgeClass, edgePath, edgeSides, edgeVisible } from "./edges.use-cases.js";
-import { ROW_LABEL } from "./entities.js";
-import { place } from "./use-cases.js";
-import { data } from "./use-cases.js";
+import { chips, drawn } from "../use-cases/board.js";
+import { h, svg, wrap } from "../adapters/dom.js";
+import { assignPorts, edgeClass, edgePath, edgeSides, edgeVisible } from "../use-cases/edges.js";
+import { ROW_LABEL } from "../entities/vocab.js";
+import { place } from "../use-cases/placement.js";
+import { data } from "../use-cases/state.js";
 
 // The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
 let stickyPaths = [];
@@ -31,6 +31,7 @@ export function drawEdges() {
   const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   defs.innerHTML = [
     "ok",
+    "lean",
     "type",
     "smell",
     "violation",
@@ -43,6 +44,7 @@ export function drawEdges() {
     .map((c) => {
       const color = {
         ok: "var(--ok)",
+        lean: "var(--lean)",
         type: "var(--type)",
         smell: "var(--smell)",
         violation: "var(--bad)",

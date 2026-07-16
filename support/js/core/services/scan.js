@@ -5,14 +5,14 @@
 
 import { join } from 'node:path';
 
-import { deepSideEffect, slicingPressure } from './entities/messages.js';
-import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from './entities/model.js';
-import { createWalker } from './flow.services.js';
-import { cycles } from './graph.use-cases.js';
-import { graphRoles } from './ownership.use-cases.js';
-import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';
-import { gatherFiles, readOptions } from './tree.adapters.js';
-import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from './verdicts.use-cases.js';
+import { deepSideEffect, slicingLean, slicingPressure } from '../entities/messages.js';
+import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from '../entities/model.js';
+import { createWalker } from './flow.js';
+import { cycles } from '../use-cases/graph.js';
+import { graphRoles } from '../use-cases/ownership.js';
+import { EXT_CANDIDATES, moduleInfo } from '../adapters/parse.js';
+import { gatherFiles, readOptions } from '../adapters/tree.js';
+import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from '../use-cases/verdicts.js';
 
 export function buildGraph(appDir) {
   const options = readOptions(appDir);
@@ -218,8 +218,50 @@ export function buildGraph(appDir) {
       verdict: slicingPressure(scope, list.length, [...new Set(list.map((x) => x.pair))]),
     }));
 
+  // The pressure pass's legal mirror - the slicing leans: downward imports that cross a piece boundary to reach the shared base below, each one legal, and a cluster of them is the drawn geometry of a slice at odds with its dataflow.
+  // A named unit reading its subdomain's bare base crosses every column to reach it, and a core piece reading a lower core piece does the same across the shared block; the marked edges take their own paint, and a cluster from two or more pieces ships as a recommendation to consider the other slicing direction.
+  const leanOf = (ref) => {
+    if (ref.to == null || ref.typeOnly || ref.tier) return null;
+    const a = files[ref.from].role;
+    const b = files[ref.to].role;
+    if (!a.layer || !b.layer) return null;
+    if (LAYER_RANK[b.layer] >= LAYER_RANK[a.layer]) return null;
+    if (a.kind === 'domain' && b.kind === 'domain') {
+      const ca = (a.chain ?? []).join('/');
+      const cb = (b.chain ?? []).join('/');
+      if (ca !== cb || (a.name ?? '') === '' || (b.name ?? '') !== '') return null;
+      return { scope: ca, piece: a.name, via: a.via };
+    }
+    if (a.kind === 'core' && b.kind === 'core') {
+      if ((a.chain ?? []).join('/') === (b.chain ?? []).join('/')) return null;
+      if (a.area == null || a.area !== b.area) return null;
+      return { scope: a.area, piece: (a.chain ?? []).join('/'), via: a.via };
+    }
+    return null;
+  };
+  const leanGroups = new Map();
+  for (const e of edges) {
+    const hit = leanOf(e);
+    if (!hit) continue;
+    e.lean = true;
+    if (!leanGroups.has(hit.scope)) leanGroups.set(hit.scope, []);
+    leanGroups.get(hit.scope).push({ from: e.from, to: e.to, piece: hit.piece, via: hit.via });
+  }
+  const recommendations = [...leanGroups.entries()]
+    .filter(([, list]) => new Set(list.map((x) => x.piece)).size >= 2)
+    .map(([scope, list]) => {
+      const spelled =
+        list.filter((x) => x.via === 'branch').length > list.length / 2 ? 'horizontal' : 'vertical';
+      return {
+        scope,
+        edges: list.map(({ from, to }) => ({ from, to })),
+        verdict: slicingLean(scope, list.length, spelled),
+      };
+    });
+
   const walker = createWalker({ appRoot: appDir, aliases, ownershipDir, core });
   const flows = expandFlows(files, edges, walker, appDir, byPath);
+  for (const f of flows) if (leanOf(f)) f.lean = true;
   // Root glue draws in the bar of the root that reached it, and glue shared between roots gets a bar of its own, so every composition-root file has a place on the board.
   const rootBars = roots.map((r) => ({ key: r.key, label: r.label }));
   for (const f of files) {
@@ -233,6 +275,7 @@ export function buildGraph(appDir) {
     edges,
     flows,
     pressure,
+    recommendations,
     cycles: cycles(files, cycleEdges(edges, flows)),
     cwd: norm(appDir)
   };

@@ -2,19 +2,10 @@
 // Interactions: delegated hover and pinning, grab panning, the tooltip.
 // The sibling services it composes on an event (the focus painting, the edge tips) arrive as ports the composer fills, so this service imports none of them; the rebuild and the pin re-application go through the board's own ports.
 
-import { applyPin, compactFiles, drawn, rebuild } from "./use-cases.js";
-import { markSelection, tooltip, wrap } from "./adapters.js";
-import { place } from "./use-cases.js";
-import {
-  data,
-  getEditorLink,
-  hiddenFiles,
-  pinnedCycle,
-  pinnedPath,
-  setPin,
-  setPinCycle,
-  setSelected,
-} from "./use-cases.js";
+import { applyPin, compactFiles, drawn, rebuild } from "../use-cases/board.js";
+import { markSelection, tooltip, wrap } from "../adapters/dom.js";
+import { place } from "../use-cases/placement.js";
+import { data, getEditorLink, hiddenFiles, pinnedCycle, pinnedPath, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
 
 // The composer supplies what an event composes (LAYER.2): the focus painting and the edge tips are sibling services this one never imports.
 export function installInteractions({ focus, blur, edgeTip, endLabel }) {

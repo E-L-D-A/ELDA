@@ -12,7 +12,7 @@ import { ENTRY, template } from './viewer.entities.template.js';
 
 export const livePage = () => html(styles, null, template);
 
-// The marker in the shared base (use-cases.js) that a snapshot replaces with the scanned graph, so the page boots with its data inlined and asks no server.
+// The marker in the session state (use-cases/state.js) that a snapshot replaces with the scanned graph, so the page boots with its data inlined and asks no server.
 const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
 const injectGraph = (src, graph) => src.replace(DATA_RE, JSON.stringify(graph));
 
@@ -24,8 +24,8 @@ export function snapshotPage(names, sourceOf, graph) {
   const imports = {};
   for (const name of names) {
     let src = sourceOf(name);
-    if (name === 'use-cases') src = injectGraph(src, graph);
-    imports[name === 'services' ? ENTRY : `@viewer/${name}`] = dataUrl(toBare(src));
+    if (name === 'use-cases/state') src = injectGraph(src, graph);
+    imports[name === 'services/index' ? ENTRY : `@viewer/${name}`] = dataUrl(toBare(src, name));
   }
   return html(styles, { imports }, template);
 }
