@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CODE_RE } from '../../core/parse.adapters.js';
-import { buildGraph } from '../../core/scan.use-cases.js';
+import { buildGraph } from '../../core/scan.services.js';
 import { STYLE_RE, isAsset, readOptions, walk } from '../../core/tree.adapters.js';
 import { livePage, snapshotPage } from './viewer.use-cases.js';
 

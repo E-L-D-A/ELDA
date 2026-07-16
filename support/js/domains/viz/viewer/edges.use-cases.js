@@ -1,12 +1,21 @@
 // ---------------------------------------------------------------------------
-// Edges.
+// Edge geometry and classification: which node an endpoint draws as, how references bundle under a fold, what paints an edge, which sides and ports it occupies, and the cubic through them.
+// Pure over the board's derived state and a caller-supplied rect reader; the SVG painting that consumes this lives in edges.services.js.
 
-import { compactRow, isBarFile, place } from "./placement.use-cases.js";
-import { chips, compactRep, cycleClosers, drawn, h } from "./render.use-cases.js";
-import { $, ROW_LABEL, data, edgeKey, svg, wrap } from "./entities.js";
-
-// The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
-let stickyPaths = [];
+import { edgeKey } from "./entities.js";
+import {
+  chips,
+  collapsed,
+  commit,
+  compactRep,
+  compactRow,
+  cycleClosers,
+  data,
+  isBarFile,
+  place,
+  threadComposers,
+  toggle,
+} from "./use-cases.js";
 
 // The node an endpoint draws as: a file of a folded domain draws as its rank's aggregate, so every reference crossing into that rank lands on one chip, which is where the bundle forms.
 const nodeOf = (id) => {
@@ -55,7 +64,7 @@ export function bundleEdges(list) {
 // A laundered finding carries a tier, yet it is a graph-only landing rather than an authored breach, so it paints as its own severity ahead of the tier colors.
 // A cycle closer paints as the cycle once nothing else has named it: where a verdict already sits on the edge, that verdict is the one carrying a remedy at the site, and the cycle is what remains when every edge closing it is legal.
 // A bundle settled its own paint when it formed, out of the worst reference it carries.
-function edgeClass(e) {
+export function edgeClass(e) {
   if (e.cls) return e.cls;
   if (e.laundered) return "laundered";
   if (e.tier === "invariant") return "violation";
@@ -69,8 +78,8 @@ export function edgeVisible(e) {
   if (e.to == null) return false;
   if (!chips().has(e.from) || !chips().has(e.to)) return false;
   const cls = edgeClass(e);
-  if (cls === "ok" && !$("t-ok").checked) return false;
-  if (cls === "type" && !$("t-type").checked) return false;
+  if (cls === "ok" && !toggle("t-ok")) return false;
+  if (cls === "type" && !toggle("t-type")) return false;
   return true;
 }
 
@@ -80,7 +89,7 @@ function edgeMode(e) {
   const pf = place(data().files[e.from]),
     pt = place(data().files[e.to]);
   if (pf.area === "root" || pt.area === "root") return "v";
-  // A reach into a core block is legal from any rank - the diagram's dashed laterals into Shared - so a cross-block core edge reads horizontally; inside the block the normal geometry holds.
+  // A reach into a core block is legal at or below the consumer's rank - the diagram's dashed laterals into Shared - so a cross-block core edge reads horizontally; inside the block the normal geometry holds.
   if ((pf.core || pt.core) && pf.domain !== pt.domain) return "h";
   const fromBar = isBarFile(data().files[e.from]),
     toBar = isBarFile(data().files[e.to]);
@@ -104,7 +113,7 @@ function edgeMode(e) {
 }
 
 // The concrete sides an edge occupies, drawn straight between them: a vertical run leaves a horizontal side and lands on the facing one, a horizontal run uses the facing vertical sides, a diagonal leaves and enters on the vertical sides so its slant is unmistakable, and a same-cell arc pairs the two right sides.
-function edgeSides(e, rectOf) {
+export function edgeSides(e, rectOf) {
   const S = rectOf(e.from),
     T = rectOf(e.to);
   const dx = T.x + T.w / 2 - (S.x + S.w / 2),
@@ -120,7 +129,7 @@ function edgeSides(e, rectOf) {
 }
 
 // Every endpoint sharing a chip side gets its own evenly spaced port, ordered by where the opposite endpoint sits, so a fan of edges spreads cleanly along the side.
-function assignPorts(entries, rectOf) {
+export function assignPorts(entries, rectOf) {
   const groups = new Map();
   for (const en of entries) {
     for (const end of ["from", "to"]) {
@@ -151,89 +160,8 @@ function port(rect, side, frac) {
   return [rect.x + rect.w, rect.y + padY + (rect.h - 2 * padY) * frac];
 }
 
-export function drawEdges() {
-  const wrapRect = wrap.getBoundingClientRect();
-  svg.setAttribute("width", wrap.scrollWidth);
-  svg.setAttribute("height", wrap.scrollHeight);
-  svg.replaceChildren();
-  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
-  defs.innerHTML = [
-    "ok",
-    "type",
-    "smell",
-    "violation",
-    "laundered",
-    "cycle",
-    "hi-in",
-    "hi-out",
-    "hi-cycle",
-  ]
-    .map((c) => {
-      const color = {
-        ok: "var(--ok)",
-        type: "var(--type)",
-        smell: "var(--smell)",
-        violation: "var(--bad)",
-        laundered: "var(--laundered)",
-        cycle: "var(--cycle)",
-        "hi-in": "var(--hi-in)",
-        "hi-out": "var(--hi-out)",
-        "hi-cycle": "var(--cycle)",
-      }[c];
-      return `<marker id="m-${c}" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0.8 L9.5 5 L0 9.2 L2.6 5 z" fill="${color}"/></marker>`;
-    })
-    .join("");
-  svg.append(defs);
-
-  const rectOf = rectFor(wrapRect);
-  const entries = [];
-  drawn().forEach((e, i) => {
-    if (!edgeVisible(e) || e.from === e.to) return;
-    entries.push({ e, i, sides: edgeSides(e, rectOf) });
-  });
-  assignPorts(entries, rectOf);
-  stickyPaths = [];
-  for (const en of entries) {
-    const d = edgePath(en, rectOf);
-    const cls = edgeClass(en.e);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", d);
-    path.setAttribute(
-      "class",
-      "edge " +
-        cls +
-        (en.sides.kind === "diag" ? " diagonal" : "") +
-        (en.e.bundle ? " bundled" : ""),
-    );
-    // A bundled arrow stands for many references, so its weight reads the count while its colour keeps the worst verdict among them.
-    if (en.e.bundle) path.style.setProperty("--n", en.e.bundle.length);
-    path.setAttribute("marker-end", `url(#m-${cls})`);
-    path.dataset.from = en.e.from;
-    path.dataset.to = en.e.to;
-    svg.append(path);
-    const hit = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    hit.setAttribute("d", d);
-    hit.setAttribute("class", "hit");
-    hit.dataset.i = en.i;
-    svg.append(hit);
-    // Only edges touching the viewport-sticky root chips move on scroll; remember them so scrolling rewrites their geometry in place.
-    if (isRootFile(en.e.from) || isRootFile(en.e.to)) stickyPaths.push({ en, path, hit });
-  }
-}
-
-const isRootFile = (id) => place(data().files[id]).area === "root";
-const rectFor = (wrapRect) => (id) => {
-  const r = chips().get(id).getBoundingClientRect();
-  return {
-    x: r.left - wrapRect.left,
-    y: r.top - wrapRect.top,
-    w: r.width,
-    h: r.height,
-  };
-};
-
 // One edge's cubic through its assigned ports: a same-cell arc nests beside the cell by port index, a horizontal run curves through the facing vertical sides, and a vertical or diagonal run curves through the horizontal sides, its curvature scaled by the distance covered plus a share of the cross-axis distance so long fans stay rounded; shared by the full rebuild and the on-scroll geometry updates.
-function edgePath(en, rectOf) {
+export function edgePath(en, rectOf) {
   const { sides } = en;
   const S = rectOf(en.e.from),
     T = rectOf(en.e.to);
@@ -256,100 +184,24 @@ function edgePath(en, rectOf) {
   return `M${x1} ${y1} C${x1} ${c1}, ${x2} ${c2}, ${x2} ${y2}`;
 }
 
-// The scroll-time pass: rewrite the sticky-connected paths' geometry in place through their frozen ports, touching no other DOM.
-export function updateStickyEdges() {
-  if (!stickyPaths.length) return;
-  const rectOf = rectFor(wrap.getBoundingClientRect());
-  for (const s of stickyPaths) {
-    const d = edgePath(s.en, rectOf);
-    s.path.setAttribute("d", d);
-    s.hit.setAttribute("d", d);
+// The drawn reading, derived after a board pass has committed its chips: the closers, the flow list under the current view, and the adjacency the reach walk rides.
+// The adjacency counts only what the board is drawing: an edge a filter dropped or a hidden block took away is out of the walk exactly as it is out of the picture, so the reach you read is the reach of the graph in front of you.
+export function deriveDrawn() {
+  const expunge = !toggle("t-surfaces");
+  const threadC = !toggle("t-services");
+  // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in; a view that redraws the arrows through their conduits routes them around the cycle, and the files it encloses still raise together.
+  const closers = new Set(data().cycles.flatMap((c) => c.edges.map(edgeKey)));
+  // With surfaces expunged, every edge is expanded through the conduits to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
+  let list = expunge ? data().flows : data().edges;
+  if (threadC) list = threadComposers(list);
+  if (collapsed.size) list = bundleEdges(list);
+  const adjOut = new Map();
+  const adjIn = new Map();
+  commit({ drawn: list, cycleClosers: closers });
+  for (const e of list) {
+    if (e.from === e.to || !edgeVisible(e)) continue;
+    (adjOut.get(e.from) ?? adjOut.set(e.from, []).get(e.from)).push(e.to);
+    (adjIn.get(e.to) ?? adjIn.set(e.to, []).get(e.to)).push(e.from);
   }
-}
-
-// The verdict as a separated prose block, with the rule id in its tier colour.
-function verdictBlock(e) {
-  if (!e.verdict) return null;
-  const m = e.verdict.match(/^(ELDA [A-Z]+\.\d+(?: \([^)]+\))?):\s*([\s\S]*)$/);
-  const cls = e.tier === "invariant" ? "violation" : "smell";
-  return m
-    ? h("div", { class: "t-verdict" }, h("b", { class: "t-rule " + cls }, m[1]), ` ${m[2]}`)
-    : h("div", { class: "t-verdict" }, e.verdict);
-}
-
-// How an endpoint reads once its domain is folded: the domain and the rank it landed on, since the file behind the aggregate is one of many.
-export const endLabel = (id) => {
-  const f = data().files[id];
-  const p = place(f);
-  if (!p.collapsed) return f.path;
-  const rank = p.band
-    ? p.row === "services"
-      ? "composer"
-      : "shared base"
-    : (ROW_LABEL[p.row] ?? p.row);
-  return `${p.domain} · ${rank}`;
-};
-
-// A bundled arrow stands for many references at once, so its tip names the two ends, counts what crosses, and lists the references behind it.
-function bundleTip(e) {
-  const shown = e.bundle.slice(0, 8);
-  return h(
-    "div",
-    {},
-    h("div", { class: "t-src" }, endLabel(e.from)),
-    h(
-      "div",
-      { class: "t-row t-spec" },
-      `→ ${endLabel(e.to)}`,
-      h(
-        "span",
-        { class: "t-kind" },
-        `${e.bundle.length} reference${e.bundle.length > 1 ? "s" : ""}`,
-      ),
-    ),
-    h(
-      "div",
-      { class: "t-row t-via" },
-      shown.map((m) => h("div", {}, `${data().files[m.from].path} → ${data().files[m.to].path}`)),
-    ),
-    e.bundle.length > shown.length
-      ? h("div", { class: "t-row t-names" }, `+ ${e.bundle.length - shown.length} more`)
-      : null,
-    verdictBlock(e),
-  );
-}
-
-// The edge tooltip, each fact in its own register: the source module, the authored specifier with its kind badges, the bindings taken, the re-export chain ridden, the module landed on, and the verdict as a separated prose block with the rule id in its tier color.
-export function edgeTip(e) {
-  if (e.bundle) return bundleTip(e);
-  const kinds = [];
-  if (e.typeOnly) kinds.push("type-only");
-  if (e.kind === "dynamic") kinds.push("dynamic");
-  if (e.kind === "reexport") kinds.push("re-export");
-  if (e.kind === "side-effect") kinds.push("side-effect");
-  const tip = h(
-    "div",
-    {},
-    h("div", { class: "t-src" }, data().files[e.from].path),
-    h(
-      "div",
-      { class: "t-row t-spec" },
-      `→ ${e.spec}`,
-      kinds.map((k) => h("span", { class: "t-kind" }, k)),
-    ),
-    Array.isArray(e.names) && e.names.length
-      ? h("div", { class: "t-row t-names" }, `{ ${e.names.join(", ")} }`)
-      : null,
-    e.via && e.via.length
-      ? h(
-          "div",
-          { class: "t-row t-via" },
-          e.via.map((id) => h("div", {}, `via ${data().files[id].path}`)),
-        )
-      : null,
-    e.to != null ? h("div", { class: "t-row t-land" }, `= ${data().files[e.to].path}`) : null,
-  );
-  const verdict = verdictBlock(e);
-  if (verdict) tip.append(verdict);
-  return tip;
+  commit({ adjOut, adjIn });
 }

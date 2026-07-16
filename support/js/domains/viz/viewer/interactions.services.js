@@ -1,23 +1,23 @@
 // ---------------------------------------------------------------------------
 // Interactions: delegated hover and pinning, grab panning, the tooltip.
+// The sibling services it composes on an event (the focus painting, the edge tips) arrive as ports the composer fills, so this service imports none of them; the rebuild and the pin re-application go through the board's own ports.
 
-import { getEditorLink } from "./entities.js";
-import { edgeTip, endLabel } from "./edges.use-cases.js";
-import { applyPin, blur, focus } from "./focus.use-cases.js";
-import { place } from "./placement.use-cases.js";
-import { compactFiles, drawn, render } from "./render.use-cases.js";
+import { applyPin, compactFiles, drawn, rebuild } from "./use-cases.js";
+import { markSelection, tooltip, wrap } from "./adapters.js";
+import { place } from "./use-cases.js";
 import {
   data,
+  getEditorLink,
   hiddenFiles,
-  markSelection,
   pinnedCycle,
   pinnedPath,
   setPin,
   setPinCycle,
   setSelected,
-  tooltip,
-  wrap,
-} from "./entities.js";
+} from "./use-cases.js";
+
+// The composer supplies what an event composes (LAYER.2): the focus painting and the edge tips are sibling services this one never imports.
+export function installInteractions({ focus, blur, edgeTip, endLabel }) {
 
 // Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
 // The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
@@ -76,7 +76,7 @@ wrap.addEventListener("click", (e) => {
   if (chip.classList.contains("ghost")) {
     hiddenFiles.delete(f.path);
     hideTip();
-    render();
+    rebuild();
     return;
   }
   if (e.ctrlKey || e.altKey) {
@@ -86,10 +86,10 @@ wrap.addEventListener("click", (e) => {
   setPinCycle(null);
   setSelected(null);
   setPin(pinnedPath() === f.path ? null : f.path);
-  render();
+  rebuild();
 });
 // A file joins the hidden shelf with its pin cleared when it was the pinned one.
-function banish(f) {
+  function banish(f) {
   hiddenFiles.add(f.path);
   if (pinnedPath() === f.path) {
     setPin(null);
@@ -124,7 +124,7 @@ wrap.addEventListener("auxclick", (e) => {
     }
   }
   hideTip();
-  render();
+  rebuild();
 });
 // Canceling the middle-button pointerdown keeps the browser's autoscroll mode off the hideable targets.
 wrap.addEventListener("pointerdown", (e) => {
@@ -139,6 +139,8 @@ document.body.addEventListener("click", () => {
     markSelection();
   }
 });
+
+}
 
 // Grab panning: dragging the board scrolls the page on both axes, with momentum on release.
 // Interactive elements keep their own pointer behavior, and a drag suppresses the click that would otherwise clear the pin.

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 import { deepSideEffect, slicingPressure } from './entities/messages.js';
 import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from './entities/model.js';
-import { createWalker } from './flow.use-cases.js';
+import { createWalker } from './flow.services.js';
 import { cycles } from './graph.use-cases.js';
 import { graphRoles } from './ownership.use-cases.js';
 import { EXT_CANDIDATES, moduleInfo } from './parse.adapters.js';

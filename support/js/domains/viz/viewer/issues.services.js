@@ -1,22 +1,21 @@
 // ---------------------------------------------------------------------------
 // Issues drawer: every verdict edge, the laundered flow findings, unresolved specifiers, and files the classifier could not place.
+// A drawer click re-aims the board through the board's own ports (rebuild, applyPin), so this service composes no sibling service.
 
-import { getEditorLink } from "./entities.js";
-import { applyPin } from "./focus.use-cases.js";
-import { place } from "./placement.use-cases.js";
-import { chips, h, render } from "./render.use-cases.js";
+import { applyPin, chips, rebuild } from "./use-cases.js";
+import { $, h, markSelection } from "./adapters.js";
+import { place } from "./use-cases.js";
 import {
-  $,
   collapsed,
   cycleId,
   data,
-  markSelection,
+  getEditorLink,
   savePrefs,
   selectedKey,
   setPin,
   setPinCycle,
   setSelected,
-} from "./entities.js";
+} from "./use-cases.js";
 
 // A header stat: the count and its label; the severity stats add a dot that takes the severity color while the count is nonzero.
 const stat = (n, label, sev) =>
@@ -78,7 +77,7 @@ export function renderIssues() {
     if (!shut.length) return false;
     for (const d of shut) collapsed.delete(d);
     savePrefs();
-    render();
+    rebuild();
     return true;
   };
   const scrollTo = (id) =>

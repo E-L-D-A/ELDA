@@ -12,9 +12,7 @@ import {
   targetOf,
   targetOfPath,
 } from '../../core/entities/model.js';
-import { createWalker } from '../../core/flow.use-cases.js';
 import { graphRoles } from '../../core/ownership.use-cases.js';
-import { buildGraph } from '../../core/scan.use-cases.js';
 import {
   importVerdict,
   landedVerdict,
@@ -25,12 +23,14 @@ import {
   unjudgedVerdict,
 } from '../../core/verdicts.use-cases.js';
 
-// The app-root resolution is an adapter concern the composer supplies (LAYER.2): the rules declare the need here, enforce's services file injects the implementation, and this module touches no filesystem of its own.
-let resolveAppRoot = () => null;
-export const supplyAppRoot = (fn) => {
-  resolveAppRoot = fn;
+// The scan, the walker, and the app-root resolution sit at ranks above this one (core's services, core's adapters), so the rules declare the needs here and enforce's services file supplies the implementations by ordinary composition (LAYER.2); this module touches no filesystem and reaches nothing upward.
+let host = { appRootOf: () => null, buildGraph: () => null, createWalker: () => null };
+export const wire = (injected) => {
+  host = { ...host, ...injected };
 };
-const appRootOf = (filename) => resolveAppRoot(filename);
+const appRootOf = (filename) => host.appRootOf(filename);
+const buildGraph = (appRoot) => host.buildGraph(appRoot);
+const createWalker = (opts) => host.createWalker(opts);
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 

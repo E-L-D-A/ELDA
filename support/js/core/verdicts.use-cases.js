@@ -147,9 +147,11 @@ export const LATERAL = {
 };
 
 // The lateral-coupling verdict for one reference at one outer layer, or null when the reference does not smell.
+// A core target never grades as a lateral mount: the diagram draws the lean into Shared as its weak-dependency arrow, distinct from the red laterals between feature domains, so consuming a core piece at or below one's own rank stays plain.
 export function lateralVerdict(role, t, layer, { remedy, crossSurface } = LATERAL[layer]) {
   if (role.layer !== layer || role.chain.length === 0) return null;
   if (!t || t.layer !== layer || t.asset) return null;
+  if (t.kind === 'core' || t.area != null) return null;
   const importerUnit = unitOf(role);
   const r = rel(role.chain, t.chain);
   if (r.kind === 'into-child') {

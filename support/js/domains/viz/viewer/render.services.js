@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
-// DOM building.
+// Board building: the root bars, the domain boxes, the unclassified box, and the block bar, rebuilt as one pass that commits its derived reading to the board.
+// The pass builds DOM and computes the derived state together, commits both to board.use-cases.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
 
-import { bundleEdges, drawEdges, edgeVisible } from "./edges.use-cases.js";
-import { applyPin } from "./focus.use-cases.js";
-import { renderIssues } from "./issues.use-cases.js";
+import { commit, rebuild } from "./use-cases.js";
+import { $, h, wrap } from "./adapters.js";
+import { ROWS, ROW_LABEL, byPath } from "./entities.js";
 import {
   blockOf,
   chipParts,
@@ -11,57 +12,32 @@ import {
   isComposerFile,
   isLonerCore,
   place,
-  threadComposers,
-  toggleCollapse,
-} from "./placement.use-cases.js";
+} from "./use-cases.js";
 import {
-  $,
-  ROWS,
-  ROW_LABEL,
-  byPath,
   collapsed,
   data,
-  edgeKey,
   hiddenBlocks,
   hiddenFiles,
   savePrefs,
   setCollapsed,
-  wrap,
-} from "./entities.js";
+  toggle,
+} from "./use-cases.js";
 
-// Render owns the derived state it rebuilds every pass: the chip map keyed by file id, the drawn edge list, the cycle-closing edge set, the reach adjacency both ways, and the folded-domain aggregates.
-// Every module reads these through the accessors; only render reassigns the private bindings, so no live mutable binding crosses the module boundary (CHANNEL.4).
+// The pass rebuilds the derived state into these private bindings and commits them whole; every reader takes them from the board.
 let _chips = new Map();
-let _drawn = [];
-let _cycleClosers = new Set();
-let _adjOut = new Map();
-let _adjIn = new Map();
 let _compactRep = new Map();
 let _compactFiles = new Map();
-export const chips = () => _chips;
-export const drawn = () => _drawn;
-export const cycleClosers = () => _cycleClosers;
-export const adjOut = () => _adjOut;
-export const adjIn = () => _adjIn;
-export const compactRep = () => _compactRep;
-export const compactFiles = () => _compactFiles;
 // A file's dependency count is its distinct outgoing references; stacks float the highest-dependency file to the top and columns bubble it left, so arrows run down and to the right. Only render sorts by it.
 let outDeg = new Map();
 const deg = (f) => outDeg.get(f.id) ?? 0;
 const byDeg = (a, b) => deg(b) - deg(a) || byPath(a, b);
 
-// Element builder: `class` and `style` arrive as strings, any other key assigns an element property when one exists (checked, hidden, on* handlers) and an attribute otherwise.
-// Child arrays flatten one level and nullish children drop, so callers can pass map results directly.
-export function h(tag, props = {}, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === "class") el.className = v;
-    else if (k === "style") el.style.cssText = v;
-    else if (k in el) el[k] = v;
-    else el.setAttribute(k, v);
-  }
-  el.append(...children.flat().filter((c) => c != null));
-  return el;
+// Folding a domain is a view change like any other: it persists for the session, and the board rebuilds around it.
+export function toggleCollapse(name) {
+  if (collapsed.has(name)) collapsed.delete(name);
+  else collapsed.add(name);
+  savePrefs();
+  rebuild();
 }
 
 // The corner button that hides a block without reaching for the bottom bar.
@@ -75,7 +51,7 @@ function hideBtn(key) {
         e.stopPropagation();
         hiddenBlocks.add(key);
         savePrefs();
-        render();
+        rebuild();
       },
     },
     "✕",
@@ -106,7 +82,7 @@ function makeChip(f, ghost) {
   return el;
 }
 
-export function render() {
+export function renderBoard() {
   _chips = new Map();
   // Recompute dependency counts from the authored edges, distinct per target, so stacking and ordering stay stable under the view toggles.
   outDeg = new Map();
@@ -118,9 +94,9 @@ export function render() {
     counted.add(k);
     outDeg.set(e.from, (outDeg.get(e.from) ?? 0) + 1);
   }
-  const hideAsset = !$("t-assets").checked;
-  const expunge = !$("t-surfaces").checked;
-  const threadC = !$("t-services").checked;
+  const hideAsset = !toggle("t-assets");
+  const expunge = !toggle("t-surfaces");
+  const threadC = !toggle("t-services");
   // A core surface expunges like any other conduit, except the loner: that file IS its domain, the binding walk terminates on its declarations, so the dataflow view keeps it and draws it inside its obscured cake.
   const isConduit = (f) =>
     f.role.kind === "surface" || (f.role.kind === "core" && f.role.surface != null && !isLonerCore(f.role));
@@ -135,28 +111,12 @@ export function render() {
   renderRootBar(visible);
   renderOtherBox(visible);
   renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS, expunge);
-  // A cycle closes over the landed flows, so its closing edges are on the board in the expunged view, which is the view the cycles were found in.
-  // A view that redraws the arrows through their conduits routes them around the cycle; the files it encloses still raise together, which is what a cycle is.
-  // The closers are keyed before the edges are drawn, because a bundle takes its paint from the worst reference it carries and a cycle closer is one of the paints it can take.
-  _cycleClosers = new Set(data().cycles.flatMap((c) => c.edges.map(edgeKey)));
-  // The drawn flow comes precomputed from the scanner: with surfaces expunged, every edge is expanded through the conduits (surfaces, re-export chains) to the real carriers and judged by the geometry verdicts; with surfaces shown, the raw authored edges draw as-is.
-  _drawn = expunge ? data().flows : data().edges;
-  if (threadC) _drawn = threadComposers(_drawn);
-  if (collapsed.size) _drawn = bundleEdges(_drawn);
-  // The adjacency the reach walk rides is the board's own: an edge a filter dropped or a hidden block took away is out of the walk exactly as it is out of the picture, so the reach you read is the reach of the graph in front of you.
-  _adjOut = new Map();
-  _adjIn = new Map();
-  for (const e of _drawn) {
-    if (e.from === e.to || !edgeVisible(e)) continue;
-    (_adjOut.get(e.from) ?? _adjOut.set(e.from, []).get(e.from)).push(e.to);
-    (_adjIn.get(e.to) ?? _adjIn.set(e.to, []).get(e.to)).push(e.from);
-  }
-  wrap.classList.toggle("reach", $("t-reach").checked);
+  wrap.classList.toggle("reach", toggle("t-reach"));
   renderBlockBar();
-  renderIssues();
-  requestAnimationFrame(() => {
-    drawEdges();
-    applyPin();
+  commit({
+    chips: _chips,
+    compactRep: _compactRep,
+    compactFiles: _compactFiles,
   });
 }
 
@@ -389,7 +349,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
                 onclick: (ev) => {
                   ev.stopPropagation();
                   for (const f of shelf) hiddenFiles.delete(f.path);
-                  render();
+                  rebuild();
                 },
               },
               h("span", { class: "idle" }, "hidden"),
@@ -648,7 +608,7 @@ function renderBlockBar() {
         onchange: (e) => {
           hiddenBlocks[e.target.checked ? "delete" : "add"](key);
           savePrefs();
-          render();
+          rebuild();
         },
       }),
       text,
@@ -672,7 +632,7 @@ function renderBlockBar() {
           onchange: (e) => {
             for (const k of keys) hiddenBlocks[e.target.checked ? "delete" : "add"](k);
             savePrefs();
-            render();
+            rebuild();
           },
         }),
         "all",
@@ -689,7 +649,7 @@ function renderBlockBar() {
           class: "bar-btn",
           onclick: () => {
             hiddenFiles.clear();
-            render();
+            rebuild();
           },
         },
         `unhide ${hiddenFiles.size} file${hiddenFiles.size > 1 ? "s" : ""}`,
@@ -708,7 +668,7 @@ function renderBlockBar() {
           onclick: () => {
             setCollapsed(allFolded ? new Set() : new Set(names));
             savePrefs();
-            render();
+            rebuild();
           },
         },
         allFolded ? "open all" : "fold all",

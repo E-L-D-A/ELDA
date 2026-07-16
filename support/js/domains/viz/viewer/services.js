@@ -1,14 +1,16 @@
 // ---------------------------------------------------------------------------
-// The viewer's composer: it boots the page, wires the header, injects the storage effect, and starts the first load once every definition is in place.
-// interactions registers its handlers as a side effect and nothing takes its exports, so it is imported for effect; issues loads through render, which uses it.
+// The viewer's composer: it fills the board's ports with the rebuild pipeline and the pin application, wires the interaction service with the siblings it composes on events, injects the storage effect, syncs the header toggles into state, and starts the first load once every definition is in place.
+// The pipeline is the one place the services meet: board, drawer, arrows, pin - so no service imports another, and a handler anywhere below asks the board.
 
-import "./interactions.use-cases.js";
-
-import { drawEdges, updateStickyEdges } from "./edges.use-cases.js";
-import { applyPin } from "./focus.use-cases.js";
-import { render } from "./render.use-cases.js";
+import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "./use-cases.js";
+import { deriveDrawn } from "./edges.use-cases.js";
+import { $ } from "./adapters.js";
+import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.services.js";
+import { applyPin, blur, focus } from "./focus.services.js";
+import { installInteractions } from "./interactions.services.js";
+import { renderIssues } from "./issues.services.js";
+import { renderBoard } from "./render.services.js";
 import {
-  $,
   INLINE,
   collapsed,
   data,
@@ -16,10 +18,26 @@ import {
   savePrefs,
   setData,
   setPersist,
-} from "./entities.js";
+  setToggle,
+} from "./use-cases.js";
 
-// The view-mode toggles in the header, persisted alongside block visibility.
+onRebuild(() => {
+  renderBoard();
+  deriveDrawn();
+  renderIssues();
+  requestAnimationFrame(() => {
+    drawEdges();
+    applyPin();
+  });
+});
+onApplyPin(applyPin);
+installInteractions({ focus, blur, edgeTip, endLabel });
+
+// The view-mode toggles in the header, persisted alongside block visibility and mirrored into state so everything below reads state instead of the DOM.
 const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach"];
+const syncToggles = () => {
+  for (const id of TOGGLES) setToggle(id, $(id).checked);
+};
 
 // On a fresh session every composition root starts hidden; the domains, core blocks among them, carry the diagram, and a root is unhidden from the bottom bar when its wiring is what you want to read.
 const defaultHidden = () => (data() ? data().options.roots.map((r) => "@root:" + r.key) : []);
@@ -43,6 +61,7 @@ function loadPrefs() {
   for (const b of hidden) hiddenBlocks.add(b);
   collapsed.clear();
   for (const d of folded) collapsed.add(d);
+  syncToggles();
 }
 setPersist(() => {
   try {
@@ -60,8 +79,9 @@ setPersist(() => {
 
 for (const id of TOGGLES)
   $(id).addEventListener("change", () => {
+    syncToggles();
     savePrefs();
-    render();
+    rebuild();
   });
 
 let resizeTimer = 0;
@@ -69,7 +89,7 @@ addEventListener("resize", () => {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     drawEdges();
-    applyPin();
+    boardApplyPin();
   }, 120);
 });
 
@@ -117,7 +137,7 @@ async function load() {
     $("app-name").textContent = data().app;
     document.title = `ELDA · ${data().app}`;
     loadPrefs();
-    render();
+    rebuild();
   } catch (error) {
     // A failed fetch is the live indicator's business; a failed render is a viewer bug, and swallowing it leaves a half-drawn board with an empty drawer and no trace, which is the worst of the silences.
     console.error(error);

@@ -152,5 +152,5 @@ export const cycle = ({ domains, chains, componentLength, firstPath }) => {
   const what = componentLength === 1
     ? `the file '${firstPath}' references itself`
     : `${componentLength} files close a reference cycle ${where}`;
-  return `ELDA CHANNEL.5: ${what}, and every reference in it carries a value synchronously. Enclose a settling element - a change-gated channel with a tight equality, which breaks the synchronous re-entry - or break the cycle by lifting the shared content into a subdomain both sides consume.`;
+  return `ELDA CHANNEL.5: ${what}, and every reference in it carries a value synchronously. Lift the shared content the cycle encloses into a piece both sides consume, which collapses the mutual dependency into one-way leans - or, where the loop is a designed feedback, enclose a settling element: a change-gated channel with a tight equality, which breaks the synchronous re-entry.`;
 };
