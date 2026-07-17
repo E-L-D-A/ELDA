@@ -4,13 +4,13 @@
 
 import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "../flows/board.js";
 import { deriveDrawn } from "../flows/edges.js";
+import { INLINE, collapsed, data, hiddenBlocks, savePrefs, setData, setPersist, setToggle } from "../flows/state.js";
 import { $ } from "../harnesses/dom.js";
 import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.js";
 import { applyPin, blur, focus, markSelection } from "./focus.js";
 import { installInteractions } from "./interactions.js";
 import { installIssues, openFinding, renderIssues } from "./issues.js";
 import { renderBoard } from "./render.js";
-import { INLINE, collapsed, data, hiddenBlocks, savePrefs, setData, setPersist, setToggle } from "../flows/state.js";
 
 onRebuild(() => {
   renderBoard();
@@ -26,7 +26,7 @@ installInteractions({ focus, blur, edgeTip, endLabel, markSelection, openFinding
 installIssues({ markSelection });
 
 // The view-mode toggles in the header, persisted alongside block visibility and mirrored into state so everything below reads state instead of the DOM.
-const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach"];
+const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach", "t-unsorted"];
 const syncToggles = () => {
   for (const id of TOGGLES) setToggle(id, $(id).checked);
 };

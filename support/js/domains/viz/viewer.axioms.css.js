@@ -972,6 +972,13 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
 .cell.flows {
   background: color-mix(in srgb, var(--flows-bg) 30%, transparent);
 }
+.cell.unsorted {
+  background: color-mix(in srgb, var(--surface-bg) 26%, transparent);
+}
+.chip.unsorted {
+  border-style: dashed;
+  color: var(--muted);
+}
 .cell.axioms {
   background: color-mix(in srgb, var(--axioms-bg) 30%, transparent);
 }

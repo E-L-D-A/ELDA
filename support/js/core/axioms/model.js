@@ -84,8 +84,11 @@ export function classify(segs) {
       }
       continue;
     }
-    if (last) surface = seg;
-    else chain.push(seg);
+    if (last) {
+      // A plain name is a surface; a dotted name whose segments include no layer is a FAILED layer claim - the dot is the layer-claim syntax, and an unreadable claim is neither a layer file nor a curated surface.
+      if (seg.includes('.')) via = 'unsorted';
+      else surface = seg;
+    } else chain.push(seg);
   }
   return { chain, layer, via, sub, surface, name, branchDir, segs, unitDir: unitDirAt >= 0 };
 }
@@ -127,6 +130,7 @@ export function fileRole(filename, { ownershipDir, compositionRoot, core } = {})
     const c = classify(own.rest.split('/').filter(Boolean));
     if (c.layer && c.chain.length > 0) return { kind: 'domain', ...c };
     if (c.surface && c.chain.length > 0) return { kind: 'surface', ...c };
+    if (c.via === 'unsorted' && c.chain.length > 0) return { kind: 'unsorted', ...c };
     return { kind: 'other' };
   }
   if (inArea(filename, compositionRoot ?? [])) return { kind: 'composition-root' };
@@ -139,6 +143,7 @@ export function fileRole(filename, { ownershipDir, compositionRoot, core } = {})
       return { kind: 'core', area, chain: [name], layer: null, via: null, sub: [], surface: name, name: null };
     }
     const c = classify(segs);
+    if (c.via === 'unsorted') return { kind: 'unsorted', area, ...c, chain: c.chain.length ? c.chain : [area] };
     if (c.chain.length === 0 && c.surface && c.surface !== 'index') return { kind: 'core', area, ...c, chain: [c.surface] };
     if (c.chain.length === 0 && c.layer && c.name) return { kind: 'core', area, ...c, chain: [c.name] };
     return { kind: 'core', area, ...c };

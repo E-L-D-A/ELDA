@@ -89,6 +89,7 @@ export function renderBoard() {
   }
   const hideAsset = !toggle("t-assets");
   const expunge = !toggle("t-surfaces");
+  const hideUnsorted = !toggle("t-unsorted");
   const threadC = !toggle("t-services");
   // A core surface expunges like any other conduit, except the loner: that file IS its domain, the binding walk terminates on its declarations, so the dataflow view keeps it and draws it inside its obscured cake.
   const isConduit = (f) =>
@@ -96,6 +97,7 @@ export function renderBoard() {
   const passes = (f) =>
     !(hideAsset && f.kind !== "code") &&
     !(expunge && isConduit(f)) &&
+    !(hideUnsorted && f.role.kind === "unsorted") &&
     !(threadC && isComposerFile(f)) &&
     !hiddenBlocks.has(blockOf(f));
   const visible = (f) => passes(f) && !hiddenFiles.has(f.path);
@@ -103,7 +105,8 @@ export function renderBoard() {
   const ghost = (f) => passes(f) && hiddenFiles.has(f.path);
   renderRootBar(visible);
   renderOtherBox(visible);
-  renderDomains(visible, ghost, expunge ? ROWS.slice(1) : ROWS, expunge);
+  const rowList = ROWS.filter((r) => !(expunge && r === "surface") && !(hideUnsorted && r === "unsorted"));
+  renderDomains(visible, ghost, rowList, expunge);
   wrap.classList.toggle("reach", toggle("t-reach"));
   renderBlockBar();
   commit({

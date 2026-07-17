@@ -21,6 +21,7 @@ const T = {
   unresolved: "Unresolved specifiers",
   unextracted: "Unextracted declarations (surfaces owning bindings)",
   unreachable: "Unreachable from any root",
+  unsorted: "Unsorted (no layer claim)",
   unclassified: "Unclassified files",
 };
 
@@ -503,6 +504,13 @@ export function renderIssues() {
         pathLink(f.path),
         f.unreached ? h("div", { class: "msg" }, f.unreached) : null,
       ),
+    (f) => f.path,
+    (f) => [f.id],
+  );
+  section(
+    T.unsorted,
+    data().files.filter((f) => f.role.kind === "unsorted"),
+    (f) => h("div", { class: "item", onclick: pinId(f.id) }, pathLink(f.path)),
     (f) => f.path,
     (f) => [f.id],
   );

@@ -160,6 +160,8 @@ export function buildGraph(appDir) {
   };
   const dirOf = (p) => (p.lastIndexOf('/') < 0 ? '' : p.slice(0, p.lastIndexOf('/')));
 
+  // An unsorted file is judged by nothing: its imports carry no layer to read, and a reference INTO one resolves to a real file whose kind says the spec-shape guess must not run.
+  const judged = (k) => k !== 'other' && k !== 'unsorted';
   // Pass two: judge every reference with the inferred roles - the same ladder the lint rules climb.
   for (const e of edges) {
     if (e.kind === 'embeds') continue;
@@ -167,14 +169,14 @@ export function buildGraph(appDir) {
     const relPath = '/' + file.path;
     // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
     const resolved = targetOfNode(e.to);
-    const t = resolved ?? targetOf(relPath, e.spec, ownershipAlias, ownershipDir);
+    const t = resolved ?? (e.to != null && files[e.to].role.kind === 'unsorted' ? null : targetOf(relPath, e.spec, ownershipAlias, ownershipDir));
     // An in-tree specifier naming no file is undecidable, and the shape-only reading of one is the most permissive reading available: a dangling `./x` reads as a reference inside the importer's own subdomain, so a half-finished move would draw an all-grey diagram.
-    if (e.to == null && file.role.kind !== 'other' && inTreeSpec(e.spec, aliasEntries)) {
+    if (e.to == null && judged(file.role.kind) && inTreeSpec(e.spec, aliasEntries)) {
       e.verdict = unjudgedVerdict(file.role, e.spec, 'is shaped like in-tree code yet resolves to no file');
       e.tier = 'invariant';
       continue;
     }
-    if (t && file.role.kind !== 'other') {
+    if (t && judged(file.role.kind)) {
       e.verdict = importVerdict(file.role, t, ownershipAlias, resolved != null) ?? selfSurfaceVerdict(file.role, t);
       if (e.verdict) e.tier = 'invariant';
       else if (!e.typeOnly && file.role.kind === 'domain') {
@@ -187,7 +189,7 @@ export function buildGraph(appDir) {
       }
     }
     // A side-effect import reaching past its own directory hides an effect in the graph (SURFACE.5); co-location is the directory itself, wherever it lives.
-    if (!e.verdict && e.kind === 'side-effect' && e.to != null && file.role.kind !== 'other' && dirOf(files[e.to].path) !== dirOf(file.path)) {
+    if (!e.verdict && e.kind === 'side-effect' && e.to != null && judged(file.role.kind) && dirOf(files[e.to].path) !== dirOf(file.path)) {
       e.verdict = deepSideEffect(e.spec);
       e.tier = 'smell';
     }

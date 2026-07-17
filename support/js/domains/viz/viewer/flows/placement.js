@@ -42,12 +42,12 @@ function unitCol(r) {
 export function place(f) {
   const r = f.role;
   if (r.kind === "composition-root") return { area: "root", root: r.root };
-  if (r.kind === "surface" || r.kind === "domain" || r.kind === "core") {
+  if (r.kind === "surface" || r.kind === "domain" || r.kind === "core" || r.kind === "unsorted") {
     const core = r.kind === "core";
     const chain = core ? [r.area ?? "(shared)", ...(r.chain ?? [])] : r.chain;
     const isSurface = r.surface != null;
     const domain = chain[0];
-    const row = isSurface ? "surface" : (r.layer ?? "surface");
+    const row = r.kind === "unsorted" ? "unsorted" : isSurface ? "surface" : (r.layer ?? "surface");
     // A collapsed domain gives up its columns and keeps its rows: every file at one rank draws as that rank's aggregate, so an arrow into the domain still lands on the row it belongs to and a diagonal still reads as one.
     // Dropping the rows would collapse the one thing the diagram is for, since a reference's meaning is the rank it crosses.
     // The bands keep their own places above and below the cake: a composer is a composition surface and a bare axioms file is the shared base, and each anchors its edges as a band rather than as a cell.

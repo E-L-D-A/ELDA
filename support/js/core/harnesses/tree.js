@@ -64,6 +64,9 @@ export function gatherFiles(appDir, { ownershipDir, compositionRoot, core }) {
     ...areaTargets(appDir, core).map((c) => ({ dir: c.dir, file: c.file })),
   ];
   const found = [];
+  // A directory declaring no areas still renders: the root itself scans as one area, so any codebase draws its files and edges, classified or unsorted, without conforming first.
+  const declared = areas.filter((a) => (a.dir ?? a.file) && existsSync(a.dir ?? a.file));
+  if (!declared.length) areas.push({ dir: appDir });
   for (const area of areas) {
     const target = area.dir ?? area.file;
     if (!target || !existsSync(target)) continue;

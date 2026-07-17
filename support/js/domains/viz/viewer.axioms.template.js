@@ -13,13 +13,14 @@ export const template = (entry) => /* html */`
     <span class="counts" id="counts"></span>
     <div style="flex-grow: 1"></div>
     <span class="toggles">
+      <label title="Highlight every transitive dependency on selection instead of only the adjacent ones"><input type="checkbox" id="t-reach"> reach</label>
       <label><input type="checkbox" id="t-ok" checked> deps</label>
       <label><input type="checkbox" id="t-type"> type-only</label>
       <label><input type="checkbox" id="t-assets" checked>
-        styles+assets</label>
-      <label><input type="checkbox" id="t-surfaces"> surfaces</label>
+        assets</label>
       <label><input type="checkbox" id="t-services" checked> domain services</label>
-      <label title="Raise everything a focused file reaches, and everything that reaches it, instead of its first hop"><input type="checkbox" id="t-reach"> reach</label>
+      <label><input type="checkbox" id="t-surfaces"> surfaces</label>
+      <label><input type="checkbox" id="t-unsorted" checked> unsorted</label>
     </span>
     <button id="issues-btn">issues <span id="issue-count"></span></button>
   </header>

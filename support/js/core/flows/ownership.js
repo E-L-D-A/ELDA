@@ -43,7 +43,10 @@ function nameRole(path) {
       return { layer: row.layer, name: null, via: 'branch', surface: null, sub: [...segs.slice(i + 1), stripExt(base)] };
     }
   }
-  return { layer: null, name: null, via: null, surface: stripExt(base) || 'index', sub: [] };
+  const stripped = stripExt(base) || 'index';
+  // A dotted name with no layer token is a failed layer claim (kind 'unsorted' at fileRole): no layer, no surface, judged by nothing.
+  if (stripped.includes('.')) return { layer: null, name: null, via: 'unsorted', surface: null, sub: [] };
+  return { layer: null, name: null, via: null, surface: stripped, sub: [] };
 }
 
 // What a relative reference may cross into: a barrel or named surface, or the runtime-composition surface in either spelling - the bare `services` file, or the services row's `index` - since a parent composing `./host/services` is entering host, and that crossing is what names the subdomain.
@@ -127,7 +130,7 @@ function inferChains(graph) {
 function pathClaim(file, options) {
   if (file.kind === 'asset') return null;
   const claim = fileRole('/' + file.path, options);
-  return claim.kind === 'domain' || claim.kind === 'surface' || claim.kind === 'core' ? claim : null;
+  return claim.kind === 'domain' || claim.kind === 'surface' || claim.kind === 'core' || claim.kind === 'unsorted' ? claim : null;
 }
 
 const sameChain = (a, b) => a.length === b.length && a.every((s, i) => s === b[i]);
@@ -232,11 +235,16 @@ export function graphRoles(graph) {
     else if (chain !== undefined && f.kind === 'asset') graphRole = { kind: 'domain', chain, layer: 'axioms', via: 'asset', surface: null, name: String(f.path).split('/').pop(), sub: [], asset: true };
     else if (chain !== undefined) {
       const nr = nameRole(f.path);
-      graphRole = { kind: nr.surface ? 'surface' : 'domain', chain, ...nr };
+      graphRole = { kind: nr.via === 'unsorted' ? 'unsorted' : nr.surface ? 'surface' : 'domain', chain, ...nr };
     }
     if (graphRole == null) {
       const why = inbound.has(f.id) ? 'imported only by files nothing reaches' : 'nothing imports this file';
       out.set(f.id, { role: claim ?? { kind: 'other', chain: [], ...nameRole(f.path) }, dispute: null, unreached: why });
+      continue;
+    }
+    // A failed layer claim contests nothing: there is no readable claim to hold against the graph, so an unsorted file rides where its directories place it, dispute-free.
+    if (claim?.kind === 'unsorted' || graphRole.kind === 'unsorted') {
+      out.set(f.id, { role: claim ?? graphRole, dispute: null, unreached: null });
       continue;
     }
     // An agreed core file keeps the claim as its role, since only the tree names which core module it belongs to; everywhere else the graph reading is the richer of the two.

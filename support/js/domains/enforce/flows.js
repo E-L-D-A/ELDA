@@ -158,7 +158,7 @@ const imports = {
     const { aliases, ownershipAlias, ownershipDir, compositionRoot, core } = opts;
     const filename = filenameOf(context);
     const { role, roleAt } = graphClassify(filename, opts);
-    if (role.kind === 'other') return {};
+    if (role.kind === 'other' || role.kind === 'unsorted') return {};
 
     const walker = walkerOf(filename, opts);
     const targetFor = (spec) => graphTargetFor(roleAt, walker, filename, spec, opts);

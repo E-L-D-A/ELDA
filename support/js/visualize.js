@@ -47,10 +47,9 @@ for (let i = 0; i < args.length; i++) {
 }
 
 if (!hasTree(appDir)) {
-  console.error(
-    `No ownership tree under ${appDir} (its .oxlintrc.json names the directory, 'domains' by default); pass the app workspace directory.`,
+  console.warn(
+    `No ownership tree under ${appDir} (its .oxlintrc.json names the directory, 'domains' by default); rendering the directory as it is, unsorted.`,
   );
-  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------

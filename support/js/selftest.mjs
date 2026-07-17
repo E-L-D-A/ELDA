@@ -166,6 +166,13 @@ const entryOk =
   deadBundle[0].path === 'src/domains/orders/print/stale.flows.ts' &&
   brokenGraph.files.find((f) => f.path === 'src/domains/orders/print/services.ts')?.reachable === true;
 console.log(`${(entryOk ? 'fires' : 'SILENT').padStart(6)}  ${'entry dead-bundle (graph)'.padEnd(26)} ${deadBundle.length}`);
+// The unsorted reading, held to the same bar: a dotted name with no layer token is a failed layer claim, never a surface - it classifies as unsorted in its domain, every rule declines it, and a clean plain name stays a surface.
+const UNSORTED = ['src/domains/cart/legacy-shape.entities.ts', 'src/domains/cart/widget.spec.ts'];
+const unsortedRoles = UNSORTED.map((path) => graph.files.find((f) => f.path === path)?.role.kind);
+const unsortedFired = [...bag].flatMap(([id, hits]) => hits.filter((h) => UNSORTED.includes(h.file)).map((h) => `${id} on ${h.file}`));
+const plainSurface = brokenGraph.files.find((f) => f.path === 'src/domains/cart/summary.ts')?.role.kind === 'surface';
+const unsortedOk = unsortedRoles.every((k) => k === 'unsorted') && unsortedFired.length === 0 && plainSurface;
+console.log(`${(unsortedOk ? 'fires' : 'SILENT').padStart(6)}  ${'unsorted band (graph)'.padEnd(26)} ${unsortedRoles.filter((k) => k === 'unsorted').length}`);
 if (list) {
   for (const c of graph.cycles) {
     console.log(`          ${c.scope}${c.gate ? ' (gating class)' : ''}`);
@@ -212,9 +219,15 @@ if (!embedOk) {
   console.error(`\nThe embed pass failed on the green app: the \`@elda-import\` directive must reach both receipt files through the declared entry, stay unjudged, and dispute nothing.`);
   console.error('Either the pass is broken, or the directives or the receipt files were broken by an edit. Both are failures.');
 }
+if (!unsortedOk) {
+  console.error(`
+The unsorted reading failed: the two failed-claim specimens must classify as unsorted with no rule firing on them, and a clean plain name must stay a surface.`);
+  console.error('Either the classification is broken, or the specimens were broken by an edit. Both are failures.');
+  if (unsortedFired.length) for (const t of unsortedFired) console.error('  fired: ' + t);
+}
 if (!entryOk) {
   console.error(`\nThe entry pass failed on the broken app: the shipped-and-never-composed file must be exactly print/stale.flows.ts, with the shipping host named in its reason.`);
   console.error('Either the pass is broken, or the print fixture was broken by an edit. Both are failures.');
 }
-if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk) process.exit(1);
+if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk || !unsortedOk) process.exit(1);
 console.log(`\nAll ${bag.size} rules fire on their fixtures, the graph-classified rules fire on the connected app, the green app stays silent, and the graph passes hold their cycle and their slicing cluster.`);
