@@ -1,7 +1,5 @@
-// The host bindings: the document lookups every builder shares, the element builder, and the selection sweep over the drawer's items.
+// The host bindings: the document lookups every builder shares, and the element builder.
 // This is the one place the viewer touches the document API outside its services, so everything below the adapters row stays pure.
-
-import { selectedKey } from "../use-cases/state.js";
 
 export const $ = (id) => document.getElementById(id);
 export const wrap = $("wrap"),
@@ -21,9 +19,3 @@ export function h(tag, props = {}, ...children) {
   el.append(...children.flat().filter((c) => c != null));
   return el;
 }
-
-// The drawer item carrying the current selection lights up, and every other one lets go.
-export const markSelection = () => {
-  for (const el of $("issues").querySelectorAll(".item"))
-    el.classList.toggle("selected", selectedKey() !== null && el.dataset.key === selectedKey());
-};

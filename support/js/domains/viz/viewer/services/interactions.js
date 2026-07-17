@@ -3,12 +3,12 @@
 // The sibling services it composes on an event (the focus painting, the edge tips) arrive as ports the composer fills, so this service imports none of them; the rebuild and the pin re-application go through the board's own ports.
 
 import { applyPin, compactFiles, drawn, rebuild } from "../use-cases/board.js";
-import { markSelection, tooltip, wrap } from "../adapters/dom.js";
+import { tooltip, wrap } from "../adapters/dom.js";
 import { place } from "../use-cases/placement.js";
 import { data, getEditorLink, hiddenFiles, pinnedCycle, pinnedPath, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
 
-// The composer supplies what an event composes (LAYER.2): the focus painting and the edge tips are sibling services this one never imports.
-export function installInteractions({ focus, blur, edgeTip, endLabel }) {
+// The composer supplies what an event composes (LAYER.2): the focus painting, the selection sweep, the edge tips, and the drawer's open-at-finding are sibling services this one never imports.
+export function installInteractions({ focus, blur, edgeTip, endLabel, markSelection, openFinding }) {
 
 // Chip and edge pointer work arrives by delegation on the board, so a render rebinds nothing.
 // The over/out pair also fires for child-to-child moves inside one chip, and relatedTarget filters those out.
@@ -60,6 +60,20 @@ wrap.addEventListener("pointermove", (e) => {
   if (tooltip.style.display === "block") moveTip(e);
 });
 wrap.addEventListener("click", (e) => {
+  // The dot on a chip and the arrow itself are the two ways from the board into a finding's text in the drawer.
+  if (e.target.closest(".finding-dot")) {
+    const dotChip = e.target.closest(".chip");
+    if (dotChip) {
+      e.stopPropagation();
+      openFinding({ fileId: Number(dotChip.dataset.id) });
+      return;
+    }
+  }
+  if (e.target.classList.contains("hit")) {
+    e.stopPropagation();
+    openFinding({ edge: drawn()[Number(e.target.dataset.i)] });
+    return;
+  }
   const chip = e.target.closest(".chip");
   if (!chip) return;
   e.stopPropagation();

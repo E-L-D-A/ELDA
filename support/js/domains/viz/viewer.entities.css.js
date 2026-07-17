@@ -125,6 +125,13 @@ header h1 .brand {
   gap: 5px;
   white-space: nowrap;
 }
+/* A severity count is also the way into its section of the drawer, so a nonzero one reads as a control. */
+.counts .stat.clickable {
+  cursor: pointer;
+}
+.counts .stat.clickable:hover b {
+  text-decoration: underline;
+}
 .counts .stat b {
   color: var(--fg);
   font-weight: 650;
@@ -1055,6 +1062,41 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
   outline: 2px solid var(--cycle);
   outline-offset: 1px;
 }
+/* A chip that carries a finding wears a dot in the finding's worst severity, sitting on the chip's top-right corner; clicking it opens the drawer at that finding. */
+.chip .finding-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--box);
+  background: var(--muted);
+  cursor: pointer;
+}
+.chip .finding-dot:hover {
+  transform: scale(1.25);
+}
+.chip .finding-dot.sev-violation {
+  background: var(--bad);
+}
+.chip .finding-dot.sev-cycle {
+  background: var(--cycle);
+}
+.chip .finding-dot.sev-laundered {
+  background: var(--laundered);
+}
+.chip .finding-dot.sev-smell {
+  background: var(--smell);
+}
+.chip .finding-dot.sev-lean {
+  background: var(--lean);
+}
+/* The review-signal tier is not a breach, so its dot reads as absence: hollow, none of the severity colours. */
+.chip .finding-dot.sev-dead {
+  background: var(--box);
+  border-color: var(--muted);
+}
 .root-block .chip, #other-box .chip {
   margin: 2px 3px;
 }
@@ -1085,12 +1127,92 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
   top: 0;
   z-index: 1;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 14px;
   background: inherit;
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line);
+}
+.drawer-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.issue-search {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--box-hi);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+}
+.issue-search::placeholder {
+  color: var(--faint);
+}
+.issue-search:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 1px;
+}
+.filter-clear {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--box-hi);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.filter-clear:hover {
+  color: var(--fg);
+  border-color: var(--line-strong);
+}
+/* The domain facet: one chip per domain a finding sits in, the lit one scoping the list. A crowded set folds into a select instead of wrapping. */
+.drawer-facet:empty {
+  display: none;
+}
+.dom-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.dom-chip {
+  appearance: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.dom-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--fg);
+}
+.dom-chip.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--fg);
+}
+.dom-select {
+  appearance: none;
+  width: 100%;
+  padding: 4px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--box-hi);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
 }
 .drawer-body {
   overflow-y: auto;
@@ -1131,13 +1253,64 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
   color: var(--faint);
   font-size: 12px;
 }
+/* A section hidden by the category scope or a facet that emptied it leaves no header behind. */
+.issue-section.filtered {
+  display: none;
+}
+#issues .item.filtered {
+  display: none;
+}
 #issues h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
   margin: 16px 0 8px;
+  cursor: pointer;
+}
+#issues h3:hover {
+  color: var(--fg);
+}
+/* The caret says whether the section is open or folded; folding keeps the header and drops its items. */
+.sec-caret::before {
+  content: "▾";
+  display: inline-block;
+  font-size: 9px;
+  color: var(--faint);
+}
+.issue-section.collapsed .sec-caret::before {
+  content: "▸";
+}
+.issue-section.collapsed .item {
+  display: none;
+}
+.sec-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--line);
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+/* The item the board just jumped to pulses once so the eye catches where it landed in the list. */
+@keyframes item-flash {
+  0% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hi-out) 60%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+#issues .item.flash {
+  animation: item-flash 1.2s ease-out;
 }
 #issues .item {
   padding: 7px 9px;

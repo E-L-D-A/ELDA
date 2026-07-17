@@ -6,9 +6,9 @@ import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "../us
 import { deriveDrawn } from "../use-cases/edges.js";
 import { $ } from "../adapters/dom.js";
 import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.js";
-import { applyPin, blur, focus } from "./focus.js";
+import { applyPin, blur, focus, markSelection } from "./focus.js";
 import { installInteractions } from "./interactions.js";
-import { renderIssues } from "./issues.js";
+import { installIssues, openFinding, renderIssues } from "./issues.js";
 import { renderBoard } from "./render.js";
 import { INLINE, collapsed, data, hiddenBlocks, savePrefs, setData, setPersist, setToggle } from "../use-cases/state.js";
 
@@ -22,7 +22,8 @@ onRebuild(() => {
   });
 });
 onApplyPin(applyPin);
-installInteractions({ focus, blur, edgeTip, endLabel });
+installInteractions({ focus, blur, edgeTip, endLabel, markSelection, openFinding });
+installIssues({ markSelection });
 
 // The view-mode toggles in the header, persisted alongside block visibility and mirrored into state so everything below reads state instead of the DOM.
 const TOGGLES = ["t-ok", "t-type", "t-assets", "t-surfaces", "t-services", "t-reach"];

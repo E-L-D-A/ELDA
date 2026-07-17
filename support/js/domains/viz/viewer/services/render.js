@@ -5,6 +5,7 @@
 import { $, h, wrap } from "../adapters/dom.js";
 import { ROWS, ROW_LABEL, byPath } from "../entities/index.js";
 import { commit, rebuild } from "../use-cases/board.js";
+import { worstByFile } from "../use-cases/findings.js";
 import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, place } from "../use-cases/placement.js";
 import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../use-cases/state.js";
 
@@ -14,6 +15,8 @@ let _compactRep = new Map();
 let _compactFiles = new Map();
 // A file's dependency count is its distinct outgoing references; stacks float the highest-dependency file to the top and columns bubble it left, so arrows run down and to the right. Only render sorts by it.
 let outDeg = new Map();
+// The worst finding severity per file, recomputed each pass so a chip's dot matches the drawer's list after a rescan.
+let worst = new Map();
 const deg = (f) => outDeg.get(f.id) ?? 0;
 const byDeg = (a, b) => deg(b) - deg(a) || byPath(a, b);
 
@@ -62,6 +65,10 @@ function makeChip(f, ghost) {
     ghost && p.sub ? h("span", { class: "gsub" }, p.sub + " / ") : null,
     label,
     badges.map((b) => h("span", { class: "badge" }, b)),
+    // A chip that carries a finding wears a dot in its worst severity; clicking the dot opens the drawer at that finding.
+    !ghost && worst.has(f.id)
+      ? h("span", { class: "finding-dot sev-" + worst.get(f.id), title: "show issue" })
+      : null,
   );
   if (!ghost) _chips.set(f.id, el);
   return el;
@@ -69,6 +76,7 @@ function makeChip(f, ghost) {
 
 export function renderBoard() {
   _chips = new Map();
+  worst = worstByFile();
   // Recompute dependency counts from the authored edges, distinct per target, so stacking and ordering stay stable under the view toggles.
   outDeg = new Map();
   const counted = new Set();
