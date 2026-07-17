@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
 // Focus application: hovering or pinning a chip raises its edges and its neighbors on the board; raising a cycle raises the set of files it encloses.
-// The reach walk itself is focus.use-cases.js; this service paints its result onto the SVG paths and the chips.
+// The reach walk itself is flows/focus.js; this service paints its result onto the SVG paths and the chips.
 
-import { $, svg } from "../adapters/dom.js";
-import { edgeKey } from "../entities/index.js";
-import { chips } from "../use-cases/board.js";
-import { neighbourhood } from "../use-cases/focus.js";
-import { cycleId, data, pinnedCycle, pinnedPath, selectedKey, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
+import { $, svg } from "../harnesses/dom.js";
+import { edgeKey } from "../axioms/index.js";
+import { chips } from "../flows/board.js";
+import { neighbourhood } from "../flows/focus.js";
+import { cycleId, data, pinnedCycle, pinnedPath, selectedKey, setPin, setPinCycle, setSelected } from "../flows/state.js";
 
 // The selection sweep is focus work like the chip and edge painting: it reads the selection and applies it as classes over the drawer's items.
 // The drawer item carrying the current selection lights up, and every other one lets go; the drawer and the interactions take this through the composer's ports.

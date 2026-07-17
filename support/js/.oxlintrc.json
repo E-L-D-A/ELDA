@@ -22,13 +22,13 @@
       { "acrossDomains": "warn", "acrossSubdomains": "warn", "withinSubdomain": "warn" }
     ],
     "elda/no-service-coupling": "warn",
-    "elda/no-adapter-coupling": "warn",
+    "elda/no-harness-coupling": "warn",
     "elda/no-penetration": "warn",
     "elda/no-dishonest-placement": "warn",
     "elda/no-deep-side-effects": "warn",
     "elda/no-async-inner": "warn",
     "elda/no-mutable-surface": "warn",
-    "elda/no-entity-state": "warn",
+    "elda/no-axiom-state": "warn",
     "elda/vocab-gate": "warn",
     "elda/ambient-ownership": "warn"
   }

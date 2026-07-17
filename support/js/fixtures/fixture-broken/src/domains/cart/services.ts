@@ -1,11 +1,11 @@
-import { openCart } from './cart.use-cases';
-import { badLanding } from './bad-landing.use-cases';
+import { openCart } from './cart.flows';
+import { badLanding } from './bad-landing.flows';
 import { badDiagonal } from './bad-diagonal.services';
-import { badSelf } from './bad-self.entities';
+import { badSelf } from './bad-self.axioms';
 import { badLateral } from './bad-lateral.services';
-import { deepEffects } from './bad-effects.use-cases';
-import { drift } from './bad-mutable.entities';
-import { go } from './bad-async.use-cases';
-import { badCoreReach } from './bad-core-reach.use-cases';
+import { deepEffects } from './bad-effects.flows';
+import { drift } from './bad-mutable.axioms';
+import { go } from './bad-async.flows';
+import { badCoreReach } from './bad-core-reach.flows';
 export const cartService = () => { openCart(); badLanding(); badDiagonal(); badSelf(); badLateral(); deepEffects(); go(); badCoreReach(); return drift; };
 export const openCartService = openCart;

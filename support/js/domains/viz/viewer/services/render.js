@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
 // Board building: the root bars, the domain boxes, the unclassified box, and the block bar, rebuilt as one pass that commits its derived reading to the board.
-// The pass builds DOM and computes the derived state together, commits both to board.use-cases.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
+// The pass builds DOM and computes the derived state together, commits both to flows/board.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
 
-import { $, h, wrap } from "../adapters/dom.js";
-import { ROWS, ROW_LABEL, byPath } from "../entities/index.js";
-import { commit, rebuild } from "../use-cases/board.js";
-import { worstByFile } from "../use-cases/findings.js";
-import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, place } from "../use-cases/placement.js";
-import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../use-cases/state.js";
+import { $, h, wrap } from "../harnesses/dom.js";
+import { ROWS, ROW_LABEL, byPath } from "../axioms/index.js";
+import { commit, rebuild } from "../flows/board.js";
+import { worstByFile } from "../flows/findings.js";
+import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, place } from "../flows/placement.js";
+import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../flows/state.js";
 
 // The pass rebuilds the derived state into these private bindings and commits them whole; every reader takes them from the board.
 let _chips = new Map();
@@ -166,7 +166,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
   const compact = new Map();
   _compactRep = new Map();
   _compactFiles = new Map();
-  // The bare composer (services) and the bare entities file are the (sub)domain's own composition root and shared base.
+  // The bare composer (services) and the bare axioms file are the (sub)domain's own composition root and shared base.
   // They lift out of the layer cake into a sub-root cap above the columns and a shared-base bar below them, keyed by domain then subdomain.
   const subRoots = new Map();
   const subBases = new Map();
@@ -199,7 +199,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
     if (!domains.has(p.domain)) domains.set(p.domain, new Map());
     const subsOf = domains.get(p.domain);
     if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
-    // The layer's subdomain-wide spelling at the services or entities layer is the subdomain's composer or shared base; lift it to the sub-root or sub-base bar. A plain concern-named file in a layer row stays in its row.
+    // The layer's subdomain-wide spelling at the services or axioms layer is the subdomain's composer or shared base; lift it to the sub-root or sub-base bar. A plain concern-named file in a layer row stays in its row.
     if (isBarFile(f)) {
       bucketBar(p.row === "services" ? subRoots : subBases, p.domain, p.sub, f);
       continue;
@@ -475,7 +475,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
           ),
         );
       if (g.sub === "") continue;
-      // The subdomain's own composer caps its subtree as a nested sub-root, and its bare entities file underlies the same span as the shared base.
+      // The subdomain's own composer caps its subtree as a nested sub-root, and its bare axioms file underlies the same span as the shared base.
       const rootFiles = (subRoots.get(name)?.get(g.sub) ?? []).sort(byDeg);
       if (rootFiles.length)
         grid.append(

@@ -1,3 +1,3 @@
-import { cartKey } from './use-cases';
+import { cartKey } from './flows';
 
 export const mountCart = () => cartKey();

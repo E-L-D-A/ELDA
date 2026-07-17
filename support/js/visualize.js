@@ -62,7 +62,7 @@ const summary = (g) =>
   [
     `${g.files.length} files`,
     `${g.edges.length} edges`,
-    `${g.flows.filter((f) => f.laundered).length} laundered findings`,
+    `${g.landings.filter((f) => f.laundered).length} laundered findings`,
     `${g.cycles.length} reference cycles`,
   ].join(", ");
 
@@ -115,7 +115,7 @@ const rescan = () => {
 
 // The viewer modules are read from disk on every request, so editing one changes what a new page runs while an open one carries on with the old.
 // Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer the server now holds.
-// The shell entities are code this process imported, so an edit to them takes a restart.
+// The shell axioms are code this process imported, so an edit to them takes a restart.
 let viewerDebounce = null;
 const viewerChanged = () => {
   clearTimeout(viewerDebounce);

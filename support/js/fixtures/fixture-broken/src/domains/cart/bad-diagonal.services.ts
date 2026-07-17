@@ -1,2 +1,2 @@
-import { price } from './pricing.entities';
+import { price } from './pricing.axioms';
 export const badDiagonal = () => price;

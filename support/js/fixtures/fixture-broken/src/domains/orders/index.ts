@@ -1,2 +1,2 @@
-export { placeOrder } from './orders.use-cases';
-export { seed } from './orders.entities';
+export { placeOrder } from './orders.flows';
+export { seed } from './orders.axioms';

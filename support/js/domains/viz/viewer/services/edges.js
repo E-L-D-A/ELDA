@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
 // Edge painting: the SVG layer, the on-scroll geometry updates, and the edge tooltips.
-// The geometry and classification live in edges.use-cases.js; this service measures the chips, paints the paths, and builds the tip elements.
+// The geometry and classification live in flows/edges.js; this service measures the chips, paints the paths, and builds the tip elements.
 
-import { h, svg, wrap } from "../adapters/dom.js";
-import { ROW_LABEL } from "../entities/index.js";
-import { chips, drawn } from "../use-cases/board.js";
-import { assignPorts, edgeClass, edgePath, edgeSides, edgeVisible } from "../use-cases/edges.js";
-import { place } from "../use-cases/placement.js";
-import { data } from "../use-cases/state.js";
+import { h, svg, wrap } from "../harnesses/dom.js";
+import { ROW_LABEL } from "../axioms/index.js";
+import { chips, drawn } from "../flows/board.js";
+import { assignPorts, edgeClass, edgePath, edgeSides, edgeVisible } from "../flows/edges.js";
+import { place } from "../flows/placement.js";
+import { data } from "../flows/state.js";
 
 // The paths whose geometry follows the viewport-sticky root chips on scroll, remembered each draw so the scroll pass rewrites only them. Only the edge layer touches it.
 let stickyPaths = [];

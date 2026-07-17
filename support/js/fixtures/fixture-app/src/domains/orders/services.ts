@@ -1,4 +1,4 @@
-import { placeOrder } from './orders.use-cases';
+import { placeOrder } from './orders.flows';
 export const ordersService = () => placeOrder();
 
 // The receipt subtree ships to another runtime as source; nothing imports it, and the directive carries the reach.

@@ -22,9 +22,9 @@ This phase is the judgment the architecture cannot mechanize; the later phases a
 
 "When `<trigger>`, the user can `<action>`, producing `<result>`." Extract:
 
-- **nouns** - candidate Entities (rules, shapes, value objects) and state,
-- **verbs** - candidate Use-Cases (processes, reactions, pipelines),
-- **effects** (network, storage, platform, DOM) - candidate Adapters and Services.
+- **nouns** - candidate Axioms (rules, shapes, value objects) and state,
+- **verbs** - candidate Flows (processes, reactions, pipelines),
+- **effects** (network, storage, platform, DOM) - candidate Harnesses and Services.
 
 This is the only essence-judgment the procedure asks for. Make it explicit on the page rather than implicit in which folder you happened to open.
 
@@ -44,7 +44,7 @@ Do not ask "what is this, really." Ask "what will it need to import." Position o
 
 Will any part of this be consumed by *other* domains (navigation, theme, a toast, a loading shell)? Re-ownership decides, and its test is re-instancing:
 
-- A helper that **owns nothing** - it returns a pure value over ambient mechanism or another domain's already-published state - is consumed **directly** as a use-case. No block, no wrapper.
+- A helper that **owns nothing** - it returns a pure value over ambient mechanism or another domain's already-published state - is consumed **directly** as a flow. No block, no wrapper.
 - A concern that **owns state, encodes a policy, or authors markup** more than one consumer would otherwise re-author becomes a **composition block**: a service its owning domain exposes, composed once by the root, with consumer content composed in. Consumers contribute data and behavior contracts.
 
 Re-use references the single owner; it never re-instances ownership. If the verdict is "block," the block is part of this feature's scope from the start - retrofitting one after consumers have grown their own copies of the policy is the expensive path, and in practice tends never to get done.
@@ -57,27 +57,27 @@ List every identifier the feature introduces that lives in a shared runtime name
 
 ## Phase B - Build inside-out
 
-Build Entities, then Use-Cases, then Adapters, then Services, so that at every step the thing you are writing depends only on things that already exist beneath it. Dependencies point inward by construction; the direction never needs retrofitting.
+Build Axioms, then Flows, then Harnesses, then Services, so that at every step the thing you are writing depends only on things that already exist beneath it. Dependencies point inward by construction; the direction never needs retrofitting.
 
-### B1. Entities
+### B1. Axioms
 
-Pure rules, shapes, and value objects expressed as functions of plain values. Imports limited to core. No framework, no platform, no I/O. **Unit-test them here** - this layer is where the testability dividend is collected, and the easiest place to leave it uncollected. If a validation library's schema factory bundles the shape with a throwing validator, the shape is the entity and the factory invocation belongs outward at the boundary; the library will not build that wall for you.
+Pure rules, shapes, and value objects expressed as functions of plain values. Imports limited to core. No framework, no platform, no I/O. **Unit-test them here** - this layer is where the testability dividend is collected, and the easiest place to leave it uncollected. If a validation library's schema factory bundles the shape with a throwing validator, the shape is the axiom and the factory invocation belongs outward at the boundary; the library will not build that wall for you.
 
-### B2. Use-Cases
+### B2. Flows
 
-Compose entities into processes and reactions. Receive every outer dependency - platform values, a navigation callback, the current route - as a **parameter** the layer above will supply; the port is the parameter list. Local reactive state created here is this layer's own affair, and its writes need no ceremony: the architecture contains what is *observable* of state, and what crosses a boundary is published as immutable snapshots.
+Compose axioms into processes and reactions. Receive every outer dependency - platform values, a navigation callback, the current route - as a **parameter** the layer above will supply; the port is the parameter list. Local reactive state created here is this layer's own affair, and its writes need no ceremony: the architecture contains what is *observable* of state, and what crosses a boundary is published as immutable snapshots.
 
-If a use-case wants to import an *outer* module (a service, an adapter), stop: that is the relocation rule. The logic is misplaced - the pure part moves inward to where its dependencies are, the binding part moves out to an Adapter.
+If a flow wants to import an *outer* module (a service, a harness), stop: that is the relocation rule. The logic is misplaced - the pure part moves inward to where its dependencies are, the binding part moves out to a Harness.
 
-### B3. Adapters - only at shape mismatch
+### B3. Harnesses - where the coupling gear lives
 
-An Adapter exists to make a mismatched shape conform to the concepts: a throwing API, a promise or async-callback interface, an imperative or mutable-global interface, request/response over the network. Wrap those into domain-shaped values - async into a single-emission channel, throws into typed branch values - choosing the channel's storage shape (does a late subscriber see the settled value?) by what consumers need.
+A harness holds the coupling gear that makes a mismatched shape conform to the concepts: a throwing API, a promise or async-callback interface, an imperative or mutable-global interface, request/response over the network, a host API, an in-process foreign model (an AST, a parser's tables). Wrap those into domain-shaped values - async into a single-emission channel, throws into typed branch values - choosing the channel's storage shape (does a late subscriber see the settled value?) by what consumers need. The posture is opt-out: gear appearing inside a flow or a service is the harness knocking, and leaving it inline is the active decision, carrying the same one-line justification an inadvisable mounting does.
 
-Two bounds. An external API that is already domain-shaped (a reactive accessor, a pure hook, idempotent on import) gets **no** adapter - wrapping it is a hop that homes no decision, and the indirection rule refuses it. And at a genuinely foreign boundary (a wire format, a platform SDK, a third-party API) the adapter's obligation is **translation into the domain's own entity vocabulary**: a wrapper that merely re-shapes has left the foreign model in charge of the domain's types.
+Two bounds. An external API that is already domain-shaped (a reactive accessor, a pure hook, idempotent on import) gets **no** harness - wrapping it is a hop that homes no decision, and the indirection rule refuses it. And at a genuinely foreign boundary (a wire format, a platform SDK, a third-party API) the harness's obligation is **translation into the domain's own axiom vocabulary**: a wrapper that merely re-shapes has left the foreign model in charge of the domain's types.
 
 ### B4. Services
 
-The domain's outward blocks: facades over external systems and the domain's own composable blocks, exposing **ports** (named slots, callbacks, configured policies) for the root to fill. When a service needs a sibling block inside itself, the graded order applies: a slot port the root fills is the designed form; mounting the sibling block directly - a sibling unit's, or a peer domain's block at its runtime-composition surface, never past it - is inadvisable and needs a justification. The justification test is the indirection rule: name the decision the root would make at the port hop; if there is none, the port is ceremony and the mounting is honest. Never re-author the sibling concern from its use-cases - that re-owns it, and is the actual violation.
+The domain's outward blocks: facades over external systems and the domain's own composable blocks, exposing **ports** (named slots, callbacks, configured policies) for the root to fill. When a service needs a sibling block inside itself, the graded order applies: a slot port the root fills is the designed form; mounting the sibling block directly - a sibling unit's, or a peer domain's block at its runtime-composition surface, never past it - is inadvisable and needs a justification. The justification test is the indirection rule: name the decision the root would make at the port hop; if there is none, the port is ceremony and the mounting is honest. Never re-author the sibling concern from its flows - that re-owns it, and is the actual violation.
 
 ---
 
@@ -85,7 +85,7 @@ The domain's outward blocks: facades over external systems and the domain's own 
 
 ### C1. Define the surfaces
 
-The consumable surface re-exports exactly what crosses the boundary: use-case functions, channels, and the vocabulary that travels with them. Services and adapters stay off it; services go on the runtime-composition surface the root reaches. Split a surface whenever one target would conflate two consumer types (a client-facing and a server-facing entry, so server-only vocabulary never rides into a client bundle). Prefer explicit named re-exports, so the surface stays a deliberate contract.
+The consumable surface re-exports exactly what crosses the boundary: flow functions, channels, and the vocabulary that travels with them. Services and harnesses stay off it; services go on the runtime-composition surface the root reaches. Split a surface whenever one target would conflate two consumer types (a client-facing and a server-facing entry, so server-only vocabulary never rides into a client bundle). Prefer explicit named re-exports, so the surface stays a deliberate contract.
 
 ### C2. Wire at the root - and only there
 
@@ -95,7 +95,7 @@ The root's imperative shell **sequences**: it names and orders owned surfaces an
 
 ### C3. Cross-domain reaction (if the feature reacts to another domain)
 
-The producer updates its channel; the consumer subscribes through the producer's surface; when the consumer must trigger the producer back, it calls the producer's published use-case. Direct typed references everywhere - no string-keyed dispatch.
+The producer updates its channel; the consumer subscribes through the producer's surface; when the consumer must trigger the producer back, it calls the producer's published flow. Direct typed references everywhere - no string-keyed dispatch.
 
 If the reaction closes a loop, the two cycle gates apply: the loop must contain a **change-gated** channel (equality-gated delivery, tight equality, never value-retaining replay), and a loop that stays hot after inputs settle is a logic bug the architecture makes observable. Check the gate exists before wiring the loop.
 
@@ -125,7 +125,7 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 
 ## Decision aids (consolidated)
 
-**Which layer?** What does it depend on? Plain values only - Entity. Entities plus supplied ports - Use-Case. Wraps a genuinely mismatched external shape - Adapter. Outward block or facade exposing ports - Service.
+**Which layer?** What does it depend on? Plain values only - Axiom. Axioms plus supplied ports - Flow. Coupling gear that converts, absorbs, or caches a shape the domain does not define - Harness. Outward block or facade exposing ports - Service.
 
 **Hook or block?** Owns nothing and returns a pure value over published state - hook, consumed directly. Owns state, encodes policy, or authors shared markup - block, composed once by the root.
 
@@ -145,8 +145,8 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 - [ ] Placement decided by imports; lens, coordinator, or consumer call made (A2).
 - [ ] Cross-cutting parts decided: hook or block (A3).
 - [ ] Every new shared-namespace identifier given an owner before first use (A4).
-- [ ] Built inside-out; entities unit-tested (B).
-- [ ] Adapters only at real shape mismatches; foreign shapes translated into owned vocabulary (B3).
+- [ ] Built inside-out; axioms unit-tested (B).
+- [ ] Coupling gear lives in harnesses, or carries its inline justification; foreign shapes translated into owned vocabulary (B3).
 - [ ] Sibling composition by slot port, or a mounting justified by the indirection rule (B4).
 - [ ] Surfaces curated and named; services on the composition surface only (C1).
 - [ ] Wired at the root; the shell sequences and never chews (C2).
@@ -163,9 +163,9 @@ Feature: a text filter over the current list.
 - **A2.** It filters a list the feature already owns and needs no other feature's data - it stays inside the feature domain.
 - **A3.** Two parts, two verdicts. The *match predicate* owns nothing - a hook, consumed directly. The *search box* (input, debounce, clear affordance, highlighting) becomes policy the moment a second list wants the same behavior - a block. With one consumer it stays a local component, revisited on the second.
 - **A4.** No new shared-namespace identifiers; the query never leaves the domain.
-- **B1.** Entity: `matches(query, label)` - pure, unit-tested.
+- **B1.** Axiom: `matches(query, label)` - pure, unit-tested.
 - **B2.** Use-case: `filteredItems(items, query)` - composes `matches` over reactive accessors received as parameters. The query signal lives here; its setter is the domain writing its own state.
-- **B3.** No adapter - nothing throwing, async, or imperative crosses a boundary.
+- **B3.** No harness - nothing throwing, async, or imperative crosses a boundary.
 - **B4.** Service only if A3 said "block": a `SearchBox` exposing a query port and a clear callback, owning the debounce policy internally.
 - **C1.** The consumable surface exports `filteredItems`; the block, if built, goes on the composition surface. `matches` stays internal.
 - **C2.** The route composes the block, passes the list, renders the filtered accessor; the wiring reads top to bottom.

@@ -3,11 +3,11 @@
 // A drawer click re-aims the board through the board's own ports (rebuild, applyPin), so this service composes no sibling service.
 // The list is navigable through a text search and a domain facet, both applied by toggling item visibility rather than rebuilding, so a keystroke never re-renders under the cursor.
 
-import { applyPin, chips, rebuild } from "../use-cases/board.js";
-import { $, h } from "../adapters/dom.js";
-import { edgeClass } from "../use-cases/edges.js";
-import { place } from "../use-cases/placement.js";
-import { collapsed, cycleId, data, getEditorLink, savePrefs, selectedKey, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
+import { applyPin, chips, rebuild } from "../flows/board.js";
+import { $, h } from "../harnesses/dom.js";
+import { edgeClass } from "../flows/edges.js";
+import { place } from "../flows/placement.js";
+import { collapsed, cycleId, data, getEditorLink, savePrefs, selectedKey, setPin, setPinCycle, setSelected } from "../flows/state.js";
 
 // The section titles are referenced from three places (the section, the count that scopes to it, the empty state), so they are named once here and drift nowhere.
 const T = {
@@ -352,7 +352,7 @@ export function renderIssues() {
   const flowKey = (f) => `${data().files[f.from].path}=>${data().files[f.to].path}`;
   section(
     T.laundered,
-    data().flows.filter((f) => f.laundered),
+    data().landings.filter((f) => f.laundered),
     (f) =>
       h(
         "div",
@@ -555,7 +555,7 @@ export function renderIssues() {
 
   const bad = data().edges.filter((e) => e.tier === "invariant").length;
   const smell = data().edges.filter((e) => e.tier === "smell").length;
-  const laundered = data().flows.filter((f) => f.laundered).length;
+  const laundered = data().landings.filter((f) => f.laundered).length;
   const cycles = data().cycles.length;
   const contested = data().files.filter((f) => f.dispute).length;
   const found = bad + smell + laundered + cycles + contested;

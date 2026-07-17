@@ -1,18 +1,18 @@
 // The graph assembly: gather the files, resolve every reference, infer each file's role from its position in the resolved graph, and judge every reference with the shared model.
-// A per-file rule reads one file and its specifiers, so everything a whole-graph question needs is assembled here: the classified nodes, the authored edges, the landed flows behind the conduits, the reachable set, and the reference cycles the flows close.
+// A per-file rule reads one file and its specifiers, so everything a whole-graph question needs is assembled here: the classified nodes, the authored edges, the landed landings behind the conduits, the reachable set, and the reference cycles the landings close.
 // The roles come from ownership.js - surface ownership over the edges, the same classification the lint rules read - so the diagram and the linter judge every edge identically; only the declared composition roots are taken from the scan's own areas.
 // The tree walk lives in tree.js and the module parsing in parse.js, so this file touches no filesystem of its own; the CLI (visualize.js) serves what it returns and the selftest asserts on it.
 
 import { join } from 'node:path';
 
-import { deepSideEffect, slicingLean, slicingPressure } from '../entities/messages.js';
-import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from '../entities/model.js';
-import { createWalker } from './flow.js';
-import { cycles } from '../use-cases/graph.js';
-import { graphRoles } from '../use-cases/ownership.js';
-import { EXT_CANDIDATES, moduleInfo } from '../adapters/parse.js';
-import { gatherFiles, readOptions } from '../adapters/tree.js';
-import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from '../use-cases/verdicts.js';
+import { deepSideEffect, slicingLean, slicingPressure } from '../axioms/messages.js';
+import { LAYER_RANK, inTreeSpec, isRelative, norm, posixResolve, targetOf } from '../axioms/model.js';
+import { createWalker } from './walk.js';
+import { cycles } from '../flows/graph.js';
+import { graphRoles } from '../flows/ownership.js';
+import { EXT_CANDIDATES, moduleInfo } from '../harnesses/parse.js';
+import { gatherFiles, readOptions } from '../harnesses/tree.js';
+import { diagonalVerdict, importVerdict, landedVerdict, lateralVerdict, rootLandedVerdict, selfSurfaceVerdict, unjudgedVerdict } from '../flows/verdicts.js';
 
 export function buildGraph(appDir) {
   const options = readOptions(appDir);
@@ -92,7 +92,7 @@ export function buildGraph(appDir) {
 
   // An `@elda-import:` directive (parse.js) is the serialization handoff between runtimes (ROOT.5), declared at the site that performs it: the host consumes every matched file as source, and another runtime composes them.
   // The pattern resolves against the host's own directory, and a trailing `/*` takes the whole subtree. Each match becomes an `embeds` edge: it carries reachability and draws as dataflow, it takes no reference judgment - no binding crosses a runtime boundary, and the shipped files' own edges are judged here like any other - and ownership hands each match its own tree claim rather than the host's chain.
-  // An `@elda-entry` directive names where the other runtime enters the shipped files. It sharpens the host's fan: reach then flows through the entry's own imports rather than through every shipped byte, so a shipped file no entry composes surfaces as dead bundle weight below.
+  // An `@elda-entry` directive names where the other runtime enters the shipped files. It sharpens the host's fan: reach then landings through the entry's own imports rather than through every shipped byte, so a shipped file no entry composes surfaces as dead bundle weight below.
   const entryHosts = new Set();
   for (const file of files) {
     if (file.kind !== 'code') continue;
@@ -181,7 +181,7 @@ export function buildGraph(appDir) {
         e.verdict = diagonalVerdict(file.role, t);
         if (e.verdict) e.tier = 'invariant';
         else {
-          e.verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'adapters');
+          e.verdict = lateralVerdict(file.role, t, 'services') ?? lateralVerdict(file.role, t, 'harnesses');
           if (e.verdict) e.tier = 'smell';
         }
       }
@@ -309,8 +309,8 @@ export function buildGraph(appDir) {
     });
 
   const walker = createWalker({ appRoot: appDir, aliases, ownershipDir, core });
-  const flows = expandFlows(files, edges, walker, appDir, byPath);
-  for (const f of flows) if (leanOf(f)) f.lean = true;
+  const landings = expandLandings(files, edges, walker, appDir, byPath);
+  for (const f of landings) if (leanOf(f)) f.lean = true;
   // Root glue draws in the bar of the root that reached it, and glue shared between roots gets a bar of its own, so every composition-root file has a place on the board.
   const rootBars = roots.map((r) => ({ key: r.key, label: r.label }));
   for (const f of files) {
@@ -322,18 +322,18 @@ export function buildGraph(appDir) {
     options: { ...options, roots: rootBars },
     files,
     edges,
-    flows,
+    landings,
     pressure,
     recommendations,
-    cycles: cycles(files, cycleEdges(edges, flows)),
+    cycles: cycles(files, cycleEdges(edges, landings)),
     cwd: norm(appDir)
   };
 }
 
-// The graph the cycle pass rides: the landed value flows, one edge per ordered pair.
-// A surface holds no rank and owns no value of its own, so a cycle closes through the carriers behind it, and the landed flows are already expanded through the conduits; a type-only reference is vocabulary, and no value rides it.
+// The graph the cycle pass rides: the landings, one edge per ordered pair.
+// A surface holds no rank and owns no value of its own, so a cycle closes through the carriers behind it, and the landed landings are already expanded through the conduits; a type-only reference is vocabulary, and no value rides it.
 // A file referencing itself never lands (the walk stops at the source), so its self-edge is taken from the authored graph, and a self-reference is a cycle by construction.
-function cycleEdges(edges, flows) {
+function cycleEdges(edges, landings) {
   const out = [];
   const seen = new Set();
   const add = (e) => {
@@ -342,7 +342,7 @@ function cycleEdges(edges, flows) {
     seen.add(key);
     out.push({ from: e.from, to: e.to });
   };
-  for (const f of flows) if (f.to != null && !f.typeOnly) add(f);
+  for (const f of landings) if (f.to != null && !f.typeOnly) add(f);
   for (const e of edges) if (e.to != null && e.to === e.from && !e.typeOnly) add(e);
   return out;
 }
@@ -351,7 +351,7 @@ function cycleEdges(edges, flows) {
 // The walk itself lives in flow.js and is the same one the lint rule enforces with; here each landing additionally inherits the worst authored-edge verdict along its hops, and clean-hop landings are judged by the geometry verdicts - the landed diagonal and the lateral coupling - because those constrain the dataflow itself, and a re-export chain does not change where a value lives.
 // The boundary verdicts stay per-reference, since consuming internals through a surface is exactly what a surface is for.
 // A fresh verdict on a clean-hop landing is a laundered finding: real in the graph, invisible to any per-file judgment of a single reference.
-function expandFlows(files, edges, walker, appDir, byPath) {
+function expandLandings(files, edges, walker, appDir, byPath) {
   const rank = (t) => (t === 'invariant' ? 2 : t === 'smell' ? 1 : 0);
   const rootAbs = norm(appDir);
   const absOf = (id) => rootAbs + '/' + files[id].path;
@@ -391,7 +391,7 @@ function expandFlows(files, edges, walker, appDir, byPath) {
       if (src.role.kind !== 'domain') return null;
       const dv = landedVerdict(src.role, t);
       if (dv) return { verdict: dv, tier: 'invariant' };
-      const lv = lateralVerdict(src.role, t, 'services') ?? lateralVerdict(src.role, t, 'adapters');
+      const lv = lateralVerdict(src.role, t, 'services') ?? lateralVerdict(src.role, t, 'harnesses');
       if (lv) return { verdict: lv, tier: 'smell' };
       return null;
     };

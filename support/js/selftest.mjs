@@ -44,7 +44,7 @@ const GRAPH_RULES = [
   'no-diagonal-reach',
   'no-diagonal-reach-gate',
   'no-service-coupling',
-  'no-adapter-coupling',
+  'no-harness-coupling',
   'no-dishonest-placement',
   'no-deep-side-effects',
   'no-async-inner',
@@ -124,14 +124,14 @@ const overFired = Object.keys(plugin.rules).flatMap((id) => green.get(id).map((h
 // The whole-graph pass, held to the same bar.
 //
 // The bag's two `cycle` units close a reference cycle across two domains, and every edge in it
-// is legal read on its own: an equal-rank use-case crossing through a public surface, which is what
+// is legal read on its own: an equal-rank flow crossing through a public surface, which is what
 // a surface is for. No file in the cycle is at fault, so no per-file rule can see it, and the cycle
 // is what the graph pass exists to catch.
 //
 // Both halves of that claim are checked here. A silent pass is the same failure as a silent rule,
 // and a per-file rule reporting on a cycle file would mean the finding is decidable from one file
 // after all, leaving the pass unproven on its own fixture.
-const CYCLE = ['src/domains/cart/cycle.use-cases.ts', 'src/domains/orders/cycle.use-cases.ts'];
+const CYCLE = ['src/domains/cart/cycle.flows.ts', 'src/domains/orders/cycle.flows.ts'];
 
 const graph = scanApp(BAG);
 const gated = graph.cycles.filter((c) => c.gate);
@@ -145,7 +145,7 @@ console.log(`${(gated.length ? 'fires' : 'SILENT').padStart(6)}  ${'cycles (grap
 const brokenGraph = scanApp(BROKEN);
 const pressured = brokenGraph.pressure ?? [];
 console.log(`${(pressured.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing pressure (graph)'.padEnd(26)} ${pressured.length}`);
-// The lean reading, held to the same bar: the broken core's two use-cases pieces both read its entities piece downward, and the pass must gather them into one recommendation.
+// The lean reading, held to the same bar: the broken core's two flows pieces both read its axioms piece downward, and the pass must gather them into one recommendation.
 const recommended = brokenGraph.recommendations ?? [];
 console.log(`${(recommended.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing leans (graph)'.padEnd(26)} ${recommended.length}`);
 // The embed reading, held to the same bar: the green app's receipt subtree is imported by nothing and shipped by the orders service through its `@elda-import:receipt/*` directive, so both receipt files must arrive as unjudged embeds edges, every green file must reach, and no dispute may appear.
@@ -159,11 +159,11 @@ const embedOk =
   greenGraph.files.every((f) => f.reachable) &&
   greenGraph.files.every((f) => !f.dispute);
 console.log(`${(embedOk ? 'fires' : 'SILENT').padStart(6)}  ${'embeds reach (graph)'.padEnd(26)} ${shipped.length}`);
-// The dead-bundle reading, held to the same bar: the broken app ships print/* with print/services as its entry, and the stale use-case is shipped with no entry composing it - the pass must flag exactly that file, with the shipping host in the reason.
+// The dead-bundle reading, held to the same bar: the broken app ships print/* with print/services as its entry, and the stale flow is shipped with no entry composing it - the pass must flag exactly that file, with the shipping host in the reason.
 const deadBundle = brokenGraph.files.filter((f) => !f.reachable && /ships with/.test(f.unreached ?? ''));
 const entryOk =
   deadBundle.length === 1 &&
-  deadBundle[0].path === 'src/domains/orders/print/stale.use-cases.ts' &&
+  deadBundle[0].path === 'src/domains/orders/print/stale.flows.ts' &&
   brokenGraph.files.find((f) => f.path === 'src/domains/orders/print/services.ts')?.reachable === true;
 console.log(`${(entryOk ? 'fires' : 'SILENT').padStart(6)}  ${'entry dead-bundle (graph)'.padEnd(26)} ${deadBundle.length}`);
 if (list) {
@@ -196,7 +196,7 @@ if (unseen.length) {
 }
 if (!recommended.length) {
   console.error(`
-The slicing-lean pass missed the broken core's downward imports onto its entities piece.`);
+The slicing-lean pass missed the broken core's downward imports onto its axioms piece.`);
   console.error('Either the pass is broken, or the fan was broken by an edit. Both are failures.');
 }
 if (!pressured.length) {
@@ -213,7 +213,7 @@ if (!embedOk) {
   console.error('Either the pass is broken, or the directives or the receipt files were broken by an edit. Both are failures.');
 }
 if (!entryOk) {
-  console.error(`\nThe entry pass failed on the broken app: the shipped-and-never-composed file must be exactly print/stale.use-cases.ts, with the shipping host named in its reason.`);
+  console.error(`\nThe entry pass failed on the broken app: the shipped-and-never-composed file must be exactly print/stale.flows.ts, with the shipping host named in its reason.`);
   console.error('Either the pass is broken, or the print fixture was broken by an edit. Both are failures.');
 }
 if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk) process.exit(1);

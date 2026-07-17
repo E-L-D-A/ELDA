@@ -1,2 +1,2 @@
-import { checkout } from './use-cases';
+import { checkout } from './flows';
 export const checkoutService = () => checkout();

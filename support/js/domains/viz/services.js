@@ -1,15 +1,15 @@
 // The viz domain's runtime-composition surface: the app scan, the viewer pages, the module files behind them, and the change signals, composed by the CLI root.
-// This file owns where the viewer's files live and reads them off disk; the assembly itself is viewer.use-cases.js, and the page shape is the entities beside it.
-// The root consumes everything here and touches no adapter itself: the scan, the tree checks, and the file watches are this service's work.
+// This file owns where the viewer's files live and reads them off disk; the assembly itself is viewer.flows.js, and the page shape is the axioms beside it.
+// The root consumes everything here and touches no harness itself: the scan, the tree checks, and the file watches are this service's work.
 
 import { existsSync, readFileSync, readdirSync, statSync, watch } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CODE_RE } from '../../core/adapters/parse.js';
-import { STYLE_RE, isAsset, readOptions, walk } from '../../core/adapters/tree.js';
+import { CODE_RE } from '../../core/harnesses/parse.js';
+import { STYLE_RE, isAsset, readOptions, walk } from '../../core/harnesses/tree.js';
 import { buildGraph } from '../../core/services/scan.js';
-import { livePage, snapshotPage } from './viewer.use-cases.js';
+import { livePage, snapshotPage } from './viewer.flows.js';
 
 // @elda-import:viewer/*
 const viewerDir = join(dirname(fileURLToPath(import.meta.url)), 'viewer');
@@ -20,7 +20,7 @@ const ENTRY = './viewer/services/index.js';
 export const viewerPage = () => livePage(ENTRY);
 export const viewerSnapshot = (graph) => snapshotPage(moduleNames(), moduleSource, graph, ENTRY);
 
-// Module names are viewer-relative and may carry a layer directory ('use-cases/state'), so the listing walks the tree.
+// Module names are viewer-relative and may carry a layer directory ('flows/state'), so the listing walks the tree.
 export const moduleNames = () => {
   const out = [];
   const visit = (dir, rel) => {
