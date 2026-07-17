@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Placement: where a file renders, derived from the role the scanner assigned.
 
-import { ROWS } from "../entities/vocab.js";
+import { ROWS } from "../entities/index.js";
 import { collapsed, data } from "./state.js";
 
 // The top-level block a file belongs to: the composition root, or its domain - a core area draws as a domain block like any other.
@@ -21,6 +21,11 @@ export const isLonerCore = (r) =>
   Array.isArray(r.chain) &&
   r.chain.length > 0 &&
   r.chain[r.chain.length - 1] === r.surface;
+
+// The subdomain-wide spelling of a layer: the vertical slicing's bare reserved-name file, or the horizontal slicing's row `index`.
+// Only this spelling is the composer cap or the shared base; a plain concern-named file in a layer row is a row citizen, whatever the row.
+const isAggregateSpelling = (r) =>
+  r.via === "leaf" || (r.via === "branch" && r.sub.length === 1 && r.sub[0] === "index");
 
 // A layer file belongs to the unit its own name declares; that name is its sub-column, so units line up as concerns the way the diagram draws UI / Network / Data - at the domain root and inside every subdomain alike.
 // Bare reserved-name files (the layer aggregates, the composer) and surfaces are subdomain-wide and stay in the unnamed sub-column.
@@ -57,7 +62,7 @@ export function place(f) {
         collapsed: true,
         band:
           !isSurface &&
-          unitCol(r) === "" &&
+          isAggregateSpelling(r) &&
           (r.layer === "services" || r.layer === "entities"),
       };
     return {
@@ -81,7 +86,11 @@ export const compactRow = (p) => (p.band ? (p.row === "services" ? "@root" : "@b
 export function isBarFile(f) {
   const p = place(f);
   if (p.collapsed) return p.band;
-  return p.area === "domain" && p.unit === "" && (p.row === "services" || p.row === "entities");
+  return (
+    p.area === "domain" &&
+    isAggregateSpelling(f.role) &&
+    (p.row === "services" || p.row === "entities")
+  );
 }
 
 // A services composer (a sub-root band) threads away like a surface: an edge into it re-emerges as edges to the modules it re-exports, so arrows land on the real carriers behind the composition layer. `data().flows` already carries the composer's onward hop.

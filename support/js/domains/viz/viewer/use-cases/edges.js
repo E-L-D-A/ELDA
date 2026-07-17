@@ -2,10 +2,10 @@
 // Edge geometry and classification: which node an endpoint draws as, how references bundle under a fold, what paints an edge, which sides and ports it occupies, and the cubic through them.
 // Pure over the board's derived state and a caller-supplied rect reader; the SVG painting that consumes this lives in edges.services.js.
 
-import { edgeKey } from "../entities/vocab.js";
-import { collapsed, data, toggle } from "./state.js";
+import { edgeKey } from "../entities/index.js";
 import { chips, commit, compactRep, cycleClosers } from "./board.js";
 import { compactRow, isBarFile, place, threadComposers } from "./placement.js";
+import { collapsed, data, toggle } from "./state.js";
 
 // The node an endpoint draws as: a file of a folded domain draws as its rank's aggregate, so every reference crossing into that rank lands on one chip, which is where the bundle forms.
 const nodeOf = (id) => {
@@ -15,7 +15,7 @@ const nodeOf = (id) => {
 };
 
 // How the paints rank when several references share one arrow: a bundle takes the worst of them, so folding a domain never swallows a finding.
-const CLASS_RANK = { violation: 5, laundered: 4, cycle: 3, smell: 2, ok: 1, type: 0 };
+const CLASS_RANK = { violation: 5, laundered: 4, cycle: 3, smell: 2, ships: 1, ok: 1, type: 0 };
 
 // Every reference crossing a folded domain's boundary bundles into one arrow: it carries the count, paints as its worst member, and lists what it stands for on hover.
 // A reference between two files of one folded rank is internal to that rank, and the aggregate's own tip is where those files stay visible.
@@ -62,6 +62,8 @@ export function edgeClass(e) {
   if (cycleClosers().has(edgeKey(e))) return "cycle";
   // A slicing lean is a legal downward read across a piece boundary, marked by the scan; its own paint is what makes the re-slice geometry visible on the board.
   if (e.lean) return "lean";
+  // A declared embed ships its entry's subtree to another runtime as source; the handoff is real dataflow with no binding on it, so it takes its own paint rather than a dependency's.
+  if (e.kind === "embeds") return "ships";
   if (e.typeOnly) return "type";
   return "ok";
 }
@@ -70,7 +72,7 @@ export function edgeVisible(e) {
   if (e.to == null) return false;
   if (!chips().has(e.from) || !chips().has(e.to)) return false;
   const cls = edgeClass(e);
-  if ((cls === "ok" || cls === "lean") && !toggle("t-ok")) return false;
+  if ((cls === "ok" || cls === "lean" || cls === "ships") && !toggle("t-ok")) return false;
   if (cls === "type" && !toggle("t-type")) return false;
   return true;
 }

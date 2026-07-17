@@ -1,7 +1,4 @@
-// The entry specifier is the one name the page, the served module routes, and a snapshot's import map all share, so it is declared once here and referenced everywhere else.
-export const ENTRY = './viewer/services/index.js';
-
-export const template = /* html */`
+export const template = (entry) => /* html */`
   <header>
     <h1>
       <span id="live-btn" title="Static snapshot">
@@ -40,24 +37,23 @@ export const template = /* html */`
   <div class="bottom">
     <div class="legend">
       <div class="col">
-        <span><i></i>dependency</span>
-        <span><i class="type"></i>type-only</span>
-        <span><i class="in"></i>dependency of</span>
-        <span><i class="out"></i>depends on</span>
+        <label><input type="checkbox" id="leg-ok" checked><i></i>dependency</label>
+        <label><input type="checkbox" id="leg-ships" checked><i class="ships"></i>indirect</label>
+        <label><input type="checkbox" id="leg-type" checked><i class="type"></i>type-only</label>
+        <label><input type="checkbox" id="leg-in" checked><i class="in"></i>dependency of</label>
+        <label><input type="checkbox" id="leg-out" checked><i class="out"></i>depends on</label>
       </div>
       <div class="col">
-        <span><i class="cycle"></i>reference cycle</span>
-        <span><i class="smell"></i>inadvisable</span>
-        <span><i class="lean"></i>slicing tension</span>
-      </div>
-      <div class="col">
-        <span><i class="violation"></i>violation</span>
-        <span><i class="laundered"></i>laundered</span>
+        <label><input type="checkbox" id="leg-violation" checked><i class="violation"></i>violation</label>
+        <label><input type="checkbox" id="leg-laundered" checked><i class="laundered"></i>laundered</label>
+        <label><input type="checkbox" id="leg-cycle" checked><i class="cycle"></i>reference cycle</label>
+        <label><input type="checkbox" id="leg-smell" checked><i class="smell"></i>inadvisable</label>
+        <label><input type="checkbox" id="leg-lean" checked><i class="lean"></i>slicing tension</label>
       </div>
     </div>
     <nav id="bottombar"></nav>
   </div>
   <div id="tooltip"></div>
 
-  <script type="module">import '${ENTRY}';</script>
+  <script type="module">import '${entry}';</script>
 `;

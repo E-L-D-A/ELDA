@@ -148,6 +148,24 @@ console.log(`${(pressured.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing 
 // The lean reading, held to the same bar: the broken core's two use-cases pieces both read its entities piece downward, and the pass must gather them into one recommendation.
 const recommended = brokenGraph.recommendations ?? [];
 console.log(`${(recommended.length ? 'fires' : 'SILENT').padStart(6)}  ${'slicing leans (graph)'.padEnd(26)} ${recommended.length}`);
+// The embed reading, held to the same bar: the green app's receipt subtree is imported by nothing and shipped by the orders service through its `@elda-import:receipt/*` directive, so both receipt files must arrive as unjudged embeds edges, every green file must reach, and no dispute may appear.
+// The declared entry sharpens the fan (`@elda-entry` marks './receipt/services'), so reach must flow through the entry's own imports and still cover the subtree.
+const greenGraph = scanApp(GREEN);
+const shipped = greenGraph.edges.filter((e) => e.kind === 'embeds');
+const embedOk =
+  shipped.length === 2 &&
+  shipped.every((e) => e.verdict == null) &&
+  shipped.some((e) => e.entry) &&
+  greenGraph.files.every((f) => f.reachable) &&
+  greenGraph.files.every((f) => !f.dispute);
+console.log(`${(embedOk ? 'fires' : 'SILENT').padStart(6)}  ${'embeds reach (graph)'.padEnd(26)} ${shipped.length}`);
+// The dead-bundle reading, held to the same bar: the broken app ships print/* with print/services as its entry, and the stale use-case is shipped with no entry composing it - the pass must flag exactly that file, with the shipping host in the reason.
+const deadBundle = brokenGraph.files.filter((f) => !f.reachable && /ships with/.test(f.unreached ?? ''));
+const entryOk =
+  deadBundle.length === 1 &&
+  deadBundle[0].path === 'src/domains/orders/print/stale.use-cases.ts' &&
+  brokenGraph.files.find((f) => f.path === 'src/domains/orders/print/services.ts')?.reachable === true;
+console.log(`${(entryOk ? 'fires' : 'SILENT').padStart(6)}  ${'entry dead-bundle (graph)'.padEnd(26)} ${deadBundle.length}`);
 if (list) {
   for (const c of graph.cycles) {
     console.log(`          ${c.scope}${c.gate ? ' (gating class)' : ''}`);
@@ -190,5 +208,13 @@ if (decidable.length) {
   console.error(`\nA per-file rule reports on the cycle, so it no longer proves the graph pass: ${decidable.join(', ')}`);
   console.error('The cycle must be legal edge by edge; give the rule its own fixture breach and restore this one.');
 }
-if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length) process.exit(1);
+if (!embedOk) {
+  console.error(`\nThe embed pass failed on the green app: the \`@elda-import\` directive must reach both receipt files through the declared entry, stay unjudged, and dispute nothing.`);
+  console.error('Either the pass is broken, or the directives or the receipt files were broken by an edit. Both are failures.');
+}
+if (!entryOk) {
+  console.error(`\nThe entry pass failed on the broken app: the shipped-and-never-composed file must be exactly print/stale.use-cases.ts, with the shipping host named in its reason.`);
+  console.error('Either the pass is broken, or the print fixture was broken by an edit. Both are failures.');
+}
+if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk) process.exit(1);
 console.log(`\nAll ${bag.size} rules fire on their fixtures, the graph-classified rules fire on the connected app, the green app stays silent, and the graph passes hold their cycle and their slicing cluster.`);

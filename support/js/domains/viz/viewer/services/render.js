@@ -2,10 +2,10 @@
 // Board building: the root bars, the domain boxes, the unclassified box, and the block bar, rebuilt as one pass that commits its derived reading to the board.
 // The pass builds DOM and computes the derived state together, commits both to board.use-cases.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
 
-import { commit, rebuild } from "../use-cases/board.js";
 import { $, h, wrap } from "../adapters/dom.js";
-import { ROWS, ROW_LABEL, byPath } from "../entities/vocab.js";
-import { blockOf, chipParts, compactRow, isComposerFile, isLonerCore, place } from "../use-cases/placement.js";
+import { ROWS, ROW_LABEL, byPath } from "../entities/index.js";
+import { commit, rebuild } from "../use-cases/board.js";
+import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, place } from "../use-cases/placement.js";
 import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../use-cases/state.js";
 
 // The pass rebuilds the derived state into these private bindings and commits them whole; every reader takes them from the board.
@@ -191,13 +191,9 @@ function renderDomains(visible, ghost, rowList, expunge) {
     if (!domains.has(p.domain)) domains.set(p.domain, new Map());
     const subsOf = domains.get(p.domain);
     if (!subsOf.has(p.sub)) subsOf.set(p.sub, new Map());
-    // A bare reserved-name file at the services or entities layer is the subdomain's composer or shared base; lift it to the sub-root or sub-base bar.
-    if (p.unit === "" && p.row === "services") {
-      bucketBar(subRoots, p.domain, p.sub, f);
-      continue;
-    }
-    if (p.unit === "" && p.row === "entities") {
-      bucketBar(subBases, p.domain, p.sub, f);
+    // The layer's subdomain-wide spelling at the services or entities layer is the subdomain's composer or shared base; lift it to the sub-root or sub-base bar. A plain concern-named file in a layer row stays in its row.
+    if (isBarFile(f)) {
+      bucketBar(p.row === "services" ? subRoots : subBases, p.domain, p.sub, f);
       continue;
     }
     const units = subsOf.get(p.sub);

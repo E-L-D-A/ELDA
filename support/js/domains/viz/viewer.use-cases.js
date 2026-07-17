@@ -8,9 +8,9 @@
 
 import { styles } from './viewer.entities.css.js';
 import { html } from './viewer.entities.html.js';
-import { ENTRY, template } from './viewer.entities.template.js';
+import { template } from './viewer.entities.template.js';
 
-export const livePage = () => html(styles, null, template);
+export const livePage = (entry) => html(styles, null, template(entry));
 
 // The marker in the session state (use-cases/state.js) that a snapshot replaces with the scanned graph, so the page boots with its data inlined and asks no server.
 const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
@@ -18,14 +18,25 @@ const injectGraph = (src, graph) => src.replace(DATA_RE, JSON.stringify(graph));
 
 const dataUrl = (src) => `data:text/javascript;base64,${Buffer.from(src, 'utf8').toString('base64')}`;
 
-const toBare = (src) => src.replace(/(['"])\.\/([\w.-]+)\.js\1/g, '$1@viewer/$2$1');
+// A module's relative specifier resolves against its own viewer-relative name, so a nested module's '../use-cases/state.js' and a sibling's './board.js' both land on the one bare name the map carries.
+const resolveRel = (fromName, spec) => {
+  const segs = fromName.split('/').slice(0, -1);
+  for (const part of spec.split('/')) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') segs.pop();
+    else segs.push(part);
+  }
+  return segs.join('/');
+};
+const toBare = (src, name) =>
+  src.replace(/(['"])(\.\.?\/[\w./-]+)\.js\1/g, (m, q, spec) => `${q}@viewer/${resolveRel(name, spec)}${q}`);
 
-export function snapshotPage(names, sourceOf, graph) {
+export function snapshotPage(names, sourceOf, graph, entry) {
   const imports = {};
   for (const name of names) {
     let src = sourceOf(name);
     if (name === 'use-cases/state') src = injectGraph(src, graph);
-    imports[name === 'services/index' ? ENTRY : `@viewer/${name}`] = dataUrl(toBare(src, name));
+    imports[name === 'services/index' ? entry : `@viewer/${name}`] = dataUrl(toBare(src, name));
   }
-  return html(styles, { imports }, template);
+  return html(styles, { imports }, template(entry));
 }

@@ -7,12 +7,18 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CODE_RE } from '../../core/adapters/parse.js';
-import { buildGraph } from '../../core/services/scan.js';
 import { STYLE_RE, isAsset, readOptions, walk } from '../../core/adapters/tree.js';
+import { buildGraph } from '../../core/services/scan.js';
 import { livePage, snapshotPage } from './viewer.use-cases.js';
 
+// @elda-import:viewer/*
 const viewerDir = join(dirname(fileURLToPath(import.meta.url)), 'viewer');
 const modulePath = (name) => join(viewerDir, `${name}.js`);
+
+// @elda-entry
+const ENTRY = './viewer/services/index.js';
+export const viewerPage = () => livePage(ENTRY);
+export const viewerSnapshot = (graph) => snapshotPage(moduleNames(), moduleSource, graph, ENTRY);
 
 // Module names are viewer-relative and may carry a layer directory ('use-cases/state'), so the listing walks the tree.
 export const moduleNames = () => {
@@ -36,8 +42,6 @@ export const moduleForUrl = (url) => {
   return moduleNames().includes(name) ? name : null;
 };
 
-export const viewerPage = () => livePage();
-export const viewerSnapshot = (graph) => snapshotPage(moduleNames(), moduleSource, graph);
 
 // Which viewer a page is running, sent alongside the graph: the newest mtime across the modules, so a page can tell when the server now holds code it is not running and a reload is the fix.
 export const viewerStamp = () =>

@@ -31,18 +31,27 @@ const merge = (a, b) => {
 const same = (a, b) => (a === CORE ? b === CORE : b !== CORE && a.length === b.length && isPrefix(a, b));
 
 // Layer, unit name, and surface-ness come from the file's own name, so they hold wherever the file lives.
-// A name that resolves to a layer is a layer file; a plain name is a surface (a barrel or a named surface).
+// A name that resolves to a layer is a layer file; under the horizontal slicing the layer rides a bare layer-named directory instead, and a plain-named file inside one is that row's citizen; a plain name under neither is a surface (a barrel or a named surface).
 function nameRole(path) {
-  const base = String(path).split('/').pop();
+  const segs = String(path).split('/');
+  const base = segs.pop();
   const hit = layerOf(stripExt(base));
   if (hit) return { layer: hit.layer, name: hit.name, via: hit.name === '' ? 'leaf' : 'suffix', surface: null, sub: [] };
+  for (let i = 0; i < segs.length; i++) {
+    const row = layerOf(segs[i]);
+    if (row && row.name === '') {
+      return { layer: row.layer, name: null, via: 'branch', surface: null, sub: [...segs.slice(i + 1), stripExt(base)] };
+    }
+  }
   return { layer: null, name: null, via: null, surface: stripExt(base) || 'index', sub: [] };
 }
 
-// What a relative reference may cross into: a barrel or named surface, or the bare `services` file, which doubles as the runtime-composition surface - a parent composing `./host/services` is entering host, and that crossing is what names the subdomain.
+// What a relative reference may cross into: a barrel or named surface, or the runtime-composition surface in either spelling - the bare `services` file, or the services row's `index` - since a parent composing `./host/services` is entering host, and that crossing is what names the subdomain.
 const isEntry = (path) => {
   const r = nameRole(path);
-  return r.surface != null || (r.layer === 'services' && r.name === '');
+  if (r.surface != null) return true;
+  if (r.layer !== 'services') return false;
+  return r.name === '' || (r.via === 'branch' && r.sub[r.sub.length - 1] === 'index');
 };
 
 // The chain a relative reference hands its target: the importer's chain walked along the directory delta.
@@ -52,8 +61,10 @@ const isEntry = (path) => {
 function relativeChain(importerChain, importerDir, targetPath, ownershipDir) {
   if (importerChain === CORE) return CORE;
   if (!inArea(targetPath, ownershipDir ?? 'domains')) return importerChain;
-  const from = importerDir ? importerDir.split('/') : [];
-  const to = dirOf(targetPath) ? dirOf(targetPath).split('/') : [];
+  // The horizontal slicing's layer rows are rows of one subdomain, never subdomains, so a bare layer-named directory is transparent to the delta walk: stepping out of a row pops no ownership, and a surface inside a row names its subdomain by the directory above the row.
+  const rowless = (segs) => segs.filter((s) => { const hit = layerOf(s); return !(hit && hit.name === ''); });
+  const from = rowless(importerDir ? importerDir.split('/') : []);
+  const to = rowless(dirOf(targetPath) ? dirOf(targetPath).split('/') : []);
   const shared = commonPrefix(from, to).length;
   const ups = from.length - shared;
   const downs = to.slice(shared);
@@ -88,7 +99,10 @@ function inferChains(graph) {
     const rootKey = rootKeyOf.get(id);
     for (const e of out.get(id) ?? []) {
       let child;
-      if (isRelative(e.spec)) {
+      if (e.kind === 'embeds') {
+        // An `@elda-import:` directive ships its matches to another runtime as source (ROOT.5, serialization): shipping grants reach and attributes no ownership, so each match enters with its own tree claim rather than the host's chain.
+        child = pathClaim(graph.files[e.to], options)?.chain ?? chain;
+      } else if (isRelative(e.spec)) {
         child = relativeChain(chain, dirOf(files[id].path), files[e.to].path, options.ownershipDir);
       } else {
         const t = parseSpec(e.spec, options.ownershipAlias ?? '#');

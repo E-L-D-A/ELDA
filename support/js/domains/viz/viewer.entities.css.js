@@ -29,6 +29,7 @@ export const styles = /* css */`
   --laundered: #e07b39;
   --cycle: #a06ce0;
   --lean: #62b0c4;
+  --ships: #77839a;
   --hi-out: #3f8de0;
   --hi-in: #1ba46c;
   --accent: #3f8de0;
@@ -216,10 +217,27 @@ header h1 .brand {
   justify-content: end;
   gap: 12px;
 }
-.legend span {
+.legend label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.legend label:hover {
+  color: var(--fg);
+}
+/* The checkbox drives the filter through :has() and never shows; the swatch and the label text are the whole control. */
+.legend input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+/* An off entry fades to say its edges are hidden, the swatch fading with it. */
+.legend label:has(input:not(:checked)) {
+  opacity: 0.35;
 }
 .legend i {
   display: inline-block;
@@ -241,6 +259,9 @@ header h1 .brand {
 }
 .legend i.lean {
   border-top: 2px solid var(--lean);
+}
+.legend i.ships {
+  border-top: 2px dashed var(--ships);
 }
 .legend i.type {
   border-top: 2px dotted var(--type);
@@ -474,6 +495,19 @@ body.panning, body.panning .chip {
   stroke-width: 1.3;
   opacity: 0.85;
 }
+/* A declared embed ships files to another runtime as source: real dataflow, no binding, so it draws dashed in its own hue. */
+#edges path.ships {
+  stroke: var(--ships);
+  stroke-width: 1.3;
+  stroke-dasharray: 7 4;
+  opacity: 0.85;
+}
+/* The declared entry is where the other runtime enters the shipped files, so its handoff draws solid above the fan. */
+#edges path.ships.entry {
+  stroke-dasharray: none;
+  stroke-width: 1.6;
+  opacity: 1;
+}
 #edges path.type {
   stroke: var(--type);
   stroke-width: 1;
@@ -521,6 +555,11 @@ body.panning, body.panning .chip {
   opacity: 1;
   filter: brightness(1.5);
 }
+/* The invisible hit path sits right after its edge, so hovering it lifts the arrow underneath the cursor a touch above its neighbours. */
+#edges path.edge:has(+ .hit:hover) {
+  opacity: 1;
+  filter: brightness(1.45);
+}
 #edges.focused path.edge {
   opacity: 0.05;
   filter: none;
@@ -561,6 +600,38 @@ body.panning, body.panning .chip {
   filter: drop-shadow(
     0 0 4px color-mix(in srgb, var(--cycle) 55%, transparent)
   );
+}
+/* Each legend swatch is a filter: turning it off drops that kind of edge, and the matching hit path with it, so the diagram narrows to the connections you asked to see. */
+/* The in and out swatches gate the focus highlights, so their toggles read only while a file is focused. */
+body:has(#leg-ok:not(:checked)) #edges path.ok {
+  display: none;
+}
+body:has(#leg-ships:not(:checked)) #edges path.ships {
+  display: none;
+}
+body:has(#leg-type:not(:checked)) #edges path.type {
+  display: none;
+}
+body:has(#leg-in:not(:checked)) #edges path.hi-in {
+  display: none;
+}
+body:has(#leg-out:not(:checked)) #edges path.hi-out {
+  display: none;
+}
+body:has(#leg-violation:not(:checked)) #edges path.violation {
+  display: none;
+}
+body:has(#leg-laundered:not(:checked)) #edges path.laundered {
+  display: none;
+}
+body:has(#leg-cycle:not(:checked)) #edges path.cycle {
+  display: none;
+}
+body:has(#leg-smell:not(:checked)) #edges path.smell {
+  display: none;
+}
+body:has(#leg-lean:not(:checked)) #edges path.lean {
+  display: none;
 }
 
 #root-bar {
@@ -871,14 +942,16 @@ body.panning, body.panning .chip {
 .grouphead:hover, .colhead:hover {
   color: var(--fg);
 }
+/* The board's y-axis carries the layer order and nothing else, so a cell never stacks: files sharing a cell share a rank, and peers at one rank sit side by side the way the band chips do. */
 .cell {
   padding: 6px;
   border-radius: 8px;
   min-width: 86px;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 4px;
-  align-items: stretch;
+  align-items: flex-start;
+  align-content: flex-start;
 }
 .cell.surface {
   background: color-mix(in srgb, var(--surface-bg) 45%, transparent);

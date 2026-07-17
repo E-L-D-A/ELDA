@@ -2,11 +2,11 @@
 // Focus application: hovering or pinning a chip raises its edges and its neighbors on the board; raising a cycle raises the set of files it encloses.
 // The reach walk itself is focus.use-cases.js; this service paints its result onto the SVG paths and the chips.
 
-import { chips } from "../use-cases/board.js";
 import { markSelection, svg } from "../adapters/dom.js";
+import { edgeKey } from "../entities/index.js";
+import { chips } from "../use-cases/board.js";
 import { neighbourhood } from "../use-cases/focus.js";
 import { cycleId, data, pinnedCycle, pinnedPath, setPin, setPinCycle, setSelected } from "../use-cases/state.js";
-import { edgeKey } from "../entities/vocab.js";
 
 export function focus(id) {
   svg.classList.add("focused");

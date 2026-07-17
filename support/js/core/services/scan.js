@@ -90,6 +90,46 @@ export function buildGraph(appDir) {
     }
   }
 
+  // An `@elda-import:` directive (parse.js) is the serialization handoff between runtimes (ROOT.5), declared at the site that performs it: the host consumes every matched file as source, and another runtime composes them.
+  // The pattern resolves against the host's own directory, and a trailing `/*` takes the whole subtree. Each match becomes an `embeds` edge: it carries reachability and draws as dataflow, it takes no reference judgment - no binding crosses a runtime boundary, and the shipped files' own edges are judged here like any other - and ownership hands each match its own tree claim rather than the host's chain.
+  // An `@elda-entry` directive names where the other runtime enters the shipped files. It sharpens the host's fan: reach then flows through the entry's own imports rather than through every shipped byte, so a shipped file no entry composes surfaces as dead bundle weight below.
+  const entryHosts = new Set();
+  for (const file of files) {
+    if (file.kind !== 'code') continue;
+    const info = moduleInfo(join(appDir, file.path));
+    const directives = info?.directives ?? [];
+    const entrySpecs = info?.entries ?? [];
+    if (!directives.length && !entrySpecs.length) continue;
+    const slash = file.path.lastIndexOf('/');
+    const relDir = slash < 0 ? '' : file.path.slice(0, slash);
+    for (const pattern of directives) {
+      const subtree = pattern.endsWith('/*');
+      const base = posixResolve(relDir, subtree ? pattern.slice(0, -2) : pattern).slice(1);
+      const targets = subtree
+        ? [...byPath.keys()].filter((p) => p.startsWith(base + '/'))
+        : [matchIn(base, byPath)].filter((p) => p != null);
+      if (!targets.length) {
+        console.warn(`@elda-import in ${file.path}: '${pattern}' matches nothing in the scanned areas.`);
+        continue;
+      }
+      for (const t of targets) {
+        const to = byPath.get(t);
+        if (to === file.id) continue;
+        edges.push({ from: file.id, to, spec: pattern, kind: 'embeds', typeOnly: false, names: '*', verdict: null, tier: null });
+      }
+    }
+    for (const spec of entrySpecs) {
+      const hit = matchIn(posixResolve(relDir, spec).slice(1), byPath);
+      const edge = hit == null ? null : edges.find((e) => e.kind === 'embeds' && e.from === file.id && e.to === byPath.get(hit));
+      if (!edge) {
+        console.warn(`@elda-entry in ${file.path}: '${spec}' names no file this module's @elda-import ships.`);
+        continue;
+      }
+      edge.entry = true;
+      entryHosts.add(file.id);
+    }
+  }
+
   // The roles, reconciled from the two judges (ownership): the graph reading and the tree's claim, with a dispute where they disagree and an unreached reason where the graph is silent.
   const roles = graphRoles({ files, edges, options });
   for (const f of files) {
@@ -122,6 +162,7 @@ export function buildGraph(appDir) {
 
   // Pass two: judge every reference with the inferred roles - the same ladder the lint rules climb.
   for (const e of edges) {
+    if (e.kind === 'embeds') continue;
     const file = files[e.from];
     const relPath = '/' + file.path;
     // Resolve first, judge second, exactly as the plugin does: the scanned file the specifier landed on IS the target, so the trailing-segment ambiguity never needs the tolerant two-reading fallback.
@@ -157,6 +198,8 @@ export function buildGraph(appDir) {
   const outEdges = new Map();
   for (const e of edges) {
     if (e.to == null) continue;
+    // A host that declares an entry ships through it: only the entry's edge carries reach, and the shipped subtree unfolds through the entry's own imports. A host with no entry keeps the blanket fan.
+    if (e.kind === 'embeds' && entryHosts.has(e.from) && !e.entry) continue;
     if (!outEdges.has(e.from)) outEdges.set(e.from, []);
     outEdges.get(e.from).push(e.to);
   }
@@ -170,13 +213,19 @@ export function buildGraph(appDir) {
     }
   }
   for (const f of files) f.reachable = reachable.has(f.id);
+  // A shipped file the entry never composes is dead weight in the bundle: its bytes travel and nothing runs them. The reason rides the file the way every unreached reason does, and SURFACE.4 reads it as a review signal.
+  for (const e of edges) {
+    if (e.kind !== 'embeds' || e.to == null) continue;
+    const f = files[e.to];
+    if (!f.reachable && !f.unreached) f.unreached = `ships with '${files[e.from].path}', and no declared entry composes it`;
+  }
 
   // The slicing-pressure pass (the spec's Slicing direction): rank-climbing imports whose two ends have a piece boundary between them, grouped by the nearest scope containing both.
   // Every climb is a violation on its own; this is the second-order reading over those findings - a cluster between sibling pieces is a partition fighting its dataflow - so the pass gathers and the reviewer decides the new slice.
   // A boundary sits between two units of one subdomain, two subdomains or domains, two core pieces, and a domain-and-core pair; a within-unit climb has no boundary a re-slice could move, so it stays the local finding its own verdict already remedies.
   const pressureGroups = new Map();
   for (const e of edges) {
-    if (e.to == null || e.typeOnly) continue;
+    if (e.to == null || e.typeOnly || e.kind === 'embeds') continue;
     const a = files[e.from].role;
     const b = files[e.to].role;
     if (!a.layer || !b.layer) continue;
@@ -221,7 +270,7 @@ export function buildGraph(appDir) {
   // The pressure pass's legal mirror - the slicing leans: downward imports that cross a piece boundary to reach the shared base below, each one legal, and a cluster of them is the drawn geometry of a slice at odds with its dataflow.
   // A named unit reading its subdomain's bare base crosses every column to reach it, and a core piece reading a lower core piece does the same across the shared block; the marked edges take their own paint, and a cluster from two or more pieces ships as a recommendation to consider the other slicing direction.
   const leanOf = (ref) => {
-    if (ref.to == null || ref.typeOnly || ref.tier) return null;
+    if (ref.to == null || ref.typeOnly || ref.tier || ref.kind === 'embeds') return null;
     const a = files[ref.from].role;
     const b = files[ref.to].role;
     if (!a.layer || !b.layer) return null;
@@ -328,8 +377,8 @@ function expandFlows(files, edges, walker, appDir, byPath) {
   for (const e of edges) {
     if (e.to == null || files[e.from].role.kind === 'surface') continue;
     const src = files[e.from];
-    // Side-effect imports execute the target rather than take bindings, and type-only edges are vocabulary; both draw as authored and do not expand.
-    if (e.kind === 'side-effect' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
+    // Side-effect imports execute the target rather than take bindings, type-only edges are vocabulary, and an embed ships source across a runtime boundary; all three draw as authored and do not expand.
+    if (e.kind === 'side-effect' || e.kind === 'embeds' || e.typeOnly) { push({ ...e, via: [], laundered: false }); continue; }
     const judge = (toId) => {
       const t = { ...files[toId].role, asset: files[toId].kind === 'asset' };
       // The root's landings answer ROOT.1 in core exactly as in a domain: a binding it takes that lands off the services row is a service smashed into the root.

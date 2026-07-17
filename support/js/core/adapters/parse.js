@@ -82,7 +82,26 @@ export function analyzeModule(path, code) {
     const m = text.match(/^(['"`])((?:(?!\1)[^\\$])*)\1$/);
     if (m) refs.push({ spec: m[2], kind: 'dynamic', typeOnly: false, names: '*' });
   }
-  return { refs, table };
+  // An `@elda-import:` directive is an import the language cannot spell: the module consumes the matched files as source (a shipped page, a worker bundle) rather than as bindings.
+  // Its companion `@elda-entry` marks where the other runtime enters the shipped files: the directive annotates the next statement's string literal, so the one specifier the page really imports carries the claim and no comment-side copy can drift from it.
+  // Both ride the same parsed tables as every reference, so the enforcer and the informer read one declaration and no second pass can fork from it.
+  const directives = [];
+  const entries = [];
+  const stringInit = (st) => {
+    const decl = st.type === 'ExportNamedDeclaration' ? st.declaration : st;
+    const init = decl?.declarations?.[0]?.init;
+    return init?.type === 'Literal' && typeof init.value === 'string' ? init.value : null;
+  };
+  for (const c of parsed.comments ?? []) {
+    const imp = /^\s*@elda-import:(\S+)\s*$/.exec(c.value);
+    if (imp) { directives.push(imp[1]); continue; }
+    if (/^\s*@elda-entry\s*$/.test(c.value)) {
+      const st = parsed.program.body.find((s) => s.start >= c.end);
+      const value = st ? stringInit(st) : null;
+      if (value) entries.push(value);
+    }
+  }
+  return { refs, table, directives, entries };
 }
 
 // Parsed module info, cached by mtime. Returns null for a file that is not parseable code (a stylesheet, an asset): such a file owns whatever reaches it.

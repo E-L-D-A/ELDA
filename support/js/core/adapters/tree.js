@@ -13,7 +13,7 @@ export const isAsset = (p) => isDataPath(p);
 
 // Project options, read from the app's .oxlintrc.json when it configures elda/imports; the config may carry // comments, so strip them before parsing.
 // `aliases` maps each import alias to the app-root-relative directory it resolves to, and `ownershipAlias` names the one alias whose specifiers attribute ownership; its directory is the ownership tree the path claims are read from.
-// Every declared path - alias targets, composition roots, cores - is app-root-relative, and no directory name is special on its own.
+// Every declared path - alias targets, composition roots, cores - is app-root-relative, and no directory name is special on its own. Serialization handoffs are the one claim declared in code instead: the `@elda-import:` directive (parse.js) sits on the module that performs the handoff.
 export function readOptions(appDir) {
   const defaults = { aliases: { '#': 'domains' }, ownershipAlias: '#', compositionRoot: 'routes', core: 'core' };
   const rcPath = join(appDir, '.oxlintrc.json');

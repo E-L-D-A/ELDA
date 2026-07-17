@@ -1,0 +1,3 @@
+// The entry of an embedded runtime: nothing in the app imports this subtree, and the orders service ships it as source (its `@elda-import:receipt/*` directive).
+import { receiptTitle } from './entities';
+export const renderReceipt = () => receiptTitle;
