@@ -75,6 +75,8 @@ A harness holds the coupling gear that makes a mismatched shape conform to the c
 
 Two bounds. An external API that is already domain-shaped (a reactive accessor, a pure hook, idempotent on import) gets **no** harness - wrapping it is a hop that homes no decision, and the indirection rule refuses it. And at a genuinely foreign boundary (a wire format, a platform SDK, a third-party API) the harness's obligation is **translation into the domain's own axiom vocabulary**: a wrapper that merely re-shapes has left the foreign model in charge of the domain's types.
 
+When the feature is **host-mounted** - the framework calls it: a component, a handler, a rule, a job - the harness owns a **mounting engine** (the spec's host protocol, under Libraries). Write the behavior first as a host-free definition in the flows, as if no host existed: declarative data plus judgment functions over plain values. Mount it second: the engine registers every definition in the host's grammar, drives it with events in the domain's vocabulary, and passes host objects through as opaque tokens the definition returns to supplied ports unopened. One engine serves every mounted piece of the protocol; a second engine for the same protocol, or a per-piece wrapper, fails the indirection rule.
+
 ### B4. Services
 
 The domain's outward blocks: facades over external systems and the domain's own composable blocks, exposing **ports** (named slots, callbacks, configured policies) for the root to fill. When a service needs a sibling block inside itself, the graded order applies: a slot port the root fills is the designed form; mounting the sibling block directly - a sibling unit's, or a peer domain's block at its runtime-composition surface, never past it - is inadvisable and needs a justification. The justification test is the indirection rule: name the decision the root would make at the port hop; if there is none, the port is ceremony and the mounting is honest. Never re-author the sibling concern from its flows - that re-owns it, and is the actual violation.
@@ -129,6 +131,8 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 
 **Hook or block?** Owns nothing and returns a pure value over published state - hook, consumed directly. Owns state, encodes policy, or authors shared markup - block, composed once by the root.
 
+**Definition or gear?** The host calls it - split it: the judgment is a host-free definition in the flows, and the registration plus event translation live once in the harness's mounting engine. The domain calls the host - ordinary harness gear at the shape mismatch, no engine.
+
 **Wrapper or not?** The indirection rule: the hop must become the home of a decision (an invariant, a shape translation, a composition authority). A raw setter whose full typed input space is legal *is* the published operation; a narrower operation exists only as an invariant's home. A wrapper holding no rule is ceremony.
 
 **Port or mount?** Name the decision the root makes at the port hop. A real decision (which variant, which combination) - port. No decision - the port is ceremony; mount the block at its composition surface and record the justification.
@@ -147,6 +151,7 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 - [ ] Every new shared-namespace identifier given an owner before first use (A4).
 - [ ] Built inside-out; axioms unit-tested (B).
 - [ ] Coupling gear lives in harnesses, or carries its inline justification; foreign shapes translated into owned vocabulary (B3).
+- [ ] Host-mounted behavior split into host-free definitions plus one mounting engine; host-facing names and contract shapes declared once at axioms (B3, A4).
 - [ ] Sibling composition by slot port, or a mounting justified by the indirection rule (B4).
 - [ ] Surfaces curated and named; services on the composition surface only (C1).
 - [ ] Wired at the root; the shell sequences and never chews (C2).
@@ -164,7 +169,7 @@ Feature: a text filter over the current list.
 - **A3.** Two parts, two verdicts. The *match predicate* owns nothing - a hook, consumed directly. The *search box* (input, debounce, clear affordance, highlighting) becomes policy the moment a second list wants the same behavior - a block. With one consumer it stays a local component, revisited on the second.
 - **A4.** No new shared-namespace identifiers; the query never leaves the domain.
 - **B1.** Axiom: `matches(query, label)` - pure, unit-tested.
-- **B2.** Use-case: `filteredItems(items, query)` - composes `matches` over reactive accessors received as parameters. The query signal lives here; its setter is the domain writing its own state.
+- **B2.** Flow: `filteredItems(items, query)` - composes `matches` over reactive accessors received as parameters. The query signal lives here; its setter is the domain writing its own state.
 - **B3.** No harness - nothing throwing, async, or imperative crosses a boundary.
 - **B4.** Service only if A3 said "block": a `SearchBox` exposing a query port and a clear callback, owning the debounce policy internally.
 - **C1.** The consumable surface exports `filteredItems`; the block, if built, goes on the composition surface. `matches` stays internal.

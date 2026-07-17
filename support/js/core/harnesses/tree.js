@@ -4,7 +4,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { isDataPath, norm } from '../axioms/model.js';
+import { OPTION_DEFAULTS, isDataPath, norm } from '../axioms/model.js';
 import { CODE_RE } from './parse.js';
 
 // A stylesheet is code (SURFACE.6) and draws in its layer x subdomain cell; everything that is neither a module nor a stylesheet is pure data, read as the complement (isDataPath) so that no extension the tool has never met classifies as a rankless surface.
@@ -15,7 +15,7 @@ export const isAsset = (p) => isDataPath(p);
 // `aliases` maps each import alias to the app-root-relative directory it resolves to, and `ownershipAlias` names the one alias whose specifiers attribute ownership; its directory is the ownership tree the path claims are read from.
 // Every declared path - alias targets, composition roots, cores - is app-root-relative, and no directory name is special on its own. Serialization handoffs are the one claim declared in code instead: the `@elda-import:` directive (parse.js) sits on the module that performs the handoff.
 export function readOptions(appDir) {
-  const defaults = { aliases: { '#': 'domains' }, ownershipAlias: '#', compositionRoot: 'routes', core: 'core' };
+  const defaults = OPTION_DEFAULTS;
   const rcPath = join(appDir, '.oxlintrc.json');
   const finish = (o) => ({ ...o, ownershipDir: (o.aliases ?? {})[o.ownershipAlias] ?? 'domains' });
   if (!existsSync(rcPath)) return finish(defaults);
