@@ -1,14 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
   "jsPlugins": ["./index.js"],
+  "ignorePatterns": ["fixtures/**"],
   "rules": {
     "elda/imports": [
       "warn",
       {
-        "aliases": { "#": "domains" },
-        "ownershipAlias": "#",
-        "compositionRoot": ["index.js", "visualize.js", "presets.mjs", "selftest.mjs"],
-        "core": "core"
+        "compositionRoot": ["index.js", "visualize.js", "presets.mjs", "selftest.mjs"]
       }
     ],
     "elda/no-surface-declarations": "warn",

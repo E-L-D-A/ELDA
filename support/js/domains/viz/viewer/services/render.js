@@ -74,6 +74,46 @@ function makeChip(f, ghost) {
   return el;
 }
 
+// Within one stack the importer sits above what it imports, whatever their global dependency counts, so the arrow between them keeps reading downward; files with no edge between them keep the row's own order, and a cycle falls back to it.
+function stackOrder(files) {
+  const ids = new Set(files.map((f) => f.id));
+  const importers = new Map(files.map((f) => [f.id, 0]));
+  const deps = new Map(files.map((f) => [f.id, []]));
+  const counted = new Set();
+  for (const e of data().edges) {
+    if (e.to == null || e.from === e.to || !ids.has(e.from) || !ids.has(e.to)) continue;
+    const k = e.from + ">" + e.to;
+    if (counted.has(k)) continue;
+    counted.add(k);
+    deps.get(e.from).push(e.to);
+    importers.set(e.to, importers.get(e.to) + 1);
+  }
+  const out = [];
+  const left = [...files];
+  while (left.length) {
+    const i = left.findIndex((f) => importers.get(f.id) === 0);
+    const f = left.splice(Math.max(i, 0), 1)[0];
+    out.push(f);
+    for (const d of deps.get(f.id)) importers.set(d, importers.get(d) - 1);
+  }
+  return out;
+}
+
+// Files sharing one label in one cell are one unit split across kinds, so they draw as a little column rather than as loose row neighbors; the labels themselves keep the dependency-heaviest-first order of the cell.
+function unitStacks(files) {
+  const groups = new Map();
+  for (const f of files.sort(byDeg)) {
+    const label = chipParts(f).label;
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(f);
+  }
+  return [...groups.values()].map((g) =>
+    g.length === 1
+      ? makeChip(g[0])
+      : h("span", { class: "unit-stack" }, stackOrder(g).map((f) => makeChip(f))),
+  );
+}
+
 export function renderBoard() {
   _chips = new Map();
   worst = worstByFile();
@@ -557,7 +597,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
               class: "cell " + row,
               style: `grid-column: ${col.track}; grid-row: ${layerRow(ri)}`,
             },
-            (col.rows.get(row) ?? []).sort(byDeg).map((f) => makeChip(f)),
+            unitStacks(col.rows.get(row) ?? []),
           ),
         );
       });

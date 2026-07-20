@@ -949,7 +949,7 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
 .grouphead:hover, .colhead:hover {
   color: var(--fg);
 }
-/* The board's y-axis carries the layer order and nothing else, so a cell never stacks: files sharing a cell share a rank, and peers at one rank sit side by side the way the band chips do. */
+/* The board's y-axis carries the layer order, so distinct concerns at one rank sit side by side the way the band chips do. */
 .cell {
   padding: 6px;
   border-radius: 8px;
@@ -959,6 +959,12 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
   gap: 4px;
   align-items: flex-start;
   align-content: flex-start;
+}
+/* Files sharing one label in a cell are one unit split across kinds, so they form their own little column, importer on top, and the arrow between them keeps reading downward. */
+.unit-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .cell.surface {
   background: color-mix(in srgb, var(--surface-bg) 45%, transparent);

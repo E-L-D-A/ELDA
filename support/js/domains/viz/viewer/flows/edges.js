@@ -77,7 +77,7 @@ export function edgeVisible(e) {
   return true;
 }
 
-// The logical orientation of an edge from its grid placement, not its pixels: a reference within one unit column is vertical, an equal-rank reference across columns is horizontal, a reference crossing both a column and a rank is a diagonal (the shape no ELDA row draws), and two files sharing one cell arc beside it.
+// The logical orientation of an edge from its grid placement, not its pixels: a reference within one unit column is vertical, an equal-rank reference across columns is horizontal, a reference crossing both a column and a rank is a diagonal (the shape no ELDA row draws), and two files sharing one cell arc along it.
 // The composition root drops vertically into the column it wires; a core block is reached laterally from the feature blocks; a domain-wide band spans its own subdomain's stack, so within that subdomain its edges are vertical, and two bands of the same kind on one shelf read horizontally across subdomains.
 function edgeMode(e) {
   const pf = place(data().files[e.from]),
@@ -106,20 +106,25 @@ function edgeMode(e) {
   return "diag";
 }
 
-// The concrete sides an edge occupies, drawn straight between them: a vertical run leaves a horizontal side and lands on the facing one, a horizontal run uses the facing vertical sides, a diagonal leaves and enters on the vertical sides so its slant is unmistakable, and a same-cell arc pairs the two right sides.
+// The concrete sides an edge occupies: an exit and an entry must face each other across a real gap, so the pair sits on an axis the two rects are actually apart on, and the logical mode picks between the axes only when both hold a gap, falling back to its own preferred axis when neither does.
+// Two files sharing one cell face each other along their own line the same way, and the one pair with no gap on either axis loops through the two right sides beside the cell.
 export function edgeSides(e, rectOf) {
   const S = rectOf(e.from),
     T = rectOf(e.to);
   const dx = T.x + T.w / 2 - (S.x + S.w / 2),
     dy = T.y + T.h / 2 - (S.y + S.h / 2);
   const mode = edgeMode(e);
-  if (mode === "arc") return { kind: "arc", from: "r", to: "r" };
-  if (mode === "h") return { kind: "h", from: dx > 0 ? "r" : "l", to: dx > 0 ? "l" : "r" };
-  return {
-    kind: mode,
-    from: dy > 0 ? "b" : "t",
-    to: dy > 0 ? "t" : "b",
-  };
+  const hGap = T.x >= S.x + S.w || S.x >= T.x + T.w;
+  const vGap = T.y >= S.y + S.h || S.y >= T.y + T.h;
+  const lateral = { from: dx > 0 ? "r" : "l", to: dx > 0 ? "l" : "r" };
+  const vertical = { from: dy > 0 ? "b" : "t", to: dy > 0 ? "t" : "b" };
+  if (mode === "arc") {
+    if (hGap) return { kind: "arc", ...lateral };
+    if (vGap) return { kind: "arc", ...vertical };
+    return { kind: "arc", from: "r", to: "r" };
+  }
+  const useLateral = mode === "h" ? hGap || !vGap : hGap && !vGap;
+  return { kind: mode, ...(useLateral ? lateral : vertical) };
 }
 
 // Every endpoint sharing a chip side gets its own evenly spaced port, ordered by where the opposite endpoint sits, so a fan of edges spreads cleanly along the side.
@@ -154,18 +159,29 @@ function port(rect, side, frac) {
   return [rect.x + rect.w, rect.y + padY + (rect.h - 2 * padY) * frac];
 }
 
-// One edge's cubic through its assigned ports: a same-cell arc nests beside the cell by port index, a horizontal run curves through the facing vertical sides, and a vertical or diagonal run curves through the horizontal sides, its curvature scaled by the distance covered plus a share of the cross-axis distance so long fans stay rounded; shared by the full rebuild and the on-scroll geometry updates.
+// One edge's cubic through its assigned ports, shared by the full rebuild and the on-scroll geometry updates: the side pair sets the run's axis, and the curvature scales with the distance covered plus a share of the cross-axis distance so long fans stay rounded.
+// A same-cell run bows perpendicular to its axis by port index to clear the sibling chips between its ends: beneath a run along the cell's line, rightward down a unit stack. The bow's reach and depth follow the gap it spans, so an adjacent pair reads as a short sagging link and the controls never cross into a self-loop; a same-cell pair with no facing sides keeps its loop beside the cell.
 export function edgePath(en, rectOf) {
   const { sides } = en;
   const S = rectOf(en.e.from),
     T = rectOf(en.e.to);
   const [x1, y1] = port(S, sides.from, en.fromFrac);
   const [x2, y2] = port(T, sides.to, en.toFrac);
+  const lateral = sides.from === "l" || sides.from === "r";
   if (sides.kind === "arc") {
-    const off = 26 + 8 * en.fromIdx;
-    return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
+    if (sides.from === sides.to) {
+      const off = 26 + 8 * en.fromIdx;
+      return `M${x1} ${y1} C${x1 + off} ${y1}, ${x2 + off} ${y2}, ${x2 + 2} ${y2}`;
+    }
+    const gap = lateral ? Math.abs(x2 - x1) : Math.abs(y2 - y1);
+    const reach =
+      Math.min(14, gap * 0.35) * (sides.from === "r" || sides.from === "b" ? 1 : -1);
+    const bow = Math.min(16, 2 + gap * 0.4) + 8 * en.fromIdx;
+    if (lateral)
+      return `M${x1} ${y1} C${x1 + reach} ${y1 + bow}, ${x2 - reach} ${y2 + bow}, ${x2} ${y2}`;
+    return `M${x1} ${y1} C${x1 + bow} ${y1 + reach}, ${x2 + bow} ${y2 - reach}, ${x2} ${y2}`;
   }
-  if (sides.kind === "h") {
+  if (lateral) {
     const off =
       Math.min(Math.abs(x2 - x1) * 0.5, 130) + Math.min(Math.abs(y2 - y1) * 0.12, 60) + 14;
     const c1 = x1 + (sides.from === "r" ? off : -off);

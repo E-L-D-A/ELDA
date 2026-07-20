@@ -5,17 +5,12 @@ const AREA = { anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'stri
 const LEVEL_ENUM = { enum: ['error', 'warn', 'off'] };
 
 // The rule-options schemas are wire schemas for the config boundary (OWNER.2): declared once here, mounted verbatim into each rule's meta, so the contract has one owner and the rules carry references.
-const OPTION_PROPS = {
-  aliases: { type: 'object', additionalProperties: { type: 'string' } },
-  ownershipAlias: { type: 'string' },
-  compositionRoot: AREA,
-  core: AREA,
-};
+// Paths, aliases, and areas are derived by the engine's one project read and are not rule options; the closed schemas make a config still spelling them fail loudly, which is the migration signal.
 const schema = (properties) => [{ type: 'object', properties, additionalProperties: false }];
-export const OPTIONS_SCHEMA = schema(OPTION_PROPS);
-export const LATERAL_SCHEMA = schema({ aliases: OPTION_PROPS.aliases, ownershipAlias: OPTION_PROPS.ownershipAlias });
-export const VOCAB_SCHEMA = schema({ compositionRoot: AREA, core: AREA });
-export const DIAGONAL_SCHEMA = schema({ ...OPTION_PROPS, acrossDomains: LEVEL_ENUM, acrossSubdomains: LEVEL_ENUM, withinSubdomain: LEVEL_ENUM });
+export const OPTIONS_SCHEMA = schema({ compositionRoot: AREA });
+export const LATERAL_SCHEMA = schema({});
+export const VOCAB_SCHEMA = schema({});
+export const DIAGONAL_SCHEMA = schema({ acrossDomains: LEVEL_ENUM, acrossSubdomains: LEVEL_ENUM, withinSubdomain: LEVEL_ENUM });
 
 // The shared-namespace setters the vocab gate watches for at the composition root: writes through these with a literal key introduce out-of-band vocabulary.
 export const VOCAB_WRITE_METHODS = ['setAttribute', 'setItem', 'setProperty'];

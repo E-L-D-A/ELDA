@@ -23,13 +23,24 @@ import {
   vocabGate,
 } from './flows.js';
 
-let host = { appRootOf: () => null, buildGraph: () => null, createWalker: () => null };
+let host = { appRootOf: () => null, buildGraph: () => null, createWalker: () => null, readOptions: () => null };
 export const wire = (injected) => {
   host = { ...host, ...injected };
 };
 const appRootOf = (filename) => host.appRootOf(filename);
 const buildGraph = (appRoot) => host.buildGraph(appRoot);
 const createWalker = (opts) => host.createWalker(opts);
+
+// The project options for the app a file belongs to, derived once per app root and shared by every rule.
+// The per-rule lint options carry only rule-specific knobs (the diagonal class map); paths, aliases, and areas come from this one read, the same read the graph is built from, so the enforcer and the informer can never disagree on what the tree is.
+const projectOptions = new Map();
+const NO_APP = { aliases: {}, ownershipAlias: null, ownershipDir: null, compositionRoot: OPTION_DEFAULTS.compositionRoot, core: [] };
+const optionsFor = (filename) => {
+  const appRoot = appRootOf(filename);
+  if (!appRoot) return NO_APP;
+  if (!projectOptions.has(appRoot)) projectOptions.set(appRoot, host.readOptions(appRoot) ?? NO_APP);
+  return projectOptions.get(appRoot);
+};
 
 // The walker for the app a file belongs to: it resolves specifiers the way the bundler would, and follows value names to their landings.
 // Memoized per src directory, so a lint pass builds one per app and every rule shares its parse cache.
@@ -111,18 +122,7 @@ const graphTargetFor = (roleAt, walker, filename, spec, opts) => {
 
 const filenameOf = (context) => norm(context.filename ?? (context.getFilename && context.getFilename()) ?? '');
 
-const options = (context) => {
-  const o = (context.options && context.options[0]) || {};
-  const aliases = o.aliases ?? OPTION_DEFAULTS.aliases;
-  const ownershipAlias = o.ownershipAlias ?? OPTION_DEFAULTS.ownershipAlias;
-  return {
-    aliases,
-    ownershipAlias,
-    ownershipDir: aliases[ownershipAlias] ?? OPTION_DEFAULTS.aliases['#'],
-    compositionRoot: o.compositionRoot ?? OPTION_DEFAULTS.compositionRoot,
-    core: o.core ?? OPTION_DEFAULTS.core,
-  };
-};
+const options = (context) => optionsFor(filenameOf(context));
 
 // A dynamic specifier is statically known when it is a quoted string OR a template with no substitutions; a bundler resolves both identically.
 // Reading only `Literal` would let a backtick delete the rule, so the template form is read too, and a genuinely computed specifier returns null for the caller to fail closed on.

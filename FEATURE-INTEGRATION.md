@@ -87,7 +87,7 @@ The domain's outward blocks: facades over external systems and the domain's own 
 
 ### C1. Define the surfaces
 
-The consumable surface re-exports exactly what crosses the boundary: flow functions, channels, and the vocabulary that travels with them. Services and harnesses stay off it; services go on the runtime-composition surface the root reaches. Split a surface whenever one target would conflate two consumer types (a client-facing and a server-facing entry, so server-only vocabulary never rides into a client bundle). Prefer explicit named re-exports, so the surface stays a deliberate contract.
+The consumable surface re-exports exactly what crosses the boundary: flow functions, channels, and the vocabulary that travels with them. Services and harnesses stay off it; services go on the runtime-composition surface the root reaches. Split a surface whenever one target would conflate two consumer types (a client-facing and a server-facing entry, so server-only vocabulary never rides into a client bundle). The same split is grounded by module-graph weight: a surface pulls the full graph of everything it re-exports, so an audience that must stay off a host's modules (a build-time evaluator reading vocabulary) gets its own named surface, separate from the entry that carries host-backed flows. Prefer explicit named re-exports, so the surface stays a deliberate contract.
 
 ### C2. Wire at the root - and only there
 
@@ -113,7 +113,9 @@ This is the step that converts the constraints into enforcement; it is where the
 
 ### D1. Run the machine checks
 
-The lint plugin ([support/js](./support/js)) must be quiet on the new code: layer boundaries, surface reaches, inner-layer async and try/catch, mutable surface bindings, ambient-declaration placement, vocabulary literals at the root. The machine is the first line of defense for every rule it can check; reviewer attention starts where the machine stops. How hard the gate bites is the project's alignment grade (the spec's Grades of alignment): adopting reports and compares against the accepted baseline, aligned errors on violations, justified errors on ungrounded deviations as well - and the per-change reading, no new findings in touched files, holds at every grade. Separately, the reachability pass lists exports with no consumer: each is dead surface to trim, or capability deliberately ahead of demand to keep - review items.
+The lint plugin ([support/js](./support/js)) must be quiet on the new code: layer boundaries, surface reaches, inner-layer async and try/catch, mutable surface bindings, ambient-declaration placement, vocabulary literals at the root. The machine is the first line of defense for every rule it can check; reviewer attention starts where the machine stops.
+
+Findings rarely close one-for-one. A remedy often exposes the next rule's reading of the new shape, and the sequence converges on the honest form; treat each message's remedy menu as the design space, pick the arm whose claim is true of this code, and run again. A remedy that adds surface must survive the laundering test: would the added export, wrapper, or file exist if the rule vanished? When the answer is no, the change satisfies the rule's letter against its point - give the thing a real owner instead, one whose crossing something genuinely calls. How hard the gate bites is the project's alignment grade (the spec's Grades of alignment): adopting reports and compares against the accepted baseline, aligned errors on violations, justified errors on ungrounded deviations as well - and the per-change reading, no new findings in touched files, holds at every grade. Separately, the reachability pass lists exports with no consumer: each is dead surface to trim, or capability deliberately ahead of demand to keep - review items.
 
 ### D2. Verify blast radius equals diff
 
@@ -141,6 +143,8 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 
 **Where does this effect go?** An effect is a write; it is legal where its target is owned. Own local state - the owning layer, freely. The outside world - the outer layers, where its shape is bound. Another domain's anything - never; call the owner's published operation.
 
+**An effect-only import?** A module run purely for its side effect carries nothing named across the edge, so no rule can judge the crossing. It lives where judgment is unnecessary or licensed: beside its owner inside the unit, or at the composer. When the effect must be reachable across a boundary, give it an owner - a small service the composer genuinely calls - and let the effect ride that module's own interior import, so the boundary crossing carries a name.
+
 ---
 
 ## Pre-merge checklist
@@ -157,6 +161,7 @@ New domains and new cross-domain edges go to the scheduled ontology review; new 
 - [ ] Wired at the root; the shell sequences and never chews (C2).
 - [ ] Reactions by typed reference through surfaces; any loop change-gated (C3).
 - [ ] Machine checks quiet; blast radius equals diff; maintenance hooks recorded (D).
+- [ ] Every remedy survived the laundering test: nothing added exists only to satisfy a rule (D1).
 
 ---
 

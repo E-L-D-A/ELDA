@@ -5,7 +5,8 @@
 
 // The layer vocabulary, in rank order; the rank map and the name reading (layerOf, below) both derive from it.
 // The elda options contract's defaults, declared once: the config reader on disk (core's tree harness) and the rule-options reader in enforce both consume this table, so the two boundaries cannot drift apart (OWNER.2).
-export const OPTION_DEFAULTS = { aliases: { '#': 'domains' }, ownershipAlias: '#', compositionRoot: 'routes', core: 'core' };
+// The one declared option and its convention default; aliases, the ownership tree, and the shared floors are derived (tree.js), never declared.
+export const OPTION_DEFAULTS = { compositionRoot: 'routes' };
 
 export const LAYERS = ['axioms', 'flows', 'harnesses', 'services'];
 export const LAYER_RANK = Object.fromEntries(LAYERS.map((l, i) => [l, i]));
