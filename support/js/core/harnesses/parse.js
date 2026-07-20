@@ -80,7 +80,10 @@ export function analyzeModule(path, code) {
   for (const di of parsed.module.dynamicImports) {
     const text = code.slice(di.moduleRequest.start, di.moduleRequest.end);
     const m = text.match(/^(['"`])((?:(?!\1)[^\\$])*)\1$/);
+    // A cache-busting import spells its module in the literal head of the specifier and its version in the computed tail: the path before the '?' is the reference, and the query addresses the loader's cache, never the module.
+    const q = m ? null : text.match(/^(['"`])((?:(?!\1)[^\\$?])+)\?/);
     if (m) refs.push({ spec: m[2], kind: 'dynamic', typeOnly: false, names: '*' });
+    else if (q) refs.push({ spec: q[2], kind: 'dynamic', typeOnly: false, names: '*' });
   }
   // An `@elda-import:` directive is an import the language cannot spell: the module consumes the matched files as source (a shipped page, a worker bundle) rather than as bindings.
   // Its companion `@elda-entry` marks where the other runtime enters the shipped files: the directive annotates the next statement's string literal, so the one specifier the page really imports carries the claim and no comment-side copy can drift from it.

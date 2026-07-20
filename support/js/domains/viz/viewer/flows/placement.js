@@ -78,6 +78,44 @@ export function place(f) {
   return { area: "other" };
 }
 
+// The vertical order of the root bars layers the way the whole board does, dependents over dependencies: Kahn levels over the root-to-root references keep a root above every root it reads, and a root the others read sinks below them whole.
+// Within a level, the root with more references into the domains sits lower, nearest the domain boxes it feeds, and at equal counts the root reading more of the other roots sits higher; a cycle among the roots falls back to these gradients alone.
+export function orderedRoots() {
+  const rootOf = new Map();
+  for (const f of data().files) {
+    const p = place(f);
+    if (p.area === "root") rootOf.set(f.id, p.root);
+  }
+  const domainDeg = new Map();
+  const deps = new Map();
+  for (const e of data().edges) {
+    if (e.to == null || e.to === e.from) continue;
+    const from = rootOf.get(e.from);
+    if (from == null) continue;
+    const to = rootOf.get(e.to);
+    if (to != null && to !== from) (deps.get(from) ?? deps.set(from, new Set()).get(from)).add(to);
+    else if (to == null && place(data().files[e.to]).area === "domain")
+      domainDeg.set(from, (domainDeg.get(from) ?? 0) + 1);
+  }
+  const dependents = new Map();
+  for (const set of deps.values())
+    for (const to of set) dependents.set(to, (dependents.get(to) ?? 0) + 1);
+  let remaining = [...data().options.roots];
+  const out = [];
+  const gradient = (a, b) =>
+    (domainDeg.get(a.key) ?? 0) - (domainDeg.get(b.key) ?? 0) ||
+    (deps.get(b.key)?.size ?? 0) - (deps.get(a.key)?.size ?? 0);
+  while (remaining.length) {
+    const ready = remaining.filter((r) => !dependents.get(r.key));
+    const level = ready.length ? ready : remaining;
+    out.push(...[...level].sort(gradient));
+    remaining = remaining.filter((r) => !level.includes(r));
+    for (const r of level)
+      for (const to of deps.get(r.key) ?? []) dependents.set(to, dependents.get(to) - 1);
+  }
+  return out;
+}
+
 // The row a file draws in once its domain is folded: its own rank, or one of the two band keys, which keep the composer cap above the cake and the shared base below it.
 export const compactRow = (p) => (p.band ? (p.row === "services" ? "@root" : "@base") : p.row);
 

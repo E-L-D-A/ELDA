@@ -4,13 +4,9 @@
 // The failed specifier then reaches the map as its raw './<name>.js' string, and no key can meet it there: the map's own './'-shaped keys are absolutized against the page's base when the map is parsed, so the lookup holds a raw string on one side and full URLs on the other.
 // Bare names are the one specifier form the map matches literally, so each inlined module's sibling references are re-pointed at bare `@viewer/<name>` names and the map carries every name to its data: URL; the rewrite exists only inside the snapshot's payloads, and the files on disk keep their plain relative form.
 // The entry keeps its real specifier even in the snapshot: it sits in the page's own script, whose base is real, so its resolved URL meets the map's one URL-shaped key where both normalize against the same base.
-// Pure: sources and a graph in, HTML out. The filesystem stays in services.js.
+// Pure: the shell axioms, the sources, and a graph in, HTML out. The filesystem stays in services.js, and so does reading the shell, so the caller decides which revision of it assembles the page.
 
-import { styles } from './viewer.axioms.css.js';
-import { html } from './viewer.axioms.html.js';
-import { template } from './viewer.axioms.template.js';
-
-export const livePage = (entry) => html(styles, null, template(entry));
+export const livePage = (shell, entry) => shell.html(shell.styles, null, shell.template(entry));
 
 // The marker in the session state (flows/state.js) that a snapshot replaces with the scanned graph, so the page boots with its data inlined and asks no server.
 const DATA_RE = /\/\*\s*__DATA__\s*\*\/\s*null/;
@@ -31,12 +27,12 @@ const resolveRel = (fromName, spec) => {
 const toBare = (src, name) =>
   src.replace(/(['"])(\.\.?\/[\w./-]+)\.js\1/g, (m, q, spec) => `${q}@viewer/${resolveRel(name, spec)}${q}`);
 
-export function snapshotPage(names, sourceOf, graph, entry) {
+export function snapshotPage(shell, names, sourceOf, graph, entry) {
   const imports = {};
   for (const name of names) {
     let src = sourceOf(name);
     if (name === 'flows/state') src = injectGraph(src, graph);
     imports[name === 'services/index' ? entry : `@viewer/${name}`] = dataUrl(toBare(src, name));
   }
-  return html(styles, { imports }, template(entry));
+  return shell.html(shell.styles, { imports }, shell.template(entry));
 }

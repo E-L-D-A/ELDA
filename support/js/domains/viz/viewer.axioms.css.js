@@ -674,7 +674,7 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
 }
 .root-inner .hide-btn {
   position: static;
-  margin-left: 6px;
+  margin-right: 6px;
 }
 #main {
   display: flex;

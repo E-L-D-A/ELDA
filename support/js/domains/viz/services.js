@@ -11,14 +11,27 @@ import { STYLE_RE, isAsset, readOptions, walk } from '../../core/harnesses/tree.
 import { buildGraph } from '../../core/services/scan.js';
 import { livePage, snapshotPage } from './viewer.flows.js';
 
+const vizDir = dirname(fileURLToPath(import.meta.url));
 // @elda-import:viewer/*
-const viewerDir = join(dirname(fileURLToPath(import.meta.url)), 'viewer');
+const viewerDir = join(vizDir, 'viewer');
 const modulePath = (name) => join(viewerDir, `${name}.js`);
+
+// The shell axioms assemble every page, and an edit to them must reach a running server: a static import would pin the startup revision in the module cache, so each file is imported under a version key made of its own mtime, and an unchanged file is a cache hit under the key it already carries.
+const SHELL = ['viewer.axioms.css.js', 'viewer.axioms.html.js', 'viewer.axioms.template.js'];
+const shellVersion = (file) => statSync(join(vizDir, file)).mtimeMs;
+const shell = async () => {
+  const [{ styles }, { html }, { template }] = await Promise.all([
+    import(`./viewer.axioms.css.js?v=${shellVersion('viewer.axioms.css.js')}`),
+    import(`./viewer.axioms.html.js?v=${shellVersion('viewer.axioms.html.js')}`),
+    import(`./viewer.axioms.template.js?v=${shellVersion('viewer.axioms.template.js')}`),
+  ]);
+  return { styles, html, template };
+};
 
 // @elda-entry
 const ENTRY = './viewer/services/index.js';
-export const viewerPage = () => livePage(ENTRY);
-export const viewerSnapshot = (graph) => snapshotPage(moduleNames(), moduleSource, graph, ENTRY);
+export const viewerPage = async () => livePage(await shell(), ENTRY);
+export const viewerSnapshot = async (graph) => snapshotPage(await shell(), moduleNames(), moduleSource, graph, ENTRY);
 
 // Module names are viewer-relative and may carry a layer directory ('flows/state'), so the listing walks the tree.
 export const moduleNames = () => {
@@ -43,12 +56,22 @@ export const moduleForUrl = (url) => {
 };
 
 
-// Which viewer a page is running, sent alongside the graph: the newest mtime across the modules, so a page can tell when the server now holds code it is not running and a reload is the fix.
+// Which viewer a page is running, sent alongside the graph: the newest mtime across the modules and the shell axioms, so a page can tell when the server now holds code it is not running and a reload is the fix.
 export const viewerStamp = () =>
-  String(moduleNames().reduce((max, n) => Math.max(max, statSync(modulePath(n)).mtimeMs), 0));
+  String(
+    [...moduleNames().map(modulePath), ...SHELL.map((f) => join(vizDir, f))].reduce(
+      (max, p) => Math.max(max, statSync(p).mtimeMs),
+      0,
+    ),
+  );
 
-// A change to any viewer module reaches every open page through the caller's notification.
-export const watchViewer = (onChange) => watch(viewerDir, { recursive: true }, onChange);
+// A change to any viewer module or shell axioms file reaches every open page through the caller's notification.
+export const watchViewer = (onChange) => {
+  watch(viewerDir, { recursive: true }, onChange);
+  watch(vizDir, (_e, name) => {
+    if (SHELL.includes(name)) onChange();
+  });
+};
 
 // The app scan and its change signal, as the service the CLI root mounts.
 export const scanApp = (appDir) => buildGraph(appDir);

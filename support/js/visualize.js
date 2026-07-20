@@ -80,7 +80,7 @@ const firstScan = () => {
 };
 
 if (outFile) {
-  const snapshot = viewerSnapshot(firstScan());
+  const snapshot = await viewerSnapshot(firstScan());
   try {
     writeFileSync(resolve(outFile), snapshot);
   } catch (error) {
@@ -95,14 +95,15 @@ let graph = firstScan();
 let scanError = null;
 const clients = new Set();
 
-const server = createServer((req, res) => {
+const server = createServer(async (req, res) => {
   try {
     const url = req.url.split("?")[0];
     // The services surface knows which URLs are viewer modules; everything the route serves is a real module, with a JavaScript MIME so the browser runs it as one.
     const module = moduleForUrl(url);
     if (url === "/") {
+      const page = await viewerPage();
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(viewerPage());
+      res.end(page);
     } else if (url === "/data.json") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ...graph, viewer: viewerStamp(), scanError }));
@@ -149,7 +150,7 @@ const rescan = () => {
 
 // The viewer modules are read from disk on every request, so editing one changes what a new page runs while an open one carries on with the old.
 // Telling the clients is enough: each rereads the graph, finds a stamp it does not recognize, and reloads itself onto the viewer the server now holds.
-// The shell axioms are code this process imported, so an edit to them takes a restart.
+// The shell axioms re-import under their current mtime each time a page assembles, so their edits travel the same way; what still takes a restart is the serving code itself.
 let viewerDebounce = null;
 const viewerChanged = () => {
   clearTimeout(viewerDebounce);

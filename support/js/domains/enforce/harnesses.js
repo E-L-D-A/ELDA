@@ -149,6 +149,7 @@ const options = (context) => optionsFor(filenameOf(context));
 
 // A dynamic specifier is statically known when it is a quoted string OR a template with no substitutions; a bundler resolves both identically.
 // Reading only `Literal` would let a backtick delete the rule, so the template form is read too, and a genuinely computed specifier returns null for the caller to fail closed on.
+// A cache-busting import is statically known too: it spells its module in the literal head of the specifier and its version in the computed tail, so the path before the '?' is the reference, and the query addresses the loader's cache, never the module. The same reading lives in the binding walk (parse.js), so the enforcer and the informer cannot fork on it.
 const staticSpec = (node) => {
   const s = node.source;
   if (!s) return null;
@@ -157,7 +158,14 @@ const staticSpec = (node) => {
     const q = s.quasis[0].value ?? {};
     return q.cooked ?? q.raw ?? null;
   }
-  return null;
+  const lead = (n) => {
+    if (n.type === 'TemplateLiteral') return n.quasis?.[0]?.value?.cooked ?? '';
+    let l = n;
+    while (l.type === 'BinaryExpression' && l.operator === '+') l = l.left;
+    return l.type === 'Literal' && typeof l.value === 'string' ? l.value : '';
+  };
+  const cut = lead(s).indexOf('?');
+  return cut > 0 ? lead(s).slice(0, cut) : null;
 };
 
 // AST-level value names: named imports minus type-only ones, `default`, and a namespace or dynamic import as '*' - the whole module.

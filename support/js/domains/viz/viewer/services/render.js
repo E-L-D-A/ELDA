@@ -2,12 +2,12 @@
 // Board building: the root bars, the domain boxes, the unclassified box, and the block bar, rebuilt as one pass that commits its derived reading to the board.
 // The pass builds DOM and computes the derived state together, commits both to flows/board.js, and ends there: the drawer, the arrows, and the pin re-application are the composer's pipeline, so no service reaches into another.
 
-import { $, h, wrap } from "../harnesses/dom.js";
 import { ROWS, ROW_LABEL, byPath } from "../axioms/index.js";
 import { commit, rebuild } from "../flows/board.js";
 import { worstByFile } from "../flows/findings.js";
-import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, place } from "../flows/placement.js";
+import { blockOf, chipParts, compactRow, isBarFile, isComposerFile, isLonerCore, orderedRoots, place } from "../flows/placement.js";
 import { collapsed, data, hiddenBlocks, hiddenFiles, savePrefs, setCollapsed, toggle } from "../flows/state.js";
+import { $, h, wrap } from "../harnesses/dom.js";
 
 // The pass rebuilds the derived state into these private bindings and commits them whole; every reader takes them from the board.
 let _chips = new Map();
@@ -159,7 +159,7 @@ export function renderBoard() {
 // One Application Runtime strip per composition root: the client route root, the server, and the builder each draw their own bar feeding the shared domains.
 function renderRootBar(visible) {
   const container = $("root-bar");
-  const blocks = data().options.roots
+  const blocks = orderedRoots()
     .map((r) => {
       const key = "@root:" + r.key;
       const files = data().files
@@ -175,9 +175,9 @@ function renderRootBar(visible) {
         h(
           "div",
           { class: "root-inner" },
+          hideBtn(key),
           h("span", { class: "bar-title" }, r.label),
           files.map((f) => makeChip(f)),
-          hideBtn(key),
         ),
       );
     })
@@ -623,7 +623,7 @@ function renderDomains(visible, ghost, rowList, expunge) {
 // The bottom bar lists every top-level block; unchecking one hides its box and every edge touching it.
 // The composition roots share the first row as the non-domain modules; the domains, core blocks among them, take the second.
 function renderBlockBar() {
-  const rootBlocks = data().options.roots.map((r) => ["@root:" + r.key, r.label]);
+  const rootBlocks = orderedRoots().map((r) => ["@root:" + r.key, r.label]);
   if (data().files.some((f) => place(f).area === "other"))
     rootBlocks.push(["@other", "unclassified"]);
   const domainBlocks = [...new Set(data().files.map(blockOf).filter((b) => b && !b.startsWith("@")))]
