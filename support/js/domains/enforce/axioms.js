@@ -15,6 +15,11 @@ export const DIAGONAL_SCHEMA = schema({ acrossDomains: LEVEL_ENUM, acrossSubdoma
 // The shared-namespace setters the vocab gate watches for at the composition root: writes through these with a literal key introduce out-of-band vocabulary.
 export const VOCAB_WRITE_METHODS = ['setAttribute', 'setItem', 'setProperty'];
 
+// The engine's report for an app whose project read or whole-graph scan failed, carried by the imports rule on every file of that app.
+// A silently degraded judgment would under-report and falsify the grade the gate certifies (META.6), so the degradation is declared where the findings would have been.
+export const scanFault = (detail) =>
+  `The scan of this app failed (${detail}). The elda rules are judging from file names alone, so findings that need the resolved graph may be missing; fix the fault and lint again.`;
+
 // The diagonal pair's option vocabulary: each ownership class maps onto a lint level, and the pair partitions the classes by tier.
 export const DIAGONAL_DEFAULTS = { acrossDomains: 'error', acrossSubdomains: 'warn', withinSubdomain: 'warn' };
 export const DIAGONAL_CLASSES = { acrossDomains: 'across-domains', acrossSubdomains: 'across-subdomains', withinSubdomain: 'within-subdomain' };

@@ -2,6 +2,7 @@
 // The viewer's composer: it fills the board's ports with the rebuild pipeline and the pin application, wires the interaction service with the siblings it composes on events, injects the storage effect, syncs the header toggles into state, and starts the first load once every definition is in place.
 // The pipeline is the one place the services meet: board, drawer, arrows, pin - so no service imports another, and a handler anywhere below asks the board.
 
+import { rescanFailed } from "../axioms/index.js";
 import { applyPin as boardApplyPin, onApplyPin, onRebuild, rebuild } from "../flows/board.js";
 import { deriveDrawn } from "../flows/edges.js";
 import { INLINE, collapsed, data, hiddenBlocks, savePrefs, setData, setPersist, setToggle } from "../flows/state.js";
@@ -10,6 +11,7 @@ import { drawEdges, edgeTip, endLabel, updateStickyEdges } from "./edges.js";
 import { applyPin, blur, focus, markSelection } from "./focus.js";
 import { installInteractions } from "./interactions.js";
 import { installIssues, openFinding, renderIssues } from "./issues.js";
+import { hideNotice, renderBanner, showEmpty, showFatal, showUnreachable } from "./notice.js";
 import { renderBoard } from "./render.js";
 
 onRebuild(() => {
@@ -117,8 +119,18 @@ const setLive = (on) => {
 let viewerStamp = null;
 
 async function load() {
+  let payload;
   try {
-    setData(INLINE ?? (await (await fetch("/data.json")).json()));
+    payload = INLINE ?? (await (await fetch("/data.json")).json());
+  } catch (error) {
+    // A failed fetch is the live indicator's business, and the stream below keeps retrying; the panel steps in only while there is no board at all to keep showing.
+    console.error(error);
+    setLive(false);
+    if (!data()) showUnreachable();
+    return;
+  }
+  try {
+    setData(payload);
     if (!INLINE) {
       if (viewerStamp !== null && data().viewer !== viewerStamp) {
         location.reload();
@@ -130,12 +142,22 @@ async function load() {
     document.title = `ELDA · ${data().app}`;
     loadPrefs();
     rebuild();
+    renderBanner([
+      ...(data().options.notices ?? []),
+      ...(data().scanError ? [rescanFailed(data().scanError)] : []),
+    ]);
+    if (data().files.length === 0) showEmpty(data().app, data().options.notices ?? []);
+    else hideNotice();
   } catch (error) {
-    // A failed fetch is the live indicator's business; a failed render is a viewer bug, and swallowing it leaves a half-drawn board with an empty drawer and no trace, which is the worst of the silences.
+    // A failed render is a viewer bug, and swallowing it leaves a half-drawn board with an empty drawer and no trace, which is the worst of the silences; the panel names it with the stack instead.
     console.error(error);
-    if (!INLINE) setLive(false);
+    showFatal(error);
   }
 }
+
+// A fault escaping a handler or a frame callback would distort the board with no trace just the same, so the last-resort hooks route it into the panel too.
+addEventListener("error", (ev) => showFatal(ev.error ?? ev.message));
+addEventListener("unhandledrejection", (ev) => showFatal(ev.reason));
 
 // An EventSource retries a dropped connection on its own and keeps retrying while nothing answers, so the link itself comes back once the server does, and it always did.
 // What never came back is the graph. A restarted server scans the tree afresh and then says nothing until the next file changes, so the page went on drawing the tree the dead process had sent it, and reloading by hand was the only way to catch up. A stream that opens a second time reads the graph again, which is what that hand reload was really for.

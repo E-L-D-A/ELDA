@@ -507,7 +507,7 @@ body.panning, body.panning .chip {
   stroke: var(--ships);
   stroke-width: 1.3;
   stroke-dasharray: 7 4;
-  opacity: 0.85;
+  opacity: 0.1;
 }
 /* The declared entry is where the other runtime enters the shipped files, so its handoff draws solid above the fan. */
 #edges path.ships.entry {
@@ -1491,5 +1491,105 @@ body:has(#leg-lean:not(:checked)) #edges path.lean {
 }
 #bottombar .bar-btn:hover {
   border-color: var(--line-strong);
+}
+/* The hidden attribute hides at UA origin and any author display wins over it, so the display these blocks declare must re-yield to it explicitly. */
+#notice[hidden],
+#banner[hidden] {
+  display: none;
+}
+/* The page-condition panel: it replaces the board while there is nothing trustworthy to draw, so it floats over the viewport rather than the document, which may be board-sized. */
+#notice {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  cursor: default;
+  user-select: text;
+}
+#notice.fatal {
+  background: rgb(0 0 0 / 0.4);
+}
+#notice .notice-card {
+  max-width: 560px;
+  padding: 20px 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--box);
+  box-shadow: var(--shadow);
+}
+#notice.fatal .notice-card {
+  border-color: var(--bad);
+}
+#notice .notice-card h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+#notice .notice-card p {
+  margin: 6px 0;
+  color: var(--muted);
+}
+#notice .notice-card ul {
+  margin: 6px 0;
+  padding-left: 18px;
+  color: var(--fg);
+}
+#notice .notice-card .notice-hint {
+  color: var(--faint);
+}
+#notice .notice-card details {
+  margin: 10px 0;
+}
+#notice .notice-card summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+#notice .notice-card pre {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+}
+.notice-btn {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--box-hi);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.notice-btn:hover {
+  border-color: var(--accent);
+}
+#notice .spinner {
+  width: 26px;
+  height: 26px;
+  margin: 0 auto 10px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: notice-spin 0.9s linear infinite;
+}
+@keyframes notice-spin {
+  to { transform: rotate(360deg); }
+}
+/* The header banner: conditions that narrow the picture without stopping it, riding the sticky header on its own full-width row. */
+#banner {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 2px;
+  border-top: 1px solid var(--line);
+}
+#banner .banner-line {
+  color: var(--smell);
+  font-size: 12px;
 }
 `;

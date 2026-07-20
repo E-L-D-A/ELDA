@@ -4,7 +4,7 @@
 
 import { OPTION_DEFAULTS, fileRole, norm, targetOf, targetOfPath } from '../../core/axioms/model.js';
 import { graphRoles } from '../../core/flows/ownership.js';
-import { RULES, VOCAB_WRITE_METHODS } from './axioms.js';
+import { RULES, VOCAB_WRITE_METHODS, scanFault } from './axioms.js';
 import {
   ambientOwnership,
   imports,
@@ -33,12 +33,28 @@ const createWalker = (opts) => host.createWalker(opts);
 
 // The project options for the app a file belongs to, derived once per app root and shared by every rule.
 // The per-rule lint options carry only rule-specific knobs (the diagonal class map); paths, aliases, and areas come from this one read, the same read the graph is built from, so the enforcer and the informer can never disagree on what the tree is.
+// A read that throws is caught here and recorded per app root: the rules degrade to the file-name fallback, and the imports rule declares the degradation on every file, since a swallowed fault would under-report in silence.
 const projectOptions = new Map();
-const NO_APP = { aliases: {}, ownershipAlias: null, ownershipDir: null, compositionRoot: OPTION_DEFAULTS.compositionRoot, core: [] };
+const faults = new Map();
+const NO_APP = { aliases: {}, ownershipAlias: null, ownershipDir: null, compositionRoot: OPTION_DEFAULTS.compositionRoot, core: [], notices: [] };
+const recordFault = (appRoot, phase, error) => {
+  if (!faults.has(appRoot)) faults.set(appRoot, `${phase}: ${(error && error.message) || String(error)}`);
+};
+const faultOf = (filename) => {
+  const appRoot = appRootOf(filename);
+  return appRoot ? (faults.get(appRoot) ?? null) : null;
+};
 const optionsFor = (filename) => {
   const appRoot = appRootOf(filename);
   if (!appRoot) return NO_APP;
-  if (!projectOptions.has(appRoot)) projectOptions.set(appRoot, host.readOptions(appRoot) ?? NO_APP);
+  if (!projectOptions.has(appRoot)) {
+    try {
+      projectOptions.set(appRoot, host.readOptions(appRoot) ?? NO_APP);
+    } catch (error) {
+      recordFault(appRoot, 'reading the project structure', error);
+      projectOptions.set(appRoot, NO_APP);
+    }
+  }
   return projectOptions.get(appRoot);
 };
 
@@ -62,7 +78,14 @@ const graphs = new Map();
 const graphFor = (filename) => {
   const appRoot = appRootOf(filename);
   if (!appRoot) return null;
-  if (!graphs.has(appRoot)) graphs.set(appRoot, buildGraph(appRoot));
+  if (!graphs.has(appRoot)) {
+    try {
+      graphs.set(appRoot, buildGraph(appRoot));
+    } catch (error) {
+      recordFault(appRoot, 'the whole-graph scan', error);
+      graphs.set(appRoot, null);
+    }
+  }
   return graphs.get(appRoot);
 };
 
@@ -289,13 +312,24 @@ const visitorsFor = (on) => {
 };
 
 // One definition in, one oxlint rule object out: the engine parses the options, classifies the file, gates, prepares the definition's api, and drives its handlers with neutral events.
+// A recorded scan fault reports through the imports rule alone - one declaration per file rather than one per rule - and it rides every return path, because a faulted app classifies its files as nothing and the gates would otherwise silence the declaration too.
 const mountRule = (def) => ({
   meta: def.schema ? { schema: def.schema } : {},
   create(context) {
     const opts = options(context);
     const filename = filenameOf(context);
     const { role, roleAt, dispute } = graphClassify(filename, opts);
-    if (def.gate && !def.gate({ role, filename, opts })) return {};
+    const fault = def === imports ? faultOf(filename) : null;
+    const declared = (v) => {
+      if (!fault) return v;
+      const inner = v.Program;
+      v.Program = (node) => {
+        context.report({ node, message: scanFault(fault) });
+        if (inner) inner(node);
+      };
+      return v;
+    };
+    if (def.gate && !def.gate({ role, filename, opts })) return declared({});
     const walker = walkerOf(filename, opts);
     const api = {
       role,
@@ -311,8 +345,8 @@ const mountRule = (def) => ({
       hasWalker: () => walker != null,
     };
     const on = def.file(api);
-    if (!on) return {};
-    return visitorsFor(on);
+    if (!on) return declared({});
+    return declared(visitorsFor(on));
   },
 });
 

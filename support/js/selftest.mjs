@@ -18,8 +18,9 @@
 //
 //   node selftest.mjs          assert the coverage
 //   node selftest.mjs --list   print what each rule reported
-import { readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseSync } from 'oxc-parser';
@@ -229,5 +230,24 @@ if (!entryOk) {
   console.error(`\nThe entry pass failed on the broken app: the shipped-and-never-composed file must be exactly print/stale.flows.ts, with the shipping host named in its reason.`);
   console.error('Either the pass is broken, or the print fixture was broken by an edit. Both are failures.');
 }
-if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk || !unsortedOk) process.exit(1);
+// The pessimistic environment: a directory with nothing to discover must come back as answers - no forest, no files, a notice saying why - and never as a throw, since a crash here is the misconfigured-consumer experience.
+const empty = mkdtempSync(join(tmpdir(), 'elda-empty-'));
+let pessimisticOk = false;
+let pessimisticWhy = '';
+try {
+  const g = scanApp(empty);
+  const o = g.options ?? {};
+  pessimisticOk = g.files.length === 0 && o.ownershipDir == null && Array.isArray(o.notices) && o.notices.length > 0;
+  if (!pessimisticOk) pessimisticWhy = `files=${g.files.length}, ownershipDir=${String(o.ownershipDir)}, notices=${JSON.stringify(o.notices)}`;
+} catch (error) {
+  pessimisticWhy = `threw: ${(error && error.message) || error}`;
+} finally {
+  rmSync(empty, { recursive: true, force: true });
+}
+if (!pessimisticOk) {
+  console.error(`\nThe pessimistic scan failed on an empty directory (${pessimisticWhy}).`);
+  console.error('The scan must answer with a null forest, zero files, and a notice naming why - a throw or a silent empty answer is the misconfiguration crash coming back.');
+}
+
+if (threw.length || silent.length || unconnected.length || overFired.length || unseen.length || decidable.length || !pressured.length || !recommended.length || !embedOk || !entryOk || !unsortedOk || !pessimisticOk) process.exit(1);
 console.log(`\nAll ${bag.size} rules fire on their fixtures, the graph-classified rules fire on the connected app, the green app stays silent, and the graph passes hold their cycle and their slicing cluster.`);

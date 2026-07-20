@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 
+import { configUnreadable, forestAliasAmbiguity, forestAmbiguity, noForest } from '../axioms/messages.js';
 import { OPTION_DEFAULTS, inArea, isDataPath, layerOf, norm, stripExt } from '../axioms/model.js';
 import { CODE_RE } from './parse.js';
 
@@ -224,7 +225,7 @@ function bearsGrammar(dir, depth = 6) {
 }
 
 // An alias that targets the forest is the strongest signal - it is the ownership spelling the code already uses - so alias targets are tried first. A target that is an ancestor of another candidate is the wrapper spelling and drops; one survivor is the forest, more than one is a real ambiguity the tool refuses to guess at.
-function forestFromAliases(appDir, aliases) {
+function forestFromAliases(appDir, aliases, notify) {
   const candidates = Object.values(aliases)
     .filter((d, i, all) => all.indexOf(d) === i)
     .map((d) => ({ d, abs: join(appDir, d) }))
@@ -233,15 +234,12 @@ function forestFromAliases(appDir, aliases) {
     ({ d }) => !candidates.some((o) => o.d !== d && norm(o.d).startsWith(`${norm(d)}/`)),
   );
   if (keep.length === 1) return keep[0].d;
-  if (keep.length > 1)
-    console.warn(
-      `elda: more than one alias targets a domain tree (${keep.map((k) => k.d).join(', ')}); none is taken as the ownership forest.`,
-    );
+  if (keep.length > 1) notify(forestAliasAmbiguity(keep.map((k) => k.d)));
   return null;
 }
 
 // Shape-first discovery, for trees whose resolver declares no ownership alias. Walking down from the app root: two or more domain trees side by side make their parent the forest; one domain tree beside a floor is the forest with its floor; a lone domain tree with nothing beside it is a wrapper to descend through. Crowned children of the forest itself are domains (a vertically sliced domain carries bare layer files at its crown), so the forest's own level contributes no floors.
-function discoverAreas(appDir, excluded) {
+function discoverAreas(appDir, excluded, notify) {
   const rel = (abs) => norm(relative(appDir, abs));
   const floors = [];
   let dir = appDir;
@@ -255,9 +253,7 @@ function discoverAreas(appDir, excluded) {
         (e) => !e.isDirectory() && CODE_RE.test(e.name) && !excluded(e.name, rel(join(dir, e.name))),
       );
       if (stray || dir === appDir) {
-        console.warn(
-          `elda: the ownership forest is ambiguous at '${rel(dir) || '.'}' (${br.map((e) => e.name).join(', ')}); declare a resolver alias targeting the domain tree.`,
-        );
+        notify(forestAmbiguity(rel(dir) || '.', br.map((e) => e.name)));
         return { forest: null, floors };
       }
       return { forest: rel(dir), floors };
@@ -293,10 +289,21 @@ function floorsBeside(appDir, forest, excluded) {
 
 // ---------------------------------------------------------------------------
 // Project options, derived per app root. `compositionRoot` is read from the `elda/imports` entry of the app's .oxlintrc.json - the one declaration - and `ignorePatterns` bounds the scan the same way it bounds the lint.
+// Every adjustment the derivation makes on the way - an unreadable config, an ambiguity it refuses to guess at, a tree with no forest to find - is collected into `notices`, so a consumer that renders rather than logs can surface the same diagnoses the console got.
+// The console sees each diagnosis once per app and process, since a live session re-derives on every rescan and would otherwise repeat itself; the notices array carries the full set every time.
+const consoleSaid = new Set();
 export function readOptions(appDir) {
+  const notices = [];
+  const notify = (msg) => {
+    notices.push(msg);
+    const key = `${norm(appDir)}|${msg}`;
+    if (consoleSaid.has(key)) return;
+    consoleSaid.add(key);
+    console.warn(`elda: ${msg}`);
+  };
   const rcPath = join(appDir, '.oxlintrc.json');
   const rc = existsSync(rcPath) ? parseLoose(rcPath) : null;
-  if (existsSync(rcPath) && !rc) console.warn(`Could not parse ${rcPath}; using default elda options.`);
+  if (existsSync(rcPath) && !rc) notify(configUnreadable(norm(rcPath)));
   const ruleEntry = rc?.rules?.['elda/imports'];
   const declared = Array.isArray(ruleEntry) && typeof ruleEntry[1] === 'object' ? ruleEntry[1] : {};
   const compositionRoot = declared.compositionRoot ?? OPTION_DEFAULTS.compositionRoot;
@@ -311,13 +318,15 @@ export function readOptions(appDir) {
     ignore.some((p) => inArea(relPath, p)) ||
     gitignored(relPath);
   const aliases = deriveAliases(appDir);
-  const aliased = forestFromAliases(appDir, aliases);
+  const aliased = forestFromAliases(appDir, aliases, notify);
   const { forest, floors } = aliased
     ? { forest: aliased, floors: floorsBeside(appDir, aliased, excluded) }
-    : discoverAreas(appDir, excluded);
+    : discoverAreas(appDir, excluded, notify);
   const ownershipAlias =
     forest == null ? null : (Object.keys(aliases).find((a) => norm(aliases[a]) === norm(forest)) ?? null);
-  return { aliases, ownershipAlias, ownershipDir: forest, compositionRoot, core: floors };
+  // A tree with no forest and no notice explaining why gets the bare fact as its notice; where an ambiguity already spoke, that diagnosis is the explanation.
+  if (forest == null && notices.length === 0) notify(noForest());
+  return { aliases, ownershipAlias, ownershipDir: forest, compositionRoot, core: floors, notices };
 }
 
 // A declared area, resolved to the thing on disk that holds it: a directory, or a single module where the area names one, since a build config is a composition root that lives as one file.

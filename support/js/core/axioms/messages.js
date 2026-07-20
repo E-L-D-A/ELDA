@@ -152,6 +152,17 @@ export const slicingLean = (scope, count, spelled) => {
   return `ELDA slicing: ${count} imports in '${scope}' step down a layer and cross into a sibling domain on the way. While technically legal, their clustered appearance says: the code flows along the ${flow} while the files are grouped by ${grouped}. Consider grouping '${scope}' ${flip}; the same imports then stay inside one group.`;
 };
 
+// --- Derivation notices -------------------------------------------------------
+
+// What the option derivation had to decide around, phrased once for every channel that carries it: the console at derivation time, and the viewer through the graph payload.
+export const configUnreadable = (path) => `could not parse ${path}; the default elda options apply.`;
+export const forestAliasAmbiguity = (dirs) =>
+  `more than one alias targets a domain tree (${dirs.join(', ')}); none is taken as the ownership forest.`;
+export const forestAmbiguity = (scope, names) =>
+  `the ownership forest is ambiguous at '${scope}' (${names.join(', ')}); declare a resolver alias targeting the domain tree.`;
+export const noForest = () =>
+  'no ownership forest was discovered: no resolver alias targets a domain tree, and no directory bears the layer grammar at its crown; everything renders unsorted.';
+
 // A reference cycle over the landed value graph (the graph pass, graph.js); `domains` and `chains` are the distinct domains and subdomain chains it encloses, and a single-file component is a self-reference.
 export const cycle = ({ domains, chains, componentLength, firstPath }) => {
   const where = domains.length > 1

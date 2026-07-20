@@ -129,7 +129,7 @@ const areaHit = (filename, areas) => {
 // A core area's contents classify as TOP-LEVEL shared domains - the bottom of the sharedness DAG stands beside the feature domains, never inside a domain named after the folder - so the chain never carries the area's name, and `area` rides along only so the diagram can group the shared blocks.
 // A loner file directly in the area is a whole domain in one file: a plain name is the domain's own surface (contents not yet extracted), and a layer-suffixed name is that domain's one layer file; either way the unit name lifts into the chain as the domain it is.
 export function fileRole(filename, { ownershipDir, compositionRoot, core } = {}) {
-  const own = areaHit(filename, ownershipDir ?? 'domains');
+  const own = areaHit(filename, ownershipDir);
   if (own && own.rest) {
     const c = classify(own.rest.split('/').filter(Boolean));
     if (c.layer && c.chain.length > 0) return { kind: 'domain', ...c };
@@ -167,7 +167,7 @@ export function parseSpec(spec, ownershipAlias) {
 }
 
 // Resolve a relative import against the importing file's path, so the layer and boundary rules apply to relative imports too.
-// Returns null when it resolves outside domains/.
+// Returns null when it resolves outside the ownership directory, and a tree with no discovered forest resolves nothing.
 export function posixResolve(dir, spec) {
   const out = [];
   for (const p of (dir + '/' + spec).split('/')) {
@@ -181,7 +181,7 @@ export function posixResolve(dir, spec) {
 export function relativeTarget(filename, spec, ownershipDir) {
   if (!isRelative(spec)) return null;
   const resolved = posixResolve(filename.slice(0, filename.lastIndexOf('/')), spec);
-  const hit = areaHit(resolved, ownershipDir ?? 'domains');
+  const hit = areaHit(resolved, ownershipDir);
   if (!hit || !hit.rest) return null;
   const segs = hit.rest.split('/').filter(Boolean);
   if (segs.length === 0) return null;
@@ -218,7 +218,7 @@ export function targetOf(filename, spec, ownershipAlias, ownershipDir) {
 // A specifier's trailing plain segment is ambiguous - `#/checkout/payment` is either a named surface of `checkout` or the `payment` subdomain's barrel - and only the filesystem knows which, so a caller that can resolve reads the target here and judges it once.
 // The caller supplies the resolution (this module touches no filesystem); a path that lands outside the ownership directory, or directly in it with no domain to belong to, carries no target and returns null.
 export function targetOfPath(absPath, ownershipDir) {
-  const hit = areaHit(norm(absPath), ownershipDir ?? 'domains');
+  const hit = areaHit(norm(absPath), ownershipDir);
   if (!hit || !hit.rest) return null;
   const t = classify(hit.rest.split('/').filter(Boolean));
   if (t.chain.length === 0) return null;

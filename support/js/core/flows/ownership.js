@@ -63,7 +63,7 @@ const isEntry = (path) => {
 // The delta describes positions in the ownership tree, so a target outside it has no position to walk to: the reference carries no chain information and hands on the importer's chain, exactly as a chainless aliased specifier does.
 function relativeChain(importerChain, importerDir, targetPath, ownershipDir) {
   if (importerChain === CORE) return CORE;
-  if (!inArea(targetPath, ownershipDir ?? 'domains')) return importerChain;
+  if (!inArea(targetPath, ownershipDir)) return importerChain;
   // The horizontal slicing's layer rows are rows of one subdomain, never subdomains, so a bare layer-named directory is transparent to the delta walk: stepping out of a row pops no ownership, and a surface inside a row names its subdomain by the directory above the row.
   const rowless = (segs) => segs.filter((s) => { const hit = layerOf(s); return !(hit && hit.name === ''); });
   const from = rowless(importerDir ? importerDir.split('/') : []);

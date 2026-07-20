@@ -23,7 +23,14 @@ export const template = (entry) => /* html */`
       <label><input type="checkbox" id="t-unsorted" checked> unsorted</label>
     </span>
     <button id="issues-btn">issues <span id="issue-count"></span></button>
+    <div id="banner" hidden></div>
   </header>
+  <div id="notice" class="loading">
+    <div class="notice-card">
+      <div class="spinner"></div>
+      <p>Scanning the tree&hellip;</p>
+    </div>
+  </div>
   <div id="wrap">
     <div id="root-bar"></div>
     <div id="main">

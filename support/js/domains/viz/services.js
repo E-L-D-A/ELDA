@@ -53,15 +53,23 @@ export const watchViewer = (onChange) => watch(viewerDir, { recursive: true }, o
 // The app scan and its change signal, as the service the CLI root mounts.
 export const scanApp = (appDir) => buildGraph(appDir);
 
-// Whether the app declares an ownership tree at all, so the root can refuse a directory that is not an app workspace.
-export const hasTree = (appDir) => existsSync(join(appDir, readOptions(appDir).ownershipDir));
+// Whether the target is a directory at all, so the root can refuse a path that cannot hold an app before scanning it.
+export const isAppDir = (appDir) => {
+  try {
+    return statSync(appDir).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 // Watch every configured area - the ownership tree, each composition root, each core - and call back on any code, style, or asset change.
+// A tree with no discovered forest contributes no area, so the filter keeps the joins on real paths; where no area resolves at all the app root itself is watched, mirroring the scan's own fallback, so a misconfigured tree still rescans live.
 // Recursive watch covers Windows and macOS; where a runtime lacks it, fall back to one watcher per directory.
 export const watchApp = (appDir, onChange) => {
   const { ownershipDir, compositionRoot, core } = readOptions(appDir);
-  const areas = [ownershipDir, ...[compositionRoot, core].flatMap((a) => (Array.isArray(a) ? a : [a]))];
-  const dirs = [...new Set(areas.map((a) => join(appDir, a)).filter((p) => existsSync(p) && statSync(p).isDirectory()))];
+  const areas = [ownershipDir, ...[compositionRoot, core].flatMap((a) => (Array.isArray(a) ? a : [a]))].filter(Boolean);
+  let dirs = [...new Set(areas.map((a) => join(appDir, a)).filter((p) => existsSync(p) && statSync(p).isDirectory()))];
+  if (!dirs.length) dirs = [appDir];
   const relevant = (name) => name && (CODE_RE.test(name) || STYLE_RE.test(name) || isAsset(name));
   for (const dir of dirs) {
     try {
